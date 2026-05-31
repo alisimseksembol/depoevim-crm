@@ -1353,7 +1353,8 @@ if (db && firebaseUser) {
   const [isAddWarehouseModalOpen, setIsAddWarehouseModalOpen] = useState(false);
   const [newDepoName, setNewDepoName] = useState('');
   const [newDepoM3, setNewDepoM3] = useState('');
-  
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState(null);
+  const [selectedBlockId, setSelectedBlockId] = useState(null); 
   const [isEditWarehouseModalOpen, setIsEditWarehouseModalOpen] = useState(false);
   const [editWarehouseData, setEditWarehouseData] = useState(null);
 // --- DEPO (ŞUBE) EKLEME VE DÜZENLEME (FİREBASE) ---
