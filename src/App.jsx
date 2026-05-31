@@ -3475,8 +3475,7 @@ const uploadFileToServer = async (file) => {
                                      <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                                    </>
                                 )}
-                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, proxyDocumentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
-                              </label>
+    <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, proxyDocumentPhoto: reader.result, proxyDocumentPhotoFile: file}); reader.readAsDataURL(file); } }} />                              </label>
                           </div>
                       </div>
                   )}
@@ -6225,8 +6224,7 @@ const uploadFileToServer = async (file) => {
                      ) : (
                        <><Upload size={20} className="text-gray-400 mb-2 group-hover:text-[#1bc5bd] transition-colors" /><span className="text-xs text-gray-500 font-medium">Depoya yerleşim yapıldıktan sonraki fotoğrafı yükleyin</span><span className="text-[10px] text-gray-400 mt-1">PNG, JPG formatlarında</span></>
                      )}
-                     <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setRentData({...rentData, entryPhoto: reader.result}); reader.readAsDataURL(file); } }}/>
-                   </label>
+<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setRentData({...rentData, entryPhoto: url})); } }}/>                   </label>
                  </div>
                </div>
                
@@ -6365,8 +6363,7 @@ const uploadFileToServer = async (file) => {
                    <label className="text-xs font-semibold text-gray-600">Boş Depo Görseli (İsteğe Bağlı)</label>
                    <label className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 transition-colors cursor-pointer group">
                      {endRentData.photo ? (<div className="text-green-500 font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Fotoğraf Eklendi</span></div>) : (<><Upload size={20} className="text-gray-400 mb-2 group-hover:text-cyan-500 transition-colors" /><span className="text-xs text-gray-500">Çıkış yapılan boş deponun fotoğrafını yükle</span></>)}
-                     <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEndRentData({...endRentData, photo: reader.result}); reader.readAsDataURL(file); } }}/>
-                   </label>
+<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEndRentData({...endRentData, photo: url})); } }}/>                   </label>
                  </div>
                </div>
                <div className="flex justify-end gap-3"><button onClick={() => setIsEndRentModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded text-sm font-medium">İptal</button><button onClick={handleEndRentConfirm} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded text-sm font-medium flex items-center gap-2"><LogOut size={16} /> Çıkışı Onayla</button></div>
@@ -6655,15 +6652,13 @@ const uploadFileToServer = async (file) => {
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Giriş-Çıkış Tutanağı</label>
                       <label className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24">
                         {entryExitData.protocolPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500">Tutanak Yükle</span></>)}
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEntryExitData({...entryExitData, protocolPhoto: reader.result}); reader.readAsDataURL(file); } }}/>
-                      </label>
+<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEntryExitData({...entryExitData, protocolPhoto: url})); } }}/>                      </label>
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Depo Son Hali</label>
                       <label className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24">
                         {entryExitData.finalPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500">Son Halini Yükle</span></>)}
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEntryExitData({...entryExitData, finalPhoto: reader.result}); reader.readAsDataURL(file); } }}/>
-                      </label>
+<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEntryExitData({...entryExitData, finalPhoto: url})); } }}/>                      </label>
                     </div>
                   </div>
                 </div>
@@ -6720,8 +6715,7 @@ const uploadFileToServer = async (file) => {
                         </div>
                         <div>
                             <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fatura Görseli/PDF (Zorunlu)</label>
-                            <input type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewInvoice({...newInvoice, file: reader.result}); reader.readAsDataURL(file); } else { setNewInvoice({...newInvoice, file: null}); } }} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100" />
-                        </div>
+<input type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setNewInvoice({...newInvoice, file: url})); } else { setNewInvoice({...newInvoice, file: null}); } }} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100" />                        </div>
                         <div className="sm:col-span-2 flex justify-end mt-1">
                             <button onClick={() => {
                                 if(!newInvoice.date || !newInvoice.file) return;
@@ -6810,8 +6804,7 @@ const uploadFileToServer = async (file) => {
                              <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                            </>
                         )}
-                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEditCustomerData({...editCustomerData, documentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
-                      </label>
+<input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEditCustomerData({...editCustomerData, documentPhoto: url})); } }} />                      </label>
                       {editCustomerData.documentPhoto && (
                           <div className="flex justify-center mt-2">
                               <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, documentPhoto: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Mevcut Belgeyi Kaldır</button>
@@ -6855,8 +6848,7 @@ const uploadFileToServer = async (file) => {
                                      <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                                    </>
                                 )}
-                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEditCustomerData({...editCustomerData, proxyDocumentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
-                              </label>
+<input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEditCustomerData({...editCustomerData, proxyDocumentPhoto: url})); } }} />                              </label>
                               {editCustomerData.proxyDocumentPhoto && (
                                   <div className="flex justify-center mt-2">
                                       <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, proxyDocumentPhoto: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Mevcut Vekil Belgesini Kaldır</button>
