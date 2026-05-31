@@ -1130,13 +1130,13 @@ const [customers, setCustomers] = useState([]);
         if (!customers.some(c => c.customerNo === newNo)) isUnique = true;
     }
 
-    const docPhotoUrl = newCustomer.documentPhotoFile 
-        ? await uploadFileToServer(newCustomer.documentPhotoFile) 
-        : newCustomer.documentPhoto;
-    
-    const proxyDocUrl = newCustomer.hasProxy && newCustomer.proxyDocumentPhotoFile
-        ? await uploadFileToServer(newCustomer.proxyDocumentPhotoFile)
-        : newCustomer.proxyDocumentPhoto;
+const docPhotoUrl = newCustomer.documentPhotoFile 
+    ? await uploadFileToServer(newCustomer.documentPhotoFile) 
+    : null;
+
+const proxyDocUrl = newCustomer.hasProxy && newCustomer.proxyDocumentPhotoFile
+    ? await uploadFileToServer(newCustomer.proxyDocumentPhotoFile)
+    : null;
 
     const custId = 'cust_' + Date.now();
     const cust = {
@@ -3435,7 +3435,7 @@ const uploadFileToServer = async (file) => {
                              <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                            </>
                         )}
-                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, documentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
+                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, documentPhoto: reader.result, documentPhotoFile: file}); reader.readAsDataURL(file); } }} />
                       </label>
                   </div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Özel Notlar</label><textarea value={newCustomer.notes} onChange={(e) => setNewCustomer({...newCustomer, notes: e.target.value})} rows="3" placeholder="Müşteri hakkında eklemek istediğiniz notlar..." className="border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 resize-none font-medium text-slate-700"></textarea></div>
