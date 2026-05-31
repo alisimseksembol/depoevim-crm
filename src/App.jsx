@@ -1752,7 +1752,33 @@ if (db && firebaseUser) {
     ].map((r, i) => ({ id: 803000 + i, blockId: 803, name: r.n, m3: r.m, customerName: null, isReserved: false, paidMonths: [] })),
   ]);
 
+  // --- VERİ AKTARIM FONKSİYONU ---
+  const handleMigrateDataToFirebase = async () => {
+      if (!db || !firebaseUser) return alert("Firebase bağlantısı bekleniyor...");
+      
+      try {
+          // 1. Depoları Aktar
+          for (const w of warehouses) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(w.id)), w);
+          }
+          // 2. Blokları Aktar
+          for (const b of blocks) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(b.id)), b);
+          }
+          // 3. Odaları Aktar (Bu biraz uzun sürebilir)
+          for (const r of rooms) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(r.id)), r);
+          }
+          alert("Tüm veriler başarıyla Firebase'e kopyalandı! Artık sabit kodları silebilirsiniz.");
+      } catch (error) {
+          console.error("Aktarım hatası:", error);
+      }
+  };
+  // ---------------------------------
+
   const handleAddRoom = () => {
+    // ... mevcut kodunuz devam ediyor ...
+
     if (!newRoomName || !selectedBlockId) return;
     const newRoom = { id: Date.now(), blockId: selectedBlockId, name: newRoomName, customerName: null, m3: newRoomM3 || 0, isReserved: false, paidMonths: [] };
     setRooms([newRoom, ...rooms]);
@@ -4587,6 +4613,12 @@ const uploadFileToServer = async (file) => {
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
+                    <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
+  <div className="flex items-center gap-2">
+      <button onClick={handleMigrateDataToFirebase} className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded text-sm font-medium">
+          Verileri Canlıya Aktar
+      </button>
+      <button onClick={() => setIsAddWarehouseModalOpen(true)} //... mevcut depo ekle butonu
                     <div className="flex items-center gap-2"><button onClick={() => setIsAddWarehouseModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Depo Ekle <Plus size={16} /></button></div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-8">
