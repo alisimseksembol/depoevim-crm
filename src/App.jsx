@@ -2224,12 +2224,27 @@ const uploadFileToServer = async (file) => {
         body: formData,
       });
       const text = await res.text();
+      
+      let finalUrl = '';
       try {
         const json = JSON.parse(text);
-        return json.url || json.fileName || json.file || text;
+        finalUrl = json.url || json.fileName || json.file || text;
       } catch (err) {
-        return text.trim();
+        finalUrl = text.trim();
       }
+
+      // --- BEYAZ EKRAN/KIRIK RESİM ÇÖZÜMÜ İÇİN EKLENEN KISIM ---
+      if (typeof finalUrl === 'string') {
+          if (!finalUrl.includes('http') && !finalUrl.includes('uploads/')) {
+              finalUrl = `https://www.depoevim.com/crm/uploads/${finalUrl}`;
+          }
+          else if (finalUrl.startsWith('http://')) {
+              finalUrl = finalUrl.replace('http://', 'https://');
+          }
+      }
+      
+      return finalUrl;
+
     } catch (err) {
       console.error("Yükleme hatası:", err);
       alert("Görsel yüklenemedi. Lütfen internet bağlantınızı kontrol edin.");
@@ -2237,6 +2252,7 @@ const uploadFileToServer = async (file) => {
     }
   };
 
+  // BU KISIM HİÇ DEĞİŞMEDEN AYNI KALIYOR
   const parseDateLocal = (dateString) => {
     if (!dateString) return new Date();
     const parts = dateString.split('-');
@@ -6017,7 +6033,7 @@ const uploadFileToServer = async (file) => {
                  <div className="bg-slate-50 p-5 rounded-xl border border-gray-200">
                     <label className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-white hover:border-[#1bc5bd] transition-colors cursor-pointer group bg-white/50">
                      {rentData.entryPhoto ? (
-                       <div className="text-[#1bc5bd] font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Görsel Eklendi</span><img src={rentData.entryPhoto} alt="Önizleme" className="h-16 w-16 object-cover rounded mt-2 border border-gray-200"/></div>
+                       <div className="text-[#1bc5bd] font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Görsel Eklendi</span><img src={rentData.entryPhoto} alt="Önizleme" referrerPolicy="no-referrer" className="h-16 w-16 object-cover rounded mt-2 border border-gray-200"/></div>
                      ) : (
                        <><Upload size={20} className="text-gray-400 mb-2 group-hover:text-[#1bc5bd] transition-colors" /><span className="text-xs text-gray-500 font-medium">Depoya yerleşim yapıldıktan sonraki fotoğrafı yükleyin</span><span className="text-[10px] text-gray-400 mt-1">PNG, JPG formatlarında</span></>
                      )}
