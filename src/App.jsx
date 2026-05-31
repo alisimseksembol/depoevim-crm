@@ -44,8 +44,7 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query } from 'firebase/firestore';
-
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc } from 'firebase/firestore';
 const firebaseConfig = {
     apiKey: "AIzaSyAK-4baYcG60nDIryh_ia_bJ5bsnVdIsaA",
     authDomain: "depoevim-crm.firebaseapp.com",
@@ -1171,15 +1170,23 @@ const proxyDocUrl = newCustomer.hasProxy && newCustomer.proxyDocumentPhotoFile
     setActiveMenu('tum-musteriler');
   };
 
-  const handleDeleteCustomer = (customerId) => {
+const handleDeleteCustomer = async (customerId) => {
     const customerToDelete = customers.find(c => c.id === customerId);
+    
+    if (db && firebaseUser) {
+        try {
+            const { deleteDoc, doc: firestoreDoc } = await import('firebase/firestore');
+            await deleteDoc(firestoreDoc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)));
+        } catch (e) { console.error("Firebase Silme Hatası:", e); }
+    }
+
     setCustomers(customers.filter(c => c.id !== customerId));
     if (customerToDelete) {
         setRooms(rooms.map(r => r.customerName === customerToDelete.name ? {
             ...r, customerName: null, phone: null, tc: null, paidMonths: []
         } : r));
     }
-  };
+};
 
   const handleUpdateCustomer = () => {
     if (!editCustomerData.name) return;
