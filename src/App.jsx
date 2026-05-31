@@ -1479,6 +1479,55 @@ if (db && firebaseUser) {
     setIsEditRoomModalOpen(false); setEditRoomData(null);
   };
 
+// --- DEPO VE BLOK SIRALAMA FONKSİYONLARI ---
+  const moveWarehouseUp = (index, e) => {
+    e.stopPropagation();
+    if (index === 0) return;
+    const newWarehouses = [...warehouses];
+    const temp = newWarehouses[index - 1];
+    newWarehouses[index - 1] = newWarehouses[index];
+    newWarehouses[index] = temp;
+    setWarehouses(newWarehouses);
+  };
+
+  const moveWarehouseDown = (index, e) => {
+    e.stopPropagation();
+    if (index === warehouses.length - 1) return;
+    const newWarehouses = [...warehouses];
+    const temp = newWarehouses[index + 1];
+    newWarehouses[index + 1] = newWarehouses[index];
+    newWarehouses[index] = temp;
+    setWarehouses(newWarehouses);
+  };
+
+  const moveBlockUp = (index, filteredList, e) => {
+    e.stopPropagation(); 
+    if (index === 0) return;
+    const newBlocks = [...blocks];
+    const id1 = filteredList[index - 1].id; 
+    const id2 = filteredList[index].id;
+    const idx1 = newBlocks.findIndex(b => b.id === id1); 
+    const idx2 = newBlocks.findIndex(b => b.id === id2);
+    const temp = newBlocks[idx1];
+    newBlocks[idx1] = newBlocks[idx2]; 
+    newBlocks[idx2] = temp; 
+    setBlocks(newBlocks);
+  };
+
+  const moveBlockDown = (index, filteredList, e) => {
+    e.stopPropagation();
+    if (index === filteredList.length - 1) return;
+    const newBlocks = [...blocks];
+    const id1 = filteredList[index].id;
+    const id2 = filteredList[index + 1].id;
+    const idx1 = newBlocks.findIndex(b => b.id === id1);
+    const idx2 = newBlocks.findIndex(b => b.id === id2);
+    const temp = newBlocks[idx1]; 
+    newBlocks[idx1] = newBlocks[idx2]; 
+    newBlocks[idx2] = temp; 
+    setBlocks(newBlocks);
+  };
+
   const moveRoomUp = (index, filteredList, e) => {
     e.stopPropagation(); if (index === 0) return;
     const newRooms = [...rooms];
