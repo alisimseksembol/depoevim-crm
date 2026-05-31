@@ -47,12 +47,12 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query } from 'firebase/firestore';
 
 const firebaseConfig = {
-    apiKey: "AIzaSyAK-4baYcG6OnDIryh_ia_bJ5bsnVdIsaA",
-    authDomain: "depoevim-crm.firebaseapp.com",
-    projectId: "depoevim-crm",
-    storageBucket: "depoevim-crm.firebasestorage.app",
-    messagingSenderId: "805423278855",
-    appId: "1:805423278855:web:e16e8131eff6dc5e1eb3a2"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);
