@@ -1173,10 +1173,10 @@ const proxyDocUrl = newCustomer.hasProxy && newCustomer.proxyDocumentPhotoFile
 const handleDeleteCustomer = async (customerId) => {
     const customerToDelete = customers.find(c => c.id === customerId);
     
-    if (db && firebaseUser) {
+if (db && firebaseUser) {
         try {
-            const { deleteDoc, doc: firestoreDoc } = await import('firebase/firestore');
-            await deleteDoc(firestoreDoc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)));
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)));
+            console.log("Firebase'den silindi:", customerId);
         } catch (e) { console.error("Firebase Silme Hatası:", e); }
     }
 
