@@ -1387,6 +1387,16 @@ if (db && firebaseUser) {
   const [isEditBlockModalOpen, setIsEditBlockModalOpen] = useState(false);
   const [editBlockData, setEditBlockData] = useState(null);
 
+  // --- BLOK EKLEME STATE'LERİ ---
+  const [isAddBlockModalOpen, setIsAddBlockModalOpen] = useState(false);
+  const [newBlockName, setNewBlockName] = useState('');
+  const [newBlockM3, setNewBlockM3] = useState('');
+
+  // --- ODA EKLEME STATE'LERİ ---
+  const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
+  const [newRoomM3, setNewRoomM3] = useState('');
+
   const handleAddBlock = async () => {
     if (!newBlockName || !selectedWarehouseId) return;
     const newBlock = { id: Date.now(), warehouseId: selectedWarehouseId, name: newBlockName, m3: newBlockM3 || 0 };
