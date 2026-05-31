@@ -2895,7 +2895,7 @@ const uploadFileToServer = async (file) => {
             <div className="relative">
                 <button onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)} className="flex items-center gap-2 hover:bg-gray-50 p-1 sm:p-1.5 rounded-lg transition-colors">
                   {currentUserProfile.avatar ? (
-                      <img src={currentUserProfile.avatar} alt="Profile" className="h-7 w-7 sm:h-8 sm:w-8 rounded-full object-cover border border-gray-200 shadow-sm" />
+                      <img src={currentUserProfile.avatar} alt="Profile" referrerPolicy="no-referrer" className="h-7 w-7 sm:h-8 sm:w-8 rounded-full object-cover border border-gray-200 shadow-sm" />
                   ) : (
                       <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold text-xs sm:text-sm shadow-sm">
                           {currentUserProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
@@ -3232,7 +3232,7 @@ const uploadFileToServer = async (file) => {
                            <div className="flex flex-col items-center">
                               <Check size={32} className="text-green-500 mb-2" />
                               <span className="text-sm font-bold text-green-600">Belge Eklendi</span>
-                              <img src={newCustomer.documentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                              <img src={newCustomer.documentPhoto} alt="Belge" referrerPolicy="no-referrer" className="mt-4 h-24 object-contain rounded border border-gray-200" />
                            </div>
                         ) : (
                            <>
@@ -3272,7 +3272,7 @@ const uploadFileToServer = async (file) => {
                                    <div className="flex flex-col items-center">
                                       <Check size={32} className="text-indigo-500 mb-2" />
                                       <span className="text-sm font-bold text-indigo-600">Vekalet Belgesi Eklendi</span>
-                                      <img src={newCustomer.proxyDocumentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                                      <img src={newCustomer.proxyDocumentPhoto} alt="Belge" referrerPolicy="no-referrer" className="mt-4 h-24 object-contain rounded border border-gray-200" />
                                    </div>
                                 ) : (
                                    <>
@@ -3408,7 +3408,7 @@ const uploadFileToServer = async (file) => {
                                                 <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Vekil Kimlik Belgesi</span>
                                                 <div className="border border-indigo-200 rounded p-2 bg-white w-max shadow-sm">
                                                     <a href={customer.proxyDocumentPhoto} target="_blank" rel="noreferrer">
-                                                        <img src={customer.proxyDocumentPhoto} alt="Vekil Belge" className="h-24 object-contain rounded" />
+                                                        <img src={customer.proxyDocumentPhoto} alt="Vekil Belge" referrerPolicy="no-referrer" className="h-24 object-contain rounded" />
                                                     </a>
                                                 </div>
                                             </div>
@@ -3428,7 +3428,7 @@ const uploadFileToServer = async (file) => {
                                        {customer.documentPhoto ? (
                                            <div className="border border-gray-200 rounded p-2 bg-white w-max relative group shadow-sm hover:shadow transition-shadow">
                                                <a href={customer.documentPhoto} target="_blank" rel="noreferrer">
-                                                   <img src={customer.documentPhoto} alt="Belge" className="h-32 object-contain rounded" />
+                                                   <img src={customer.documentPhoto} alt="Belge" referrerPolicy="no-referrer" className="h-32 object-contain rounded" />
                                                </a>
                                            </div>
                                        ) : (
@@ -3461,7 +3461,7 @@ const uploadFileToServer = async (file) => {
                                                            {doc.url.includes('pdf') || doc.url.startsWith('data:application/pdf') ? (
                                                                <FileTextIcon size={24} className="text-red-500" />
                                                            ) : (
-                                                               <img src={doc.url} alt={`Ek Belge ${idx+1}`} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                                               <img src={doc.url} alt={`Ek Belge ${idx+1}`} referrerPolicy="no-referrer" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                                                            )}
                                                        </a>
                                                        <span className="text-[9px] text-gray-500 font-medium truncate w-full text-center px-1" title={doc.name}>{doc.name || `Belge ${idx+1}`}</span>
@@ -4680,7 +4680,7 @@ const uploadFileToServer = async (file) => {
                                 {selectedRoomDetail?.entryPhoto && (
                                     <div className="flex flex-col gap-1.5 md:col-span-2">
                                        <label className="text-[11px] text-gray-500 font-semibold">Depo İlk Giriş Görseli</label>
-                                       <div className="border border-gray-200 rounded p-2 bg-white w-max"><a href={selectedRoomDetail.entryPhoto} target="_blank" rel="noreferrer"><img src={selectedRoomDetail.entryPhoto} alt="Giriş Görseli" className="h-32 object-contain rounded" /></a></div>
+                                       <div className="border border-gray-200 rounded p-2 bg-white w-max"><a href={selectedRoomDetail.entryPhoto} target="_blank" rel="noreferrer"><img src={selectedRoomDetail.entryPhoto} alt="Giriş Görseli" referrerPolicy="no-referrer" className="h-32 object-contain rounded" /></a></div>
                                     </div>
                                 )}
 
@@ -4700,7 +4700,7 @@ const uploadFileToServer = async (file) => {
                                                            <div className="flex-1 flex flex-col gap-1">
                                                                <span className="text-[9px] text-gray-500 text-center font-medium">Tutanak</span>
                                                                <a href={item.protocolPhoto} target="_blank" rel="noreferrer" className="block border border-gray-200 rounded overflow-hidden bg-white">
-                                                                   <img src={item.protocolPhoto} alt="Tutanak" className="h-16 w-full object-cover hover:scale-105 transition-transform" />
+                                                                   <img src={item.protocolPhoto} alt="Tutanak" referrerPolicy="no-referrer" className="h-16 w-full object-cover hover:scale-105 transition-transform" />
                                                                </a>
                                                            </div>
                                                        ) : (
@@ -4712,7 +4712,7 @@ const uploadFileToServer = async (file) => {
                                                            <div className="flex-1 flex flex-col gap-1">
                                                                <span className="text-[9px] text-gray-500 text-center font-medium">Son Hal</span>
                                                                <a href={item.finalPhoto} target="_blank" rel="noreferrer" className="block border border-gray-200 rounded overflow-hidden bg-white">
-                                                                   <img src={item.finalPhoto} alt="Son Hal" className="h-16 w-full object-cover hover:scale-105 transition-transform" />
+                                                                   <img src={item.finalPhoto} alt="Son Hal" referrerPolicy="no-referrer" className="h-16 w-full object-cover hover:scale-105 transition-transform" />
                                                                </a>
                                                            </div>
                                                        ) : (
@@ -5734,7 +5734,7 @@ const uploadFileToServer = async (file) => {
                                       <td className="px-6 py-4">
                                           <div className="flex items-center gap-3">
                                               <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0 overflow-hidden">
-                                                  {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover"/> : user.name.charAt(0)}
+                                                  {user.avatar ? <img src={user.avatar} referrerPolicy="no-referrer" className="w-full h-full object-cover"/> : user.name.charAt(0)}
                                               </div>
                                               <div>
                                                   <div className="font-bold text-gray-800 text-[15px]">{user.name}</div>
@@ -6608,7 +6608,7 @@ const uploadFileToServer = async (file) => {
                            <div className="flex flex-col items-center">
                               <Check size={32} className="text-[#1bc5bd] mb-2" />
                               <span className="text-sm font-bold text-teal-600">Belge Eklendi</span>
-                              <img src={editCustomerData.documentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                              <img src={editCustomerData.documentPhoto} alt="Belge" referrerPolicy="no-referrer" className="mt-4 h-24 object-contain rounded border border-gray-200" />
                            </div>
                         ) : (
                            <>
@@ -6652,7 +6652,7 @@ const uploadFileToServer = async (file) => {
                                    <div className="flex flex-col items-center">
                                       <Check size={32} className="text-indigo-500 mb-2" />
                                       <span className="text-sm font-bold text-indigo-600">Vekalet Belgesi Eklendi</span>
-                                      <img src={editCustomerData.proxyDocumentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                                      <img src={editCustomerData.proxyDocumentPhoto} alt="Belge" referrerPolicy="no-referrer" className="mt-4 h-24 object-contain rounded border border-gray-200" />
                                    </div>
                                 ) : (
                                    <>
@@ -7107,7 +7107,7 @@ const uploadFileToServer = async (file) => {
                       <div className="relative group cursor-pointer">
                           <div className="w-32 h-32 rounded-full border-4 border-gray-100 shadow-md overflow-hidden bg-gray-50 flex items-center justify-center">
                               {currentUserProfile.avatar ? (
-                                  <img src={currentUserProfile.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                                  <img src={currentUserProfile.avatar} alt="Avatar" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                               ) : (
                                   <span className="text-4xl font-bold text-gray-300">
                                       {currentUserProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
