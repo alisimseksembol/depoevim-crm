@@ -4309,7 +4309,7 @@ const uploadFileToServer = async (file) => {
             <div className="max-w-7xl mx-auto flex flex-col h-full bg-slate-50 relative">
               {!selectedWarehouseId ? (
                 <>
- <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+<div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
   <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
   <div className="flex items-center gap-2">
     <button onClick={handleMigrateDataToFirebase} className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded text-sm font-medium transition-colors">
@@ -4319,7 +4319,8 @@ const uploadFileToServer = async (file) => {
       Depo Ekle <Plus size={16} />
     </button>
   </div>
-</div>                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-8">
+</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-8">
                   {warehouses.map((depo, index) => {
                     const stats = getWarehouseStats(depo.id);
                     const occupied = getWarehouseOccupiedM3(depo.id);
