@@ -4613,7 +4613,6 @@ const uploadFileToServer = async (file) => {
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
-                    <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
   <div className="flex items-center gap-2">
       <button onClick={handleMigrateDataToFirebase} className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded text-sm font-medium">
           Verileri Canlıya Aktar
