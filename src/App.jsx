@@ -47,7 +47,7 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query } from 'firebase/firestore';
 
 const firebaseConfig = {
-    apiKey: "AIzaSyAK-4baYcG6OnDIryh_ia_bJ5bsnVdIsaA",
+    apiKey: "AIzaSyAK-4baYcG60nDIryh_ia_bJ5bsnVdIsaA",
     authDomain: "depoevim-crm.firebaseapp.com",
     projectId: "depoevim-crm",
     storageBucket: "depoevim-crm.firebasestorage.app",
