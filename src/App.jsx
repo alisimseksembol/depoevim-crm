@@ -46,20 +46,19 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query } from 'firebase/firestore';
 
-// ============================================================================
-// 🗄️ FIREBASE ENTEGRASYON HAZIRLIĞI VE YAPILANDIRMASI
-// ============================================================================
-const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-const firebaseConfig = firebaseConfigStr ? JSON.parse(firebaseConfigStr) : null;
-let app, auth, db, appId;
+const firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
+};
 
-if (firebaseConfig) {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-}
-// ============================================================================
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = 'depoevim-crm';
 
 // Mini grafik bileşeni
 const Sparkline = ({ data, color }) => {
@@ -201,28 +200,18 @@ export default function App() {
       return () => unsubscribe();
   }, []);
 
-  // 2. Firebase Veri Dinleme (Hazırlık)
-  useEffect(() => {
+useEffect(() => {
       if (!firebaseUser || !db) return;
-
-      // ÖRNEK: Müşterileri Firebase'den dinleme yapısı
-      // Veri girmeye başladığınızda alttaki yorum satırlarını kaldırıp kendi state'lerinize bağlayabilirsiniz.
-      /*
       const unsubCustomers = onSnapshot(
           collection(db, 'artifacts', appId, 'public', 'data', 'customers'),
           (snapshot) => {
               const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-              // if (fetchedData.length > 0) setCustomers(fetchedData);
+              if (fetchedData.length > 0) setCustomers(fetchedData);
           },
           (error) => console.error("Firebase Veri Çekme Hatası:", error)
       );
-      
-      return () => {
-          unsubCustomers(); // Component kapanırken dinlemeyi durdur
-      };
-      */
+      return () => { unsubCustomers(); };
   }, [firebaseUser]);
-  // ============================================================================
 
   // --- YENİ: AUTH VE KULLANICI STATE'LERİ ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1129,39 +1118,9 @@ export default function App() {
     ));
   };
 
-  const [customers, setCustomers] = useState([
-    { id: 1, customerNo: '10001', name: 'TİBET ÇELİK', tc: '00000000001', phone: '5315849871', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 2, customerNo: '10002', name: 'AYDIN KAHYA', tc: '00000000003', phone: '5416246083', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 3, customerNo: '10003', name: 'ALİ ÖZCAN', tc: '10245634823', phone: '5336048734', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 4, customerNo: '10004', name: 'TUNA GÖKTUNA', tc: '00000000006', phone: '5365198892', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 5, customerNo: '10005', name: 'HİLAL BABACAN', tc: '00000000007', phone: '5357233386', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 6, customerNo: '10006', name: 'ZEYNEP ALASYA', tc: '00000000031', phone: '05304606013', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 7, customerNo: '10007', name: 'ÖZKAN SÖNMEZ', tc: '00000000032', phone: '05342243326', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 8, customerNo: '10008', name: 'MELEK DİLEK', tc: '00000000033', phone: '05352915326', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 9, customerNo: '10009', name: 'BERKE UĞURAL', tc: '00000000034', phone: '05325638381', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 10, customerNo: '10010', name: 'YASEMİN CÖMERT', tc: '00000000035', phone: '4917862765502', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 11, customerNo: '10011', name: 'CAN BAHAR', tc: '00000000036', phone: '05423571303', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 12, customerNo: '10012', name: 'SERDAR DENK', tc: '00000000038', phone: '05325749432', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 13, customerNo: '10013', name: 'DENİZ ESRA MOLLAOĞLU', tc: '37593425678', phone: '05335593333', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 14, customerNo: '10014', name: 'ÖZKAN SARI', tc: '00000000040', phone: '05456964220', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 15, customerNo: '10015', name: 'NESLİHAN CANDAŞ', tc: '00000000020', phone: '05322566935', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 16, customerNo: '10016', name: 'OSMAN ÇETİNER', tc: '00000000021', phone: '5076617796', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 17, customerNo: '10017', name: 'HAKAN OKUTAN', tc: '00000000022', phone: '5330328141', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 18, customerNo: '10018', name: 'ONUR HÜR', tc: '00000000023', phone: '05303837688', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 19, customerNo: '10019', name: 'TİMUR BUNLU', tc: '00000000026', phone: '05053660200', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 20, customerNo: '10020', name: 'ÖMER TULAN', tc: '00000000027', phone: '05323267877', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 21, customerNo: '10021', name: 'ZİLAN AK', tc: '00000000028', phone: '05332328365', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 22, customerNo: '10022', name: 'VOLKAN OĞUL', tc: '00000000029', phone: '05414531698', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 23, customerNo: '10023', name: 'KUDRET ABİ', tc: '00000000030', phone: '05355509375', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 24, customerNo: '10024', name: 'BERKE UĞURAL', tc: '00000000011', phone: '5325838381', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 25, customerNo: '10025', name: 'OSMAN TUNÇ', tc: '00000000013', phone: '5466859318', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 26, customerNo: '10026', name: 'GÖKHAN ŞEN', tc: '00000000014', phone: '5532876826', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 27, customerNo: '10027', name: 'TUNCAY ÖZ', tc: '00000000015', phone: '05308250777', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 28, customerNo: '10028', name: 'GÖKSENİN GÖKSEL', tc: '00000000017', phone: '5322745957', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null },
-    { id: 29, customerNo: '10029', name: 'ESMA EĞİNLİOĞLU', tc: '00000000019', phone: '05462323762', altPhone: '', address: 'Adres', notes: '', hasProxy: false, type: 'bireysel', createdAt: '28.05.2026', invoices: [], documentPhoto: null }
-  ]);
+const [customers, setCustomers] = useState([]);
 
-  const handleSaveCustomer = () => {
+ const handleSaveCustomer = async () => {
     if (!newCustomer.name) return;
     
     let newNo = '';
@@ -1171,8 +1130,17 @@ export default function App() {
         if (!customers.some(c => c.customerNo === newNo)) isUnique = true;
     }
 
+    const docPhotoUrl = newCustomer.documentPhotoFile 
+        ? await uploadFileToServer(newCustomer.documentPhotoFile) 
+        : newCustomer.documentPhoto;
+    
+    const proxyDocUrl = newCustomer.hasProxy && newCustomer.proxyDocumentPhotoFile
+        ? await uploadFileToServer(newCustomer.proxyDocumentPhotoFile)
+        : newCustomer.proxyDocumentPhoto;
+
+    const custId = 'cust_' + Date.now();
     const cust = {
-        id: Date.now(),
+        id: custId,
         customerNo: newNo,
         name: newCustomer.name.toUpperCase(),
         tc: newCustomer.tc,
@@ -1186,14 +1154,21 @@ export default function App() {
         proxyPhone: newCustomer.hasProxy ? newCustomer.proxyPhone : '',
         proxyAltPhone: newCustomer.hasProxy ? newCustomer.proxyAltPhone : '',
         proxyAddress: newCustomer.hasProxy ? newCustomer.proxyAddress : '',
-        proxyDocumentPhoto: newCustomer.hasProxy ? newCustomer.proxyDocumentPhoto : null,
+        proxyDocumentPhoto: proxyDocUrl || null,
         type: customerType,
         createdAt: new Date().toLocaleDateString('tr-TR'),
         invoices: [],
-        documentPhoto: newCustomer.documentPhoto
+        documentPhoto: docPhotoUrl || null
     };
-    setCustomers([cust, ...customers]);
-    setNewCustomer({ name: '', tc: '', phone: '', altPhone: '', address: '', notes: '', documentPhoto: null, hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null });
+
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', custId), cust);
+        } catch (e) { console.error("Firebase Kayıt Hatası:", e); }
+    }
+    
+    setCustomers(prev => [cust, ...prev]);
+    setNewCustomer({ name: '', tc: '', phone: '', altPhone: '', address: '', notes: '', documentPhoto: null, documentPhotoFile: null, hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null, proxyDocumentPhotoFile: null });
     setActiveMenu('tum-musteriler');
   };
 
@@ -2449,6 +2424,28 @@ export default function App() {
   ];
 
   const selectedRoomDetail = rooms.find(r => r.id === selectedRoomId);
+
+const uploadFileToServer = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('https://www.depoevim.com/crm/upload.php', {
+        method: 'POST',
+        body: formData,
+      });
+      const text = await res.text();
+      try {
+        const json = JSON.parse(text);
+        return json.url || json.fileName || json.file || text;
+      } catch (err) {
+        return text.trim();
+      }
+    } catch (err) {
+      console.error("Yükleme hatası:", err);
+      alert("Görsel yüklenemedi. Lütfen internet bağlantınızı kontrol edin.");
+      return null;
+    }
+  };
 
   const parseDateLocal = (dateString) => {
     if (!dateString) return new Date();
