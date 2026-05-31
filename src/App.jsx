@@ -1167,7 +1167,6 @@ const proxyDocUrl = newCustomer.hasProxy && newCustomer.proxyDocumentPhotoFile
         } catch (e) { console.error("Firebase Kayıt Hatası:", e); }
     }
     
-    setCustomers(prev => [cust, ...prev]);
     setNewCustomer({ name: '', tc: '', phone: '', altPhone: '', address: '', notes: '', documentPhoto: null, documentPhotoFile: null, hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null, proxyDocumentPhotoFile: null });
     setActiveMenu('tum-musteriler');
   };
