@@ -201,15 +201,54 @@ export default function App() {
 
 useEffect(() => {
       if (!firebaseUser || !db) return;
+      
+      // 1. Müşterileri Dinle
       const unsubCustomers = onSnapshot(
           collection(db, 'artifacts', appId, 'public', 'data', 'customers'),
           (snapshot) => {
               const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
               if (fetchedData.length > 0) setCustomers(fetchedData);
           },
-          (error) => console.error("Firebase Veri Çekme Hatası:", error)
+          (error) => console.error("Firebase Müşteri Çekme Hatası:", error)
       );
-      return () => { unsubCustomers(); };
+
+      // 2. Depoları Dinle
+      const unsubWarehouses = onSnapshot(
+          collection(db, 'artifacts', appId, 'public', 'data', 'warehouses'),
+          (snapshot) => {
+              const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() }));
+              if (fetchedData.length > 0) setWarehouses(fetchedData);
+          },
+          (error) => console.error("Firebase Depo Çekme Hatası:", error)
+      );
+
+      // 3. Blokları Dinle
+      const unsubBlocks = onSnapshot(
+          collection(db, 'artifacts', appId, 'public', 'data', 'blocks'),
+          (snapshot) => {
+              const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() }));
+              if (fetchedData.length > 0) setBlocks(fetchedData);
+          },
+          (error) => console.error("Firebase Blok Çekme Hatası:", error)
+      );
+
+      // 4. Odaları Dinle
+      const unsubRooms = onSnapshot(
+          collection(db, 'artifacts', appId, 'public', 'data', 'rooms'),
+          (snapshot) => {
+              const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() }));
+              if (fetchedData.length > 0) setRooms(fetchedData);
+          },
+          (error) => console.error("Firebase Oda Çekme Hatası:", error)
+      );
+
+      // Component kapanırken tüm dinleyicileri temizle
+      return () => { 
+          unsubCustomers(); 
+          unsubWarehouses();
+          unsubBlocks();
+          unsubRooms();
+      };
   }, [firebaseUser]);
 
   // --- YENİ: AUTH VE KULLANICI STATE'LERİ ---
@@ -1317,6 +1356,61 @@ if (db && firebaseUser) {
   
   const [isEditWarehouseModalOpen, setIsEditWarehouseModalOpen] = useState(false);
   const [editWarehouseData, setEditWarehouseData] = useState(null);
+// --- DEPO (ŞUBE) EKLEME VE DÜZENLEME (FİREBASE) ---
+  const handleAddWarehouse = async () => {
+    if (!newDepoName) return;
+    const newWarehouse = { id: Date.now(), name: newDepoName, m3: newDepoM3 || 0 };
+    
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouse.id)), newWarehouse);
+        } catch (e) { console.error("Firebase Depo Kayıt Hatası:", e); }
+    }
+    
+    setIsAddWarehouseModalOpen(false);
+    setNewDepoName(''); setNewDepoM3('');
+  };
+
+  const handleEditWarehouse = async () => {
+    if (!editWarehouseData?.name) return;
+    
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(editWarehouseData.id)), { name: editWarehouseData.name, m3: editWarehouseData.m3 }, { merge: true });
+        } catch (e) { console.error("Firebase Depo Güncelleme Hatası:", e); }
+    }
+    
+    setIsEditWarehouseModalOpen(false); setEditWarehouseData(null);
+  };
+
+// --- BLOK STATE VE FİREBASE İŞLEMLERİ ---
+  const [isEditBlockModalOpen, setIsEditBlockModalOpen] = useState(false);
+  const [editBlockData, setEditBlockData] = useState(null);
+
+  const handleAddBlock = async () => {
+    if (!newBlockName || !selectedWarehouseId) return;
+    const newBlock = { id: Date.now(), warehouseId: selectedWarehouseId, name: newBlockName, m3: newBlockM3 || 0 };
+    
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(newBlock.id)), newBlock);
+        } catch (e) { console.error("Firebase Blok Kayıt Hatası:", e); }
+    }
+    
+    setIsAddBlockModalOpen(false); setNewBlockName(''); setNewBlockM3('');
+  };
+
+  const handleEditBlock = async () => {
+    if (!editBlockData?.name) return;
+    
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(editBlockData.id)), { name: editBlockData.name, m3: editBlockData.m3 }, { merge: true });
+        } catch (e) { console.error("Firebase Blok Güncelleme Hatası:", e); }
+    }
+    
+    setIsEditBlockModalOpen(false); setEditBlockData(null);
+  };
 
   const [warehouses, setWarehouses] = useState([]);
   const [blocks, setBlocks] = useState([]);
@@ -1346,21 +1440,32 @@ if (db && firebaseUser) {
   };
   // ---------------------------------
 
-  const handleAddRoom = () => {
-    // ... mevcut kodunuz devam ediyor ...
-
+  // --- ODA EKLEME VE DÜZENLEME (FİREBASE) ---
+  const handleAddRoom = async () => {
     if (!newRoomName || !selectedBlockId) return;
     const newRoom = { id: Date.now(), blockId: selectedBlockId, name: newRoomName, customerName: null, m3: newRoomM3 || 0, isReserved: false, paidMonths: [] };
-    setRooms([newRoom, ...rooms]);
+    
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), newRoom);
+        } catch (e) { console.error("Firebase Oda Kayıt Hatası:", e); }
+    }
+    
     setIsAddRoomModalOpen(false); setNewRoomName(''); setNewRoomM3('');
   };
 
   const [isEditRoomModalOpen, setIsEditRoomModalOpen] = useState(false);
   const [editRoomData, setEditRoomData] = useState(null);
 
-  const handleEditRoom = () => {
+  const handleEditRoom = async () => {
     if (!editRoomData?.name) return;
-    setRooms(rooms.map(r => r.id === editRoomData.id ? { ...r, name: editRoomData.name, m3: editRoomData.m3 } : r));
+    
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(editRoomData.id)), { name: editRoomData.name, m3: editRoomData.m3 }, { merge: true });
+        } catch (e) { console.error("Firebase Oda Güncelleme Hatası:", e); }
+    }
+    
     setIsEditRoomModalOpen(false); setEditRoomData(null);
   };
 
@@ -1697,7 +1802,8 @@ if (db && firebaseUser) {
       setBulkProcessResult(null);
   };
 
-  const handleRentRoom = () => {
+// --- ODAYI KİRALA (FİREBASE) ---
+  const handleRentRoom = async () => {
     if (!rentData.customerName || !rentData.monthlyFee) return;
 
     // Gün Farkı (Kıstelyevm) Bedeli Hesaplaması
@@ -1706,14 +1812,14 @@ if (db && firebaseUser) {
     const pDate = new Date(rentData.paymentDate);
     const timeDiff = pDate.getTime() - eDate.getTime();
     const dayDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
-
+    
     if (dayDiff > 0) {
       let dailyRate = Number(rentData.monthlyFee) / 30;
       proratedDebtAmount = dailyRate * dayDiff;
       if (rentData.hasKdv) proratedDebtAmount = proratedDebtAmount * 1.20;
     }
 
-    // Nakliye Bedeli Cari Hesaplaması (Eğer Sembol Nakliyat seçilmişse ve fiyat girilmişse)
+    // Nakliye Bedeli Cari Hesaplaması
     let transportDebtAmount = 0;
     if (rentData.broughtBy === 'sembol' && rentData.transportPrice) {
       transportDebtAmount = Number(rentData.transportPrice);
@@ -1722,37 +1828,36 @@ if (db && firebaseUser) {
       }
     }
 
-    // Müşterinin hesaplarına tekil Nakliye ve Gün Farkı Borcu Ekleme İşlemi
-    if (transportDebtAmount > 0 || proratedDebtAmount > 0) {
-      setCustomers(customers.map(c => {
-        if (c.name === rentData.customerName) {
-          let existingDebts = c.extraDebts || [];
-          let existingPayments = c.payments || []; // Müşterinin mevcut ödemelerini (tahsilatlarını) al
-          
-          // Nakliye
-          if (transportDebtAmount > 0) {
+    // FIREBASE 1: Müşterinin Cari Hesabını Güncelle (Nakliye ve Gün Farkı varsa)
+    const customerToUpdate = customers.find(c => c.name === rentData.customerName);
+    if (customerToUpdate && (transportDebtAmount > 0 || proratedDebtAmount > 0)) {
+        let existingDebts = customerToUpdate.extraDebts || [];
+        let existingPayments = customerToUpdate.payments || []; 
+        
+        if (transportDebtAmount > 0) {
             const hasSameDayTransport = existingDebts.some(d => d.type === 'transport' && d.date === rentData.entryDate);
             if (!hasSameDayTransport) {
-              existingDebts = [...existingDebts, { id: Date.now() + 1, type: 'transport', date: rentData.entryDate, amount: transportDebtAmount, desc: 'Sembol Nakliyat Taşıma / Nakliye Bedeli' }];
-              
-              // YENİ EKLENEN: Nakliye borcu oluştuğu anda, bu borcun ödendiğine dair tahsilat kaydını otomatik ekle
-              existingPayments = [...existingPayments, { id: Date.now() + 3, amount: transportDebtAmount, date: rentData.entryDate, note: 'Sembol Nakliyat Taşıma / Nakliye Bedeli Tahsilatı (Otomatik)' }];
+                existingDebts = [...existingDebts, { id: Date.now() + 1, type: 'transport', date: rentData.entryDate, amount: transportDebtAmount, desc: 'Sembol Nakliyat Taşıma / Nakliye Bedeli' }];
+                existingPayments = [...existingPayments, { id: Date.now() + 3, amount: transportDebtAmount, date: rentData.entryDate, note: 'Sembol Nakliyat Taşıma / Nakliye Bedeli Tahsilatı (Otomatik)' }];
             }
-          }
-
-          // Gün Farkı (Kıstelyevm)
-          if (proratedDebtAmount > 0) {
-              existingDebts = [...existingDebts, { id: Date.now() + 2, type: 'prorated', date: rentData.entryDate, amount: proratedDebtAmount, desc: `Gün Farkı Bedeli (${dayDiff} Gün)` }];
-          }
-
-          return { ...c, extraDebts: existingDebts, payments: existingPayments }; // payments alanını da güncelliyoruz
         }
-        return c;
-      }));
+
+        if (proratedDebtAmount > 0) {
+            existingDebts = [...existingDebts, { id: Date.now() + 2, type: 'prorated', date: rentData.entryDate, amount: proratedDebtAmount, desc: `Gün Farkı Bedeli (${dayDiff} Gün)` }];
+        }
+
+        if (db && firebaseUser) {
+            try {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                    extraDebts: existingDebts,
+                    payments: existingPayments
+                }, { merge: true });
+            } catch(e) { console.error("Firebase Cari Güncelleme Hatası:", e); }
+        }
     }
 
-    setRooms(rooms.map(r => r.id === selectedRoomId ? { 
-      ...r, 
+    // FIREBASE 2: Oda Bilgilerini Güncelle
+    const roomUpdates = {
       customerName: rentData.customerName, 
       entryDate: rentData.entryDate, 
       paymentDate: rentData.paymentDate, 
@@ -1767,8 +1872,14 @@ if (db && firebaseUser) {
       transportHasKdv: rentData.transportHasKdv,
       entryPhoto: rentData.entryPhoto,
       paidMonths: [] 
-    } : r));
-    
+    };
+
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), roomUpdates, { merge: true });
+        } catch(e) { console.error("Firebase Kiralama Hatası:", e); }
+    }
+
     setIsRentRoomModalOpen(false); setIsRentSuccessModalOpen(true);
     setRentData({ customerName: '', entryDate: new Date().toISOString().split('T')[0], paymentDate: new Date().toISOString().split('T')[0], monthlyFee: '', hasKdv: true, sealNo: '', broughtBy: 'kendisi', teamList: '', hasDamage: false, damageDescription: '', transportPrice: '', transportHasKdv: false, entryPhoto: null });
     setRentCustomerSearch('');
@@ -1810,16 +1921,33 @@ if (db && firebaseUser) {
     setIsEditRentModalOpen(false);
   };
 
-  const handleEndRentConfirm = () => {
+// --- DEPODAN ÇIKIŞ YAP (FİREBASE) ---
+  const handleEndRentConfirm = async () => {
     const room = rooms.find(r => r.id === selectedRoomId);
     if (!room) return;
-    const entryD = new Date(room.entryDate || Date.now()); const exitD = new Date(endRentData.exitDate);
-    const diffTime = Math.abs(exitD - entryD); const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    const months = Math.floor(diffDays / 30); const durationStr = months > 0 ? `${months} Ay` : `${diffDays} Gün`;
-
+    
+    const entryD = new Date(room.entryDate || Date.now()); 
+    const exitD = new Date(endRentData.exitDate);
+    const diffTime = Math.abs(exitD - entryD); 
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const months = Math.floor(diffDays / 30); 
+    const durationStr = months > 0 ? `${months} Ay` : `${diffDays} Gün`;
+    
     const historyRecord = { id: Date.now(), customerName: room.customerName, entryDate: room.entryDate, exitDate: endRentData.exitDate, duration: durationStr, monthlyFee: room.monthlyFee, status: 'Çıkış Yaptı', photo: endRentData.photo, entryPhoto: room.entryPhoto, entryExitHistory: room.entryExitHistory };
-    setRooms(rooms.map(r => r.id === selectedRoomId ? { ...r, customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null, broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null, paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, history: [historyRecord, ...(r.history || [])] } : r));
-    setIsEndRentModalOpen(false); setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null });
+    
+    const roomUpdates = {
+        customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null, broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null, paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
+        history: [historyRecord, ...(room.history || [])]
+    };
+
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), roomUpdates, { merge: true });
+        } catch(e) { console.error("Firebase Çıkış Yapma Hatası:", e); }
+    }
+
+    setIsEndRentModalOpen(false); 
+    setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null });
   };
 
   const handleChangeRoomConfirm = () => {
