@@ -44,20 +44,22 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc } from 'firebase/firestore';
-const firebaseConfig = {
-    apiKey: "AIzaSyAK-4baYcG60nDIryh_ia_bJ5bsnVdIsaA",
-    authDomain: "depoevim-crm.firebaseapp.com",
-    projectId: "depoevim-crm",
-    storageBucket: "depoevim-crm.firebasestorage.app",
-    messagingSenderId: "805423278855",
-    appId: "1:805423278855:web:e16e8131eff6dc5e1eb3a2"
-};
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query } from 'firebase/firestore';
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = 'depoevim-crm';
+// ============================================================================
+// 🗄️ FIREBASE ENTEGRASYON HAZIRLIĞI VE YAPILANDIRMASI
+// ============================================================================
+const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+const firebaseConfig = firebaseConfigStr ? JSON.parse(firebaseConfigStr) : null;
+let app, auth, db, appId;
+
+if (firebaseConfig) {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+}
+// ============================================================================
 
 // Mini grafik bileşeni
 const Sparkline = ({ data, color }) => {
@@ -172,6 +174,29 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
 
+  // --- YENİ EKLENEN: MOBİL UYUMLULUK VE TAM EKRAN (VIEWPORT) AYARI ---
+  useEffect(() => {
+      // Tarayıcıya uygulamanın mobil cihazın kendi çözünürlüğünde çalışması gerektiğini söylüyoruz
+      let meta = document.querySelector('meta[name="viewport"]');
+      if (!meta) {
+          meta = document.createElement('meta');
+          meta.name = 'viewport';
+          document.head.appendChild(meta);
+      }
+      // initial-scale=1.0 ve user-scalable=0 ile uzaklaştırma/yakınlaştırma ihtiyacını ortadan kaldırır
+      meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0';
+      
+      // Yatay kaymaları tamamen engellemek için genel stiller
+      document.body.style.overflowX = 'hidden';
+      document.documentElement.style.overflowX = 'hidden';
+      
+      return () => {
+          document.body.style.overflowX = '';
+          document.documentElement.style.overflowX = '';
+      };
+  }, []);
+  // ------------------------------------------------------------------
+
   // ============================================================================
   // 🗄️ FIREBASE VERİ SENKRONİZASYONU (DATA STORE)
   // ============================================================================
@@ -199,66 +224,39 @@ export default function App() {
       return () => unsubscribe();
   }, []);
 
-useEffect(() => {
+// 2. Firebase Canlı Veri Dinleme (Tüm Modüller Dahil)
+  useEffect(() => {
       if (!firebaseUser || !db) return;
       
-      // 1. Müşterileri Dinle
-      const unsubCustomers = onSnapshot(
-          collection(db, 'artifacts', appId, 'public', 'data', 'customers'),
-          (snapshot) => {
-              const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-              if (fetchedData.length > 0) setCustomers(fetchedData);
-          },
-          (error) => console.error("Firebase Müşteri Çekme Hatası:", error)
-      );
+      const unsubCustomers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setCustomers(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubWarehouses = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'warehouses'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() })); if (fetchedData.length > 0) setWarehouses(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubBlocks = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() })); if (fetchedData.length > 0) setBlocks(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubRooms = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() })); if (fetchedData.length > 0) setRooms(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubPendingCollections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pendingCollections'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setPendingCollections(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Mustafa Beşinci', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
+      const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
+      
+      // 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
+      const unsubSettings = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'settings'), (snapshot) => {
+          snapshot.docs.forEach(doc => {
+              if (doc.id === 'contract') setContractSettings(doc.data());
+              if (doc.id === 'rates') setCollectionRates(doc.data());
+          });
+      }, (error) => console.error("Ayar Çekme Hatası:", error));
 
-      // 2. Depoları Dinle
-      const unsubWarehouses = onSnapshot(
-          collection(db, 'artifacts', appId, 'public', 'data', 'warehouses'),
-          (snapshot) => {
-              const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() }));
-              if (fetchedData.length > 0) setWarehouses(fetchedData);
-          },
-          (error) => console.error("Firebase Depo Çekme Hatası:", error)
-      );
-
-      // 3. Blokları Dinle
-      const unsubBlocks = onSnapshot(
-          collection(db, 'artifacts', appId, 'public', 'data', 'blocks'),
-          (snapshot) => {
-              const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() }));
-              if (fetchedData.length > 0) setBlocks(fetchedData);
-          },
-          (error) => console.error("Firebase Blok Çekme Hatası:", error)
-      );
-
-      // 4. Odaları Dinle
-      const unsubRooms = onSnapshot(
-          collection(db, 'artifacts', appId, 'public', 'data', 'rooms'),
-          (snapshot) => {
-              const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() }));
-              if (fetchedData.length > 0) setRooms(fetchedData);
-          },
-          (error) => console.error("Firebase Oda Çekme Hatası:", error)
-      );
-
-      // Component kapanırken tüm dinleyicileri temizle
       return () => { 
-          unsubCustomers(); 
-          unsubWarehouses();
-          unsubBlocks();
-          unsubRooms();
+          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); 
+          unsubSettings(); // 👈 Ayar telsizini kapat
       };
   }, [firebaseUser]);
+  // ============================================================================
 
   // --- YENİ: AUTH VE KULLANICI STATE'LERİ ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   
-  const [systemUsers, setSystemUsers] = useState([
-      { id: 1, username: 'admin', password: 'admin', name: 'Mustafa Beşinci', role: 'Yönetici', email: 'mustafa@depoevim.com', phone: '0533 201 06 10', avatar: null }
-  ]);
+  const [systemUsers, setSystemUsers] = useState([]);
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserData, setNewUserData] = useState({ username: '', password: '', name: '', role: 'Personel', email: '', phone: '' });
 
@@ -449,6 +447,11 @@ useEffect(() => {
   const [isSendingEInvoice, setIsSendingEInvoice] = useState(false);
   const [eInvoiceSuccess, setEInvoiceSuccess] = useState(false);
 
+  // --- YENİ EKLENEN: DEPO ÖDEMELERİ GÜNCELLEME STATE'LERİ ---
+  const [isUpdateAllModalOpen, setIsUpdateAllModalOpen] = useState(false);
+  const [isUpdatingAll, setIsUpdatingAll] = useState(false);
+  const [updateAllStats, setUpdateAllStats] = useState(null);
+
   // --- FİNANS RAPOR STATE'LERİ ---
   const [finansReportFilter, setFinansReportFilter] = useState('year'); // today, week, month, year
   const [branchPaymentFilter, setBranchPaymentFilter] = useState('1'); // 1, 3, 6, 12, all
@@ -497,35 +500,51 @@ useEffect(() => {
       setIsProfileDropdownOpen(false);
   };
 
-  const handleAddSystemUser = () => {
+const handleAddSystemUser = async () => {
       if(!newUserData.username || !newUserData.password || !newUserData.name) return;
       if(systemUsers.some(u => u.username === newUserData.username)) {
           alert("Bu kullanıcı adı zaten mevcut.");
           return;
       }
-      const newUser = { id: Date.now(), ...newUserData, avatar: null };
-      setSystemUsers([...systemUsers, newUser]);
+      
+      const newId = String(Date.now());
+      const newUser = { id: newId, ...newUserData, avatar: null };
+
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'systemUsers', newId), newUser);
+          } catch(e) { console.error("Kullanıcı Kayıt Hatası:", e); }
+      }
+      
       setIsAddUserModalOpen(false);
       setNewUserData({ username: '', password: '', name: '', role: 'Personel', email: '', phone: '' });
   };
 
-  const handleDeleteSystemUser = (id) => {
+const handleDeleteSystemUser = async (id) => {
       if(systemUsers.length === 1) return alert("Sistemde en az 1 kullanıcı kalmalıdır.");
       if(currentUserProfile.id === id) return alert("Kendi hesabınızı silemezsiniz.");
-      setSystemUsers(systemUsers.filter(u => u.id !== id));
+
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'systemUsers', String(id)));
+          } catch(e) { console.error("Kullanıcı Silme Hatası:", e); }
+      }
   };
 
-  const handleUpdateSystemUser = () => {
+const handleUpdateSystemUser = async () => {
       if(!editUserData.username || !editUserData.password || !editUserData.name) return;
-      
       // Aynı kullanıcı adı başkasında var mı kontrolü
-      if(systemUsers.some(u => u.username === editUserData.username && u.id !== editUserData.id)) {
+      if(systemUsers.some(u => u.username === editUserData.username && String(u.id) !== String(editUserData.id))) {
           alert("Bu kullanıcı adı başka bir hesap tarafından kullanılıyor.");
           return;
       }
 
-      setSystemUsers(systemUsers.map(u => u.id === editUserData.id ? editUserData : u));
-      
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'systemUsers', String(editUserData.id)), editUserData, { merge: true });
+          } catch(e) { console.error("Kullanıcı Güncelleme Hatası:", e); }
+      }
+
       // Düzenlenen kullanıcı 'kendi' oturumumuz ise profili de anında güncelle
       if(currentUserProfile.id === editUserData.id) {
           setCurrentUserProfile({...currentUserProfile, name: editUserData.name, role: editUserData.role, email: editUserData.email, phone: editUserData.phone});
@@ -535,60 +554,61 @@ useEffect(() => {
       setEditUserData(null);
   };
 
-  const handleSendEInvoice = () => {
+const handleSendEInvoice = () => {
       setIsSendingEInvoice(true);
-      // Burada gerçek bir Backend'e (Node.js/PHP vb.) istek atılacaktır.
-      // Örnek: axios.post('/api/mbt-create-invoice', eInvoiceModalData)
-      
-      // Simülasyon: 2 saniye sonra fatura kesildi olarak göster
-      setTimeout(() => {
+      setTimeout(async () => {
           setIsSendingEInvoice(false);
           setEInvoiceSuccess(true);
           
-          // Müşterinin ilgili ödemesine E-Fatura kesildi bilgisini ve numarasını ekle
-          setCustomers(prev => prev.map(c => {
-              if (c.id === eInvoiceModalData.customerId) {
-                  return {
-                      ...c,
-                      payments: (c.payments || []).map(p => 
-                          p.id === eInvoiceModalData.id 
-                              ? { ...p, hasEInvoice: true, eInvoiceNo: 'MBT' + Math.floor(100000000 + Math.random() * 900000000) } 
-                              : p
-                      )
-                  };
-              }
-              return c;
-          }));
-
-          // 3 saniye sonra modalı kapat
-          setTimeout(() => {
-              setEInvoiceSuccess(false);
-              setEInvoiceModalData(null);
-          }, 3000);
+          const customerToUpdate = customers.find(c => c.id === eInvoiceModalData.customerId);
+          if (customerToUpdate && db && firebaseUser) {
+              const updatedPayments = (customerToUpdate.payments || []).map(p => 
+                  p.id === eInvoiceModalData.id 
+                  ? { ...p, hasEInvoice: true, eInvoiceNo: 'MBT' + Math.floor(100000000 + Math.random() * 900000000) } 
+                  : p
+              );
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), { payments: updatedPayments }, { merge: true });
+          }
+          setTimeout(() => { setEInvoiceSuccess(false); setEInvoiceModalData(null); }, 3000);
       }, 2000);
   };
 
-  const handleAssignPendingPayment = () => {
+const handleAssignPendingPayment = async () => {
       if (!assignData.paymentId || !assignData.customerId) return;
       const paymentToAssign = pendingCollections.find(p => p.id === assignData.paymentId);
       if (!paymentToAssign) return;
 
-      setCustomers(customers.map(c =>
-          c.id === parseInt(assignData.customerId)
-              ? { ...c, payments: [...(c.payments || []), { ...paymentToAssign, id: Date.now() }] }
-              : c
-      ));
+      const customerId = parseInt(assignData.customerId);
+      const customerToUpdate = customers.find(c => c.id === customerId);
 
-      setPendingCollections(pendingCollections.filter(p => p.id !== assignData.paymentId));
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              // 1. Cariye tahsilat olarak ekle
+              const existingPayments = customerToUpdate.payments || [];
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
+                  payments: [...existingPayments, { ...paymentToAssign, id: Date.now() }]
+              }, { merge: true });
+
+              // 2. Askıdan (pendingCollections) sil
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(assignData.paymentId)));
+          } catch(e) { console.error("Askıdan Cariye Aktarma Hatası:", e); }
+      }
+
       setIsAssignModalOpen(false);
       setAssignData({ paymentId: null, customerId: '' });
   };
 
-  const handleSaveEditPending = () => {
+const handleSaveEditPending = async () => {
       if (!editPendingData || !editPendingData.amount) return;
-      setPendingCollections(pendingCollections.map(p =>
-          p.id === editPendingData.id ? { ...p, amount: Number(editPendingData.amount), date: editPendingData.date, note: editPendingData.note } : p
-      ));
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(editPendingData.id)), {
+                  amount: Number(editPendingData.amount),
+                  date: editPendingData.date,
+                  note: editPendingData.note
+              }, { merge: true });
+          } catch (e) { console.error("Askıdaki Ödeme Güncelleme Hatası:", e); }
+      }
       setIsEditPendingModalOpen(false);
       setEditPendingData(null);
   };
@@ -1125,175 +1145,194 @@ useEffect(() => {
       setMessageModalData(null);
   };
 
-  const handleAddExtraDocument = (e, customerId) => {
-    const files = Array.from(e.target.files);
-    if (!files.length) return;
+const handleAddExtraDocument = async (e, customerId) => {
+      const files = Array.from(e.target.files);
+      if (!files.length) return;
+      const customerToUpdate = customers.find(c => c.id === customerId);
+      if (!customerToUpdate || !db || !firebaseUser) return;
 
-    files.forEach(file => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const newDoc = {
-                id: Date.now() + Math.random(),
-                url: reader.result,
-                name: file.name
-            };
-            setCustomers(prev => prev.map(c => 
-                c.id === customerId 
-                    ? { ...c, extraDocuments: [...(c.extraDocuments || []), newDoc] }
-                    : c
-            ));
-        };
-        reader.readAsDataURL(file);
-    });
-    e.target.value = ''; // Input'u temizle
+      const promises = files.map(file => {
+          return new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => { resolve({ id: Date.now() + Math.random(), url: reader.result, name: file.name }); };
+              reader.readAsDataURL(file);
+          });
+      });
+
+      const newFiles = await Promise.all(promises);
+      const updatedDocs = [...(customerToUpdate.extraDocuments || []), ...newFiles];
+
+      try {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { extraDocuments: updatedDocs }, { merge: true });
+      } catch (err) { console.error(err); }
+      e.target.value = '';
   };
 
-  const handleDeleteExtraDocument = (customerId, docId) => {
-    setCustomers(prev => prev.map(c => 
-        c.id === customerId 
-            ? { ...c, extraDocuments: (c.extraDocuments || []).filter(d => d.id !== docId) }
-            : c
-    ));
+  const handleDeleteExtraDocument = async (customerId, docId) => {
+      const customerToUpdate = customers.find(c => c.id === customerId);
+      if (!customerToUpdate || !db || !firebaseUser) return;
+      const updatedDocs = (customerToUpdate.extraDocuments || []).filter(d => d.id !== docId);
+      try {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { extraDocuments: updatedDocs }, { merge: true });
+      } catch (err) { console.error(err); }
   };
 
-const [customers, setCustomers] = useState([]);
+  const [customers, setCustomers] = useState([]);
 
- const handleSaveCustomer = async () => {
-    if (!newCustomer.name) return;
-    
-    let newNo = '';
-    let isUnique = false;
-    while (!isUnique) {
-        newNo = Math.floor(10000 + Math.random() * 90000).toString();
-        if (!customers.some(c => c.customerNo === newNo)) isUnique = true;
-    }
+const handleSaveCustomer = async () => {
+      if (!newCustomer.name) return;
+      let newNo = '';
+      let isUnique = false;
+      while (!isUnique) {
+          newNo = Math.floor(10000 + Math.random() * 90000).toString();
+          if (!customers.some(c => c.customerNo === newNo)) isUnique = true;
+      }
 
-const docPhotoUrl = newCustomer.documentPhotoFile 
-    ? await uploadFileToServer(newCustomer.documentPhotoFile) 
-    : null;
+      const custId = 'cust_' + Date.now();
+      const cust = {
+          id: custId,
+          customerNo: newNo,
+          name: newCustomer.name.toUpperCase(),
+          tc: newCustomer.tc,
+          phone: newCustomer.phone,
+          altPhone: newCustomer.altPhone,
+          address: newCustomer.address,
+          notes: newCustomer.notes,
+          hasProxy: newCustomer.hasProxy,
+          proxyName: newCustomer.hasProxy ? newCustomer.proxyName.toUpperCase() : '',
+          proxyTc: newCustomer.hasProxy ? newCustomer.proxyTc : '',
+          proxyPhone: newCustomer.hasProxy ? newCustomer.proxyPhone : '',
+          proxyAltPhone: newCustomer.hasProxy ? newCustomer.proxyAltPhone : '',
+          proxyAddress: newCustomer.hasProxy ? newCustomer.proxyAddress : '',
+          proxyDocumentPhoto: newCustomer.hasProxy ? newCustomer.proxyDocumentPhoto : null,
+          type: customerType,
+          createdAt: new Date().toLocaleDateString('tr-TR'),
+          invoices: [],
+          documentPhoto: newCustomer.documentPhoto,
+          payments: [], extraDebts: [], ledgerOverrides: []
+      };
 
-const proxyDocUrl = newCustomer.hasProxy && newCustomer.proxyDocumentPhotoFile
-    ? await uploadFileToServer(newCustomer.proxyDocumentPhotoFile)
-    : null;
-
-    const custId = 'cust_' + Date.now();
-    const cust = {
-        id: custId,
-        customerNo: newNo,
-        name: newCustomer.name.toUpperCase(),
-        tc: newCustomer.tc,
-        phone: newCustomer.phone,
-        altPhone: newCustomer.altPhone,
-        address: newCustomer.address,
-        notes: newCustomer.notes,
-        hasProxy: newCustomer.hasProxy,
-        proxyName: newCustomer.hasProxy ? newCustomer.proxyName.toUpperCase() : '',
-        proxyTc: newCustomer.hasProxy ? newCustomer.proxyTc : '',
-        proxyPhone: newCustomer.hasProxy ? newCustomer.proxyPhone : '',
-        proxyAltPhone: newCustomer.hasProxy ? newCustomer.proxyAltPhone : '',
-        proxyAddress: newCustomer.hasProxy ? newCustomer.proxyAddress : '',
-        proxyDocumentPhoto: proxyDocUrl || null,
-        type: customerType,
-        createdAt: new Date().toLocaleDateString('tr-TR'),
-        invoices: [],
-        documentPhoto: docPhotoUrl || null
-    };
-
-    if (db && firebaseUser) {
-        try {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', custId), cust);
-        } catch (e) { console.error("Firebase Kayıt Hatası:", e); }
-    }
-    
-    setNewCustomer({ name: '', tc: '', phone: '', altPhone: '', address: '', notes: '', documentPhoto: null, documentPhotoFile: null, hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null, proxyDocumentPhotoFile: null });
-    setActiveMenu('tum-musteriler');
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', custId), cust);
+          } catch (e) { console.error("Firebase Kayıt Hatası:", e); }
+      }
+      
+      setNewCustomer({ name: '', tc: '', phone: '', altPhone: '', address: '', notes: '', documentPhoto: null, hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null });
+      setActiveMenu('tum-musteriler');
   };
 
 const handleDeleteCustomer = async (customerId) => {
-    const customerToDelete = customers.find(c => c.id === customerId);
+      const customerToDelete = customers.find(c => c.id === customerId);
+      
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)));
+              
+              // Müşterinin odalarını da eşzamanlı olarak boşalt
+              if (customerToDelete) {
+                  const custRooms = rooms.filter(r => r.customerName === customerToDelete.name);
+                  for (const r of custRooms) {
+                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(r.id)), {
+                          customerName: null, phone: null, tc: null, paidMonths: []
+                      }, { merge: true });
+                  }
+              }
+          } catch (e) { console.error("Firebase Silme Hatası:", e); }
+      }
+      setIsDeleteCustomerModalOpen(false);
+      setSelectedCustomerId(null);
+  };
+
+const handleUpdateCustomer = async () => {
+      if (!editCustomerData.name) return;
+      const newName = editCustomerData.name.toUpperCase();
+      const oldCustomer = customers.find(c => c.id === editCustomerData.id);
+      
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(editCustomerData.id)), {
+                  ...editCustomerData,
+                  name: newName
+              }, { merge: true });
+
+              // İsim değiştiyse odalardaki ismi de otomatik güncelle
+              if (oldCustomer && oldCustomer.name !== newName) {
+                  const custRooms = rooms.filter(r => r.customerName === oldCustomer.name);
+                  for (const r of custRooms) {
+                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(r.id)), {
+                          customerName: newName
+                      }, { merge: true });
+                  }
+              }
+          } catch (e) { console.error("Firebase Güncelleme Hatası:", e); }
+      }
+      
+      setIsEditCustomerModalOpen(false);
+      setEditCustomerData(null);
+  };
+
+const handleDeleteLedgerItem = async (txId) => {
+    const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
     
-if (db && firebaseUser) {
+    if (customerToUpdate && db && firebaseUser) {
         try {
-            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)));
-            console.log("Firebase'den silindi:", customerId);
-        } catch (e) { console.error("Firebase Silme Hatası:", e); }
-    }
+            let updatePayload = {};
 
-    setCustomers(customers.filter(c => c.id !== customerId));
-    if (customerToDelete) {
-        setRooms(rooms.map(r => r.customerName === customerToDelete.name ? {
-            ...r, customerName: null, phone: null, tc: null, paidMonths: []
-        } : r));
-    }
-};
+            if (txId.startsWith('debt-extra-')) {
+                const debtId = parseInt(txId.replace('debt-extra-', ''));
+                updatePayload = { extraDebts: (customerToUpdate.extraDebts || []).filter(d => d.id !== debtId) };
+            } else if (txId.startsWith('credit-global-')) {
+                const payId = parseInt(txId.replace('credit-global-', ''));
+                updatePayload = { payments: (customerToUpdate.payments || []).filter(p => p.id !== payId) };
+            } else {
+                updatePayload = { 
+                    ledgerOverrides: [
+                        ...(customerToUpdate.ledgerOverrides || []).filter(o => o.txId !== txId),
+                        { txId, isDeleted: true }
+                    ]
+                };
+            }
 
-  const handleUpdateCustomer = () => {
-    if (!editCustomerData.name) return;
-    const newName = editCustomerData.name.toUpperCase();
-    const oldCustomer = customers.find(c => c.id === editCustomerData.id);
-    
-    setCustomers(customers.map(c => c.id === editCustomerData.id ? { ...c, ...editCustomerData, name: newName } : c));
-    
-    // Eğer müşterinin adı değiştiyse, aktif olarak kiraladığı odalardaki isimleri de güncelle
-    if (oldCustomer && oldCustomer.name !== newName) {
-        setRooms(rooms.map(r => r.customerName === oldCustomer.name ? { ...r, customerName: newName } : r));
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), updatePayload, { merge: true });
+        } catch(e) { console.error("Cari Silme Hatası:", e); }
     }
-    
-    setIsEditCustomerModalOpen(false);
-    setEditCustomerData(null);
   };
 
-  const handleDeleteLedgerItem = (txId) => {
-    setCustomers(customers.map(c => {
-        if (c.id !== selectedCustomerId) return c;
-        
-        if (txId.startsWith('debt-extra-')) {
-            const debtId = parseInt(txId.replace('debt-extra-', ''));
-            return { ...c, extraDebts: (c.extraDebts || []).filter(d => d.id !== debtId) };
-        } else if (txId.startsWith('credit-global-')) {
-            const payId = parseInt(txId.replace('credit-global-', ''));
-            return { ...c, payments: (c.payments || []).filter(p => p.id !== payId) };
-        } else {
-            // Otomatik oluşan oda kiraları/tahsilatları için "Override" (Üstüne Yazma/Geçersiz Kılma) mekanizması
-            return { 
-                ...c, 
-                ledgerOverrides: [
-                    ...(c.ledgerOverrides || []).filter(o => o.txId !== txId),
-                    { txId, isDeleted: true }
-                ]
-            };
-        }
-    }));
-  };
-
-  const handleSaveLedgerEdit = () => {
+const handleSaveLedgerEdit = async () => {
     if (!editingLedgerItem) return;
     const { id: txId, editDate, editDesc, editAmount, isDebt } = editingLedgerItem;
     const newAmount = Number(editAmount);
+    const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
 
-    setCustomers(customers.map(c => {
-        if (c.id !== selectedCustomerId) return c;
+    if (customerToUpdate && db && firebaseUser) {
+        try {
+            let updatePayload = {};
 
-        if (txId.startsWith('debt-extra-')) {
-            const debtId = parseInt(txId.replace('debt-extra-', ''));
-            return { ...c, extraDebts: (c.extraDebts || []).map(d => d.id === debtId ? { ...d, date: editDate, desc: editDesc, amount: newAmount } : d) };
-        } else if (txId.startsWith('credit-global-')) {
-            const payId = parseInt(txId.replace('credit-global-', ''));
-            return { ...c, payments: (c.payments || []).map(p => p.id === payId ? { ...p, date: editDate, note: editDesc, amount: newAmount } : p) };
-        } else {
-            return {
-                ...c,
-                ledgerOverrides: [
-                    ...(c.ledgerOverrides || []).filter(o => o.txId !== txId),
+            if (txId.startsWith('debt-extra-')) {
+                const debtId = parseInt(txId.replace('debt-extra-', ''));
+                const updatedDebts = (customerToUpdate.extraDebts || []).map(d => d.id === debtId ? { ...d, date: editDate, desc: editDesc, amount: newAmount } : d);
+                updatePayload = { extraDebts: updatedDebts };
+            } else if (txId.startsWith('credit-global-')) {
+                const payId = parseInt(txId.replace('credit-global-', ''));
+                const updatedPayments = (customerToUpdate.payments || []).map(p => p.id === payId ? { ...p, date: editDate, note: editDesc, amount: newAmount } : p);
+                updatePayload = { payments: updatedPayments };
+            } else {
+                // Otomatik hesaplanan oda kiralarına müdahale (Override)
+                const updatedOverrides = [
+                    ...(customerToUpdate.ledgerOverrides || []).filter(o => o.txId !== txId),
                     { txId, desc: editDesc, date: editDate, debt: isDebt ? newAmount : 0, credit: !isDebt ? newAmount : 0 }
-                ]
-            };
-        }
-    }));
+                ];
+                updatePayload = { ledgerOverrides: updatedOverrides };
+            }
+
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), updatePayload, { merge: true });
+        } catch(e) { console.error("Cari Düzenleme Kayıt Hatası:", e); }
+    }
     setEditingLedgerItem(null);
   };
 
-  const handleManualAddDebt = () => {
+const handleManualAddDebt = async () => {
     if (!newDebtData.desc || !newDebtData.amount) return;
     const baseAmount = Number(newDebtData.amount);
     const finalAmount = newDebtData.hasKdv ? baseAmount * 1.20 : baseAmount;
@@ -1307,14 +1346,21 @@ if (db && firebaseUser) {
         desc: newDebtData.desc
     };
 
-    setCustomers(customers.map(c => 
-        c.id === selectedCustomerId ? { ...c, extraDebts: [...(c.extraDebts || []), newDebt] } : c
-    ));
+    const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+    if (customerToUpdate && db && firebaseUser) {
+        try {
+            const existingDebts = customerToUpdate.extraDebts || [];
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                extraDebts: [...existingDebts, newDebt]
+            }, { merge: true });
+        } catch(e) { console.error("Manuel Borç Ekleme Hatası:", e); }
+    }
+
     setIsAddDebtModalOpen(false);
     setNewDebtData({ desc: '', amount: '', date: new Date().toISOString().split('T')[0], hasKdv: true });
   };
 
-  const handleManualAddPayment = () => {
+const handleManualAddPayment = async () => {
     if (!newPaymentData.amount) return;
     const newPayment = {
         id: Date.now(),
@@ -1323,15 +1369,23 @@ if (db && firebaseUser) {
         note: newPaymentData.note
     };
 
-    setCustomers(customers.map(c => 
-        c.id === selectedCustomerId ? { ...c, payments: [...(c.payments || []), newPayment] } : c
-    ));
+    const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+    if (customerToUpdate && db && firebaseUser) {
+        try {
+            const existingPayments = customerToUpdate.payments || [];
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                payments: [...existingPayments, newPayment]
+            }, { merge: true });
+        } catch(e) { console.error("Manuel Ödeme Ekleme Hatası:", e); }
+    }
+
     setIsAddPaymentModalOpen(false);
     setNewPaymentData({ amount: '', date: new Date().toISOString().split('T')[0], note: '' });
   };
 
-  const handleSaveCollectionNote = () => {
+const handleSaveCollectionNote = async () => {
       if (!collectionNoteData.customerId || !collectionNoteData.text) return;
+      
       const newNote = {
           id: Date.now(),
           date: new Date().toLocaleDateString('tr-TR'),
@@ -1339,194 +1393,179 @@ if (db && firebaseUser) {
           promiseDate: collectionNoteData.promiseDate
       };
 
-      setCustomers(customers.map(c => 
-          c.id === collectionNoteData.customerId 
-              ? { ...c, collectionNotes: [newNote, ...(c.collectionNotes || [])] } 
-              : c
-      ));
+      const customerToUpdate = customers.find(c => c.id === collectionNoteData.customerId);
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              const existingNotes = customerToUpdate.collectionNotes || [];
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(collectionNoteData.customerId)), {
+                  collectionNotes: [newNote, ...existingNotes]
+              }, { merge: true });
+          } catch(e) { console.error("Firebase Not Ekleme Hatası:", e); }
+      }
 
       setIsCollectionNoteModalOpen(false);
       setCollectionNoteData({ customerId: null, text: '', promiseDate: '' });
+  };
+
+const handleSaveContractSettings = async () => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'contract'), contractSettings);
+              alert("Ayarlar başarıyla Firebase'e kaydedildi!");
+          } catch(e) { console.error("Ayar Kayıt Hatası:", e); }
+      }
+  };
+
+const handleSaveCollectionRates = async () => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'rates'), collectionRates);
+              alert("Tahsilat oranları başarıyla Firebase'e kaydedildi!");
+          } catch(e) { console.error("Oran Kayıt Hatası:", e); }
+      }
+  };
+
+const handleAddInvoice = async () => {
+      if (!newInvoice.date || !newInvoice.file || !selectedCustomerId) return;
+      const inv = { id: Date.now(), ...newInvoice };
+      const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                  invoices: [...(customerToUpdate.invoices || []), inv]
+              }, { merge: true });
+          } catch (e) { console.error("Fatura Ekleme Hatası:", e); }
+      }
+      setNewInvoice({ invoiceNo: '', amount: '', date: new Date().toISOString().split('T')[0], file: null });
+  };
+
+  const handleDeleteInvoice = async (invId) => {
+      const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              const updatedInvoices = (customerToUpdate.invoices || []).filter(i => i.id !== invId);
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                  invoices: updatedInvoices
+              }, { merge: true });
+          } catch (e) { console.error("Fatura Silme Hatası:", e); }
+      }
   };
 
   // --- DEPO LİSTESİ STATE'LERİ ---
   const [isAddWarehouseModalOpen, setIsAddWarehouseModalOpen] = useState(false);
   const [newDepoName, setNewDepoName] = useState('');
   const [newDepoM3, setNewDepoM3] = useState('');
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState(null);
-  const [selectedBlockId, setSelectedBlockId] = useState(null); 
+  
   const [isEditWarehouseModalOpen, setIsEditWarehouseModalOpen] = useState(false);
   const [editWarehouseData, setEditWarehouseData] = useState(null);
-// --- DEPO (ŞUBE) EKLEME VE DÜZENLEME (FİREBASE) ---
+
+  const [warehouses, setWarehouses] = useState([]);
+
   const handleAddWarehouse = async () => {
-    if (!newDepoName) return;
-    const newWarehouse = { id: Date.now(), name: newDepoName, m3: newDepoM3 || 0 };
-    
-    if (db && firebaseUser) {
-        try {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouse.id)), newWarehouse);
-        } catch (e) { console.error("Firebase Depo Kayıt Hatası:", e); }
-    }
-    
-    setIsAddWarehouseModalOpen(false);
-    setNewDepoName(''); setNewDepoM3('');
+      if (!newDepoName) return;
+      const newWarehouse = { id: Date.now(), name: newDepoName, m3: newDepoM3 || 0 };
+      if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouse.id)), newWarehouse);
+      setIsAddWarehouseModalOpen(false); setNewDepoName(''); setNewDepoM3('');
   };
 
   const handleEditWarehouse = async () => {
-    if (!editWarehouseData?.name) return;
-    
-    if (db && firebaseUser) {
-        try {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(editWarehouseData.id)), { name: editWarehouseData.name, m3: editWarehouseData.m3 }, { merge: true });
-        } catch (e) { console.error("Firebase Depo Güncelleme Hatası:", e); }
-    }
-    
-    setIsEditWarehouseModalOpen(false); setEditWarehouseData(null);
+      if (!editWarehouseData?.name) return;
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(editWarehouseData.id)), { name: editWarehouseData.name, m3: editWarehouseData.m3 }, { merge: true });
+          } catch (e) { console.error("Firebase Depo Güncelleme Hatası:", e); }
+      }
+      setIsEditWarehouseModalOpen(false); setEditWarehouseData(null);
   };
 
-// --- BLOK STATE VE FİREBASE İŞLEMLERİ ---
-  const [isEditBlockModalOpen, setIsEditBlockModalOpen] = useState(false);
-  const [editBlockData, setEditBlockData] = useState(null);
+  const moveWarehouseUp = (index, e) => {
+    e.stopPropagation(); if (index === 0) return;
+    const newWarehouses = [...warehouses];
+    const temp = newWarehouses[index - 1];
+    newWarehouses[index - 1] = newWarehouses[index];
+    newWarehouses[index] = temp; setWarehouses(newWarehouses);
+  };
 
-  // --- BLOK EKLEME STATE'LERİ ---
+  const moveWarehouseDown = (index, e) => {
+    e.stopPropagation(); if (index === warehouses.length - 1) return;
+    const newWarehouses = [...warehouses];
+    const temp = newWarehouses[index + 1];
+    newWarehouses[index + 1] = newWarehouses[index];
+    newWarehouses[index] = temp; setWarehouses(newWarehouses);
+  };
+
+  // --- BLOK LİSTESİ STATE'LERİ ---
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState(null);
   const [isAddBlockModalOpen, setIsAddBlockModalOpen] = useState(false);
   const [newBlockName, setNewBlockName] = useState('');
   const [newBlockM3, setNewBlockM3] = useState('');
+  
+  const [blocks, setBlocks] = useState([]);
 
-  // --- ODA EKLEME STATE'LERİ ---
+  const handleAddBlock = async () => {
+      if (!newBlockName || !selectedWarehouseId) return;
+      const newBlock = { id: Date.now(), warehouseId: selectedWarehouseId, name: newBlockName, m3: newBlockM3 || 0 };
+      if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(newBlock.id)), newBlock);
+      setIsAddBlockModalOpen(false); setNewBlockName(''); setNewBlockM3('');
+  };
+
+  const [isEditBlockModalOpen, setIsEditBlockModalOpen] = useState(false);
+  const [editBlockData, setEditBlockData] = useState(null);
+
+  const handleEditBlock = async () => {
+      if (!editBlockData?.name) return;
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(editBlockData.id)), { name: editBlockData.name, m3: editBlockData.m3 }, { merge: true });
+          } catch (e) { console.error("Firebase Blok Güncelleme Hatası:", e); }
+      }
+      setIsEditBlockModalOpen(false); setEditBlockData(null);
+  };
+
+  const moveBlockUp = (index, filteredList, e) => {
+    e.stopPropagation(); if (index === 0) return;
+    const newBlocks = [...blocks];
+    const id1 = filteredList[index - 1].id; const id2 = filteredList[index].id;
+    const idx1 = newBlocks.findIndex(b => b.id === id1); const idx2 = newBlocks.findIndex(b => b.id === id2);
+    const temp = newBlocks[idx1]; newBlocks[idx1] = newBlocks[idx2]; newBlocks[idx2] = temp;
+    setBlocks(newBlocks);
+  };
+
+  const moveBlockDown = (index, filteredList, e) => {
+    e.stopPropagation(); if (index === filteredList.length - 1) return;
+    const newBlocks = [...blocks];
+    const id1 = filteredList[index].id; const id2 = filteredList[index + 1].id;
+    const idx1 = newBlocks.findIndex(b => b.id === id1); const idx2 = newBlocks.findIndex(b => b.id === id2);
+    const temp = newBlocks[idx1]; newBlocks[idx1] = newBlocks[idx2]; newBlocks[idx2] = temp;
+    setBlocks(newBlocks);
+  };
+
+  // --- ODA LİSTESİ STATE'LERİ ---
+  const [selectedBlockId, setSelectedBlockId] = useState(null);
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [newRoomM3, setNewRoomM3] = useState('');
 
-  const handleAddBlock = async () => {
-    if (!newBlockName || !selectedWarehouseId) return;
-    const newBlock = { id: Date.now(), warehouseId: selectedWarehouseId, name: newBlockName, m3: newBlockM3 || 0 };
-    
-    if (db && firebaseUser) {
-        try {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(newBlock.id)), newBlock);
-        } catch (e) { console.error("Firebase Blok Kayıt Hatası:", e); }
-    }
-    
-    setIsAddBlockModalOpen(false); setNewBlockName(''); setNewBlockM3('');
-  };
-
-  const handleEditBlock = async () => {
-    if (!editBlockData?.name) return;
-    
-    if (db && firebaseUser) {
-        try {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(editBlockData.id)), { name: editBlockData.name, m3: editBlockData.m3 }, { merge: true });
-        } catch (e) { console.error("Firebase Blok Güncelleme Hatası:", e); }
-    }
-    
-    setIsEditBlockModalOpen(false); setEditBlockData(null);
-  };
-
-  const [warehouses, setWarehouses] = useState([]);
-  const [blocks, setBlocks] = useState([]);
   const [rooms, setRooms] = useState([]);
 
-  // --- VERİ AKTARIM FONKSİYONU ---
-  const handleMigrateDataToFirebase = async () => {
-      if (!db || !firebaseUser) return alert("Firebase bağlantısı bekleniyor...");
-      
-      try {
-          // 1. Depoları Aktar
-          for (const w of warehouses) {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(w.id)), w);
-          }
-          // 2. Blokları Aktar
-          for (const b of blocks) {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(b.id)), b);
-          }
-          // 3. Odaları Aktar (Bu biraz uzun sürebilir)
-          for (const r of rooms) {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(r.id)), r);
-          }
-          alert("Tüm veriler başarıyla Firebase'e kopyalandı! Artık sabit kodları silebilirsiniz.");
-      } catch (error) {
-          console.error("Aktarım hatası:", error);
-      }
-  };
-  // ---------------------------------
-
-  // --- ODA EKLEME VE DÜZENLEME (FİREBASE) ---
   const handleAddRoom = async () => {
-    if (!newRoomName || !selectedBlockId) return;
-    const newRoom = { id: Date.now(), blockId: selectedBlockId, name: newRoomName, customerName: null, m3: newRoomM3 || 0, isReserved: false, paidMonths: [] };
-    
-    if (db && firebaseUser) {
-        try {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), newRoom);
-        } catch (e) { console.error("Firebase Oda Kayıt Hatası:", e); }
-    }
-    
-    setIsAddRoomModalOpen(false); setNewRoomName(''); setNewRoomM3('');
+      if (!newRoomName || !selectedBlockId) return;
+      const newRoom = { id: Date.now(), blockId: selectedBlockId, name: newRoomName, customerName: null, m3: newRoomM3 || 0, isReserved: false, paidMonths: [] };
+      if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), newRoom);
+      setIsAddRoomModalOpen(false); setNewRoomName(''); setNewRoomM3('');
   };
 
   const [isEditRoomModalOpen, setIsEditRoomModalOpen] = useState(false);
   const [editRoomData, setEditRoomData] = useState(null);
 
   const handleEditRoom = async () => {
-    if (!editRoomData?.name) return;
-    
-    if (db && firebaseUser) {
-        try {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(editRoomData.id)), { name: editRoomData.name, m3: editRoomData.m3 }, { merge: true });
-        } catch (e) { console.error("Firebase Oda Güncelleme Hatası:", e); }
-    }
-    
-    setIsEditRoomModalOpen(false); setEditRoomData(null);
-  };
-
-// --- DEPO VE BLOK SIRALAMA FONKSİYONLARI ---
-  const moveWarehouseUp = (index, e) => {
-    e.stopPropagation();
-    if (index === 0) return;
-    const newWarehouses = [...warehouses];
-    const temp = newWarehouses[index - 1];
-    newWarehouses[index - 1] = newWarehouses[index];
-    newWarehouses[index] = temp;
-    setWarehouses(newWarehouses);
-  };
-
-  const moveWarehouseDown = (index, e) => {
-    e.stopPropagation();
-    if (index === warehouses.length - 1) return;
-    const newWarehouses = [...warehouses];
-    const temp = newWarehouses[index + 1];
-    newWarehouses[index + 1] = newWarehouses[index];
-    newWarehouses[index] = temp;
-    setWarehouses(newWarehouses);
-  };
-
-  const moveBlockUp = (index, filteredList, e) => {
-    e.stopPropagation(); 
-    if (index === 0) return;
-    const newBlocks = [...blocks];
-    const id1 = filteredList[index - 1].id; 
-    const id2 = filteredList[index].id;
-    const idx1 = newBlocks.findIndex(b => b.id === id1); 
-    const idx2 = newBlocks.findIndex(b => b.id === id2);
-    const temp = newBlocks[idx1];
-    newBlocks[idx1] = newBlocks[idx2]; 
-    newBlocks[idx2] = temp; 
-    setBlocks(newBlocks);
-  };
-
-  const moveBlockDown = (index, filteredList, e) => {
-    e.stopPropagation();
-    if (index === filteredList.length - 1) return;
-    const newBlocks = [...blocks];
-    const id1 = filteredList[index].id;
-    const id2 = filteredList[index + 1].id;
-    const idx1 = newBlocks.findIndex(b => b.id === id1);
-    const idx2 = newBlocks.findIndex(b => b.id === id2);
-    const temp = newBlocks[idx1]; 
-    newBlocks[idx1] = newBlocks[idx2]; 
-    newBlocks[idx2] = temp; 
-    setBlocks(newBlocks);
+      if (!editRoomData?.name) return;
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(editRoomData.id)), { name: editRoomData.name, m3: editRoomData.m3 }, { merge: true });
+          } catch (e) { console.error("Firebase Oda Güncelleme Hatası:", e); }
+      }
+      setIsEditRoomModalOpen(false); setEditRoomData(null);
   };
 
   const moveRoomUp = (index, filteredList, e) => {
@@ -1548,6 +1587,17 @@ if (db && firebaseUser) {
   // --- ODA DETAY MODALLARI ---
   const [selectedRoomId, setSelectedRoomId] = useState(null);
   const [detailYear, setDetailYear] = useState(2026);
+
+  const [activeSizeFilter, setActiveSizeFilter] = useState(null);
+  const [isSizeFilterDropdownOpen, setIsSizeFilterDropdownOpen] = useState(false);
+  const sizeFilters = [
+      { id: '1+0', label: '1+0 (0 - 12 m³)', min: 0, max: 12 },
+      { id: '1+1', label: '1+1 (13 - 18 m³)', min: 13, max: 18 },
+      { id: '2+1', label: '2+1 (19 - 27 m³)', min: 19, max: 27 },
+      { id: '3+1', label: '3+1 (28 - 37 m³)', min: 28, max: 37 },
+      { id: '4+1', label: '4+1 (38 - 45 m³)', min: 38, max: 45 }
+  ];
+
   const [isEndRentModalOpen, setIsEndRentModalOpen] = useState(false);
   const [endRentData, setEndRentData] = useState({ exitDate: new Date().toISOString().split('T')[0], photo: null });
   
@@ -1557,6 +1607,12 @@ if (db && firebaseUser) {
   const [increasePercentage, setIncreasePercentage] = useState('');
   const [newRentAmount, setNewRentAmount] = useState('');
   
+  const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
+  const [pastIncreaseData, setPastIncreaseData] = useState({ date: new Date().toISOString().split('T')[0], amount: '' });
+
+  const [isEditSpecificMonthModalOpen, setIsEditSpecificMonthModalOpen] = useState(false);
+  const [specificMonthEditData, setSpecificMonthEditData] = useState(null);
+
   const [isChangeRoomModalOpen, setIsChangeRoomModalOpen] = useState(false);
   const [changeRoomWarehouseId, setChangeRoomWarehouseId] = useState('');
   const [changeRoomBlockId, setChangeRoomBlockId] = useState('');
@@ -1578,75 +1634,117 @@ if (db && firebaseUser) {
   const [isEntryExitModalOpen, setIsEntryExitModalOpen] = useState(false);
   const [entryExitData, setEntryExitData] = useState({ newSealNo: '', protocolPhoto: null, finalPhoto: null });
 
-  const handleEntryExitSave = () => {
-    if (!entryExitData.newSealNo) return;
-    
-    const sealFeeTotal = Number(collectionRates.sealFee) * 1.20; // Girilen mühür ücreti + %20 KDV
-    
-    setCustomers(customers.map(c => {
-      if (c.name === selectedRoomDetail.customerName) {
-        const newDebt = {
-          id: Date.now(),
-          type: 'seal_fee',
-          date: new Date().toISOString().split('T')[0],
-          amount: sealFeeTotal,
-          hasKdv: true,
-          desc: `Giriş-Çıkış Yeni Mühür Ücreti`
-        };
-        return { ...c, extraDebts: [...(c.extraDebts || []), newDebt] };
-      }
-      return c;
-    }));
+const handleEntryExitSave = async () => {
+      if (!entryExitData.newSealNo) return;
+      
+      const sealFeeTotal = Number(collectionRates.sealFee) * 1.20; // Mühür ücreti + %20 KDV
+      const customerToUpdate = customers.find(c => c.name === selectedRoomDetail.customerName);
+      const roomToUpdate = rooms.find(r => r.id === selectedRoomId);
 
-    setRooms(rooms.map(r => {
-      if (r.id === selectedRoomId) {
-        const newHistoryItem = {
-          id: Date.now(),
-          date: new Date().toLocaleDateString('tr-TR'),
-          sealNo: entryExitData.newSealNo,
-          protocolPhoto: entryExitData.protocolPhoto,
-          finalPhoto: entryExitData.finalPhoto
-        };
-        return {
-          ...r,
-          sealNo: entryExitData.newSealNo,
-          protocolPhoto: entryExitData.protocolPhoto,
-          finalPhoto: entryExitData.finalPhoto,
-          entryExitHistory: [newHistoryItem, ...(r.entryExitHistory || [])]
-        };
-      }
-      return r;
-    }));
+      if (db && firebaseUser) {
+          try {
+              // 1. Müşteri Carisine Mühür Ücreti Ekle
+              if (customerToUpdate) {
+                  const newDebt = {
+                      id: Date.now(),
+                      type: 'seal_fee',
+                      date: new Date().toISOString().split('T')[0],
+                      amount: sealFeeTotal,
+                      hasKdv: true,
+                      desc: `Giriş-Çıkış Yeni Mühür Ücreti`
+                  };
+                  const existingDebts = customerToUpdate.extraDebts || [];
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                      extraDebts: [...existingDebts, newDebt]
+                  }, { merge: true });
+              }
 
-    setIsEntryExitModalOpen(false);
-    setEntryExitData({ newSealNo: '', protocolPhoto: null, finalPhoto: null });
+              // 2. Oda Bilgilerini Güncelle (Mühür ve Arşiv)
+              if (roomToUpdate) {
+                  const newHistoryItem = {
+                      id: Date.now(),
+                      date: new Date().toLocaleDateString('tr-TR'),
+                      sealNo: entryExitData.newSealNo,
+                      protocolPhoto: entryExitData.protocolPhoto,
+                      finalPhoto: entryExitData.finalPhoto
+                  };
+                  const existingHistory = roomToUpdate.entryExitHistory || [];
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                      sealNo: entryExitData.newSealNo,
+                      protocolPhoto: entryExitData.protocolPhoto,
+                      finalPhoto: entryExitData.finalPhoto,
+                      entryExitHistory: [newHistoryItem, ...existingHistory]
+                  }, { merge: true });
+              }
+          } catch(e) { console.error("Firebase Giriş Çıkış Hatası:", e); }
+      }
+
+      setIsEntryExitModalOpen(false);
+      setEntryExitData({ newSealNo: '', protocolPhoto: null, finalPhoto: null });
   };
 
-  const handleSetGiftMonths = (months) => {
-      setRooms(rooms.map(r => r.id === selectedRoomId ? { ...r, giftMonths: months } : r));
+ const handleSetGiftMonths = async (months) => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { giftMonths: months }, { merge: true });
+          } catch(e) { console.error("Firebase Hediye Ay Hatası:", e); }
+      }
       setIsGiftModalOpen(false);
   };
 
-  const handleSetFreeRoom = () => {
+  const handleSetFreeRoom = async () => {
       if (!freeRoomReasonInput) return;
-      setRooms(rooms.map(r => r.id === selectedRoomId ? { ...r, isFreeRoom: true, freeRoomReason: freeRoomReasonInput } : r));
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { isFreeRoom: true, freeRoomReason: freeRoomReasonInput }, { merge: true });
+          } catch(e) { console.error("Firebase Ücretsiz Oda Hatası:", e); }
+      }
       setIsFreeRoomModalOpen(false);
       setFreeRoomReasonInput('');
   };
 
-  const handleRemoveFreeRoom = () => {
-      setRooms(rooms.map(r => r.id === selectedRoomId ? { ...r, isFreeRoom: false, freeRoomReason: null } : r));
+  const handleRemoveFreeRoom = async () => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { isFreeRoom: false, freeRoomReason: null }, { merge: true });
+          } catch(e) { console.error("Firebase Ücretsiz Oda Kaldırma Hatası:", e); }
+      }
   };
 
   // --- YENİ REZERVE STATE'LERİ ---
   const [isReserveRoomModalOpen, setIsReserveRoomModalOpen] = useState(false);
   const [reserveData, setReserveData] = useState({ name: '', phone: '', days: 10 });
 
-  const handleReserveRoom = () => {
+const handleReserveRoom = async () => {
     if (!reserveData.name || !reserveData.phone) return;
-    const today = new Date(); const expiryDate = new Date(today); expiryDate.setDate(expiryDate.getDate() + parseInt(reserveData.days));
-    setRooms(rooms.map(r => r.id === selectedRoomId ? { ...r, isReserved: true, reservedName: reserveData.name, reservedPhone: reserveData.phone, reserveExpiry: expiryDate.toLocaleDateString('tr-TR'), reserveExpiryTimestamp: expiryDate.getTime() } : r));
-    setIsReserveRoomModalOpen(false); setReserveData({ name: '', phone: '', days: 10 });
+    const today = new Date();
+    const expiryDate = new Date(today); 
+    expiryDate.setDate(expiryDate.getDate() + parseInt(reserveData.days));
+    
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                isReserved: true, 
+                reservedName: reserveData.name, 
+                reservedPhone: reserveData.phone, 
+                reserveExpiry: expiryDate.toLocaleDateString('tr-TR'), 
+                reserveExpiryTimestamp: expiryDate.getTime()
+            }, { merge: true });
+        } catch(e) { console.error("Firebase Rezerve Hatası:", e); }
+    }
+    
+    setIsReserveRoomModalOpen(false); 
+    setReserveData({ name: '', phone: '', days: 10 });
+  };
+
+const handleCancelReservation = async () => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                  isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null
+              }, { merge: true });
+          } catch(e) { console.error("Rezerve İptal Hatası:", e); }
+      }
   };
 
   // --- YENİ KİRALAMA VE ÖDEME STATE'LERİ ---
@@ -1663,6 +1761,10 @@ if (db && firebaseUser) {
   const [paymentEntryMode, setPaymentEntryMode] = useState('single'); // 'single' | 'bulk'
   const [bulkProcessResult, setBulkProcessResult] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+
+  // --- YENİ EKLENEN: TOPLU MÜŞTERİ İÇE AKTARMA STATE'LERİ ---
+  const [isCustomerUploading, setIsCustomerUploading] = useState(false);
+  const [customerImportResult, setCustomerImportResult] = useState(null);
 
   const handleBulkFileUpload = async (e) => {
       const file = e.target.files[0];
@@ -1697,7 +1799,7 @@ if (db && firebaseUser) {
       e.target.value = ''; // Input'u temizle
   };
 
-  const processBulkData = (rows) => {
+  const processBulkData = async (rows) => {
       if (!rows || rows.length <= 1) {
           alert("Dosya boş veya geçersiz format.");
           return;
@@ -1817,200 +1919,383 @@ if (db && firebaseUser) {
           }
       }
 
-      if (Object.keys(customersUpdates).length > 0) {
-          setCustomers(prev => prev.map(c => {
-              if (customersUpdates[c.id]) {
-                  return { ...c, payments: [...(c.payments || []), ...customersUpdates[c.id]] };
+  if (Object.keys(customersUpdates).length > 0 && db && firebaseUser) {
+          for (const cId of Object.keys(customersUpdates)) {
+              const customerToUpdate = customers.find(c => String(c.id) === String(cId));
+              if (customerToUpdate) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cId)), {
+                      payments: [...(customerToUpdate.payments || []), ...customersUpdates[cId]]
+                  }, { merge: true });
               }
-              return c;
-          }));
+          }
       }
 
-      if (unmatchedCount > 0) {
-          setPendingCollections(newPendingCollections);
+      if (unmatchedCount > 0 && db && firebaseUser) {
+          for (const pending of newPendingCollections) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)), pending, { merge: true });
+          }
       }
 
-      setBulkProcessResult({
-          matchedCount,
-          unmatchedCount,
-          totalMatchedAmount,
-          totalUnmatchedAmount,
-          addedPaymentIds,
-          addedPendingIds
-      });
-  };
-
-  const handleUndoBulkProcess = () => {
+  const handleUndoBulkProcess = async () => {
       if (!bulkProcessResult) return;
-      
       const { addedPaymentIds, addedPendingIds } = bulkProcessResult;
       
-      // Carilere işlenen ödemeleri geri al
-      if (addedPaymentIds && addedPaymentIds.length > 0) {
-          setCustomers(prev => prev.map(c => ({
-              ...c,
-              payments: (c.payments || []).filter(p => !addedPaymentIds.includes(p.id))
-          })));
+      if (addedPaymentIds && addedPaymentIds.length > 0 && db && firebaseUser) {
+          for (const c of customers) {
+              const hasAddedPayment = c.payments?.some(p => addedPaymentIds.includes(p.id));
+              if (hasAddedPayment) {
+                  const cleanedPayments = c.payments.filter(p => !addedPaymentIds.includes(p.id));
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(c.id)), { payments: cleanedPayments }, { merge: true });
+              }
+          }
       }
       
-      // Askıya düşen ödemeleri geri al
-      if (addedPendingIds && addedPendingIds.length > 0) {
-          setPendingCollections(prev => prev.filter(p => !addedPendingIds.includes(p.id)));
+      if (addedPendingIds && addedPendingIds.length > 0 && db && firebaseUser) {
+          for (const pId of addedPendingIds) {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pId)));
+          }
       }
-      
-      // Sonuç ekranını kapat
       setBulkProcessResult(null);
   };
 
-// --- ODAYI KİRALA (FİREBASE) ---
-  const handleRentRoom = async () => {
-    if (!rentData.customerName || !rentData.monthlyFee) return;
+  const handleBulkCustomerUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
 
-    // Gün Farkı (Kıstelyevm) Bedeli Hesaplaması
-    let proratedDebtAmount = 0;
-    const eDate = new Date(rentData.entryDate);
-    const pDate = new Date(rentData.paymentDate);
-    const timeDiff = pDate.getTime() - eDate.getTime();
-    const dayDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
-    
-    if (dayDiff > 0) {
-      let dailyRate = Number(rentData.monthlyFee) / 30;
-      proratedDebtAmount = dailyRate * dayDiff;
-      if (rentData.hasKdv) proratedDebtAmount = proratedDebtAmount * 1.20;
-    }
+      setIsCustomerUploading(true);
 
-    // Nakliye Bedeli Cari Hesaplaması
-    let transportDebtAmount = 0;
-    if (rentData.broughtBy === 'sembol' && rentData.transportPrice) {
-      transportDebtAmount = Number(rentData.transportPrice);
-      if (rentData.transportHasKdv) {
-        transportDebtAmount = transportDebtAmount * 1.20;
+      try {
+          await loadXLSXLibrary();
+const reader = new FileReader();
+          reader.onload = async (event) => {
+              try {
+                  const data = new Uint8Array(event.target.result);
+                  // Excel'deki tarihleri düzgün alabilmek için cellDates: true
+                  const workbook = window.XLSX.read(data, { type: 'array', cellDates: true });
+                  const firstSheetName = workbook.SheetNames[0];
+                  const worksheet = workbook.Sheets[firstSheetName];
+                  const rows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                  
+                  let importedCustomerCount = 0;
+                  let updatedRoomCount = 0;
+
+                  const newCustomers = [];
+                  const roomUpdates = {};
+
+                  // Satırları tarama (1. satırın başlık olduğu varsayılır, bu yüzden i=1)
+                  for (let i = 1; i < rows.length; i++) {
+                      const row = rows[i];
+                      if (!row || row.length === 0) continue;
+
+                      let nameRaw = '';
+                      let phoneRaw = '';
+                      let roomsRaw = [];
+                      let validDate = new Date().toISOString().split('T')[0];
+                      let maxRent = 0;
+
+                      for (let j = 0; j < row.length; j++) {
+                          const cell = row[j];
+                          if (cell === undefined || cell === null || cell === '') continue;
+
+                          // 1. Tarih Kontrolü (Date Objesi)
+                          if (cell instanceof Date) {
+                              validDate = cell.toISOString().split('T')[0];
+                              continue;
+                          }
+
+                          const cellStr = String(cell).trim();
+                          const cellUpper = cellStr.toUpperCase();
+
+                          // 2. Oda Kontrolü (Olası boşluk ve tireleri temizleyerek eşleştirme)
+                          const possibleRooms = cellUpper.split(/[,/]/).map(s => s.trim());
+                          let foundRoomInCell = false;
+                          possibleRooms.forEach(pr => {
+                              const matchedRoom = rooms.find(r => r.name.toUpperCase().replace(/[\s-]/g, '') === pr.replace(/[\s-]/g, ''));
+                              if (matchedRoom) {
+                                  if (!roomsRaw.includes(matchedRoom.name)) roomsRaw.push(matchedRoom.name);
+                                  foundRoomInCell = true;
+                              }
+                          });
+                          if (foundRoomInCell) continue;
+
+                          // Tarih Kontrolü (String formatında - DD.MM.YYYY)
+                          const trDateMatch = cellStr.match(/^(\d{2})[./-](\d{2})[./-](\d{4})/);
+                          if (trDateMatch) {
+                              validDate = `${trDateMatch[3]}-${trDateMatch[2]}-${trDateMatch[1]}`;
+                              continue;
+                          }
+
+                          // 3. Telefon / Müşteri No Kontrolü (10-13 Haneli)
+                          const numericOnly = cellStr.replace(/\D/g, '');
+                          if (numericOnly.length >= 10 && numericOnly.length <= 13 && (numericOnly.startsWith('5') || numericOnly.startsWith('05') || numericOnly.startsWith('905'))) {
+                              if (!phoneRaw) phoneRaw = numericOnly;
+                              continue;
+                          }
+
+                          // 4. Kira Tutarı (Dört Haneli ve Üzeri Rakamların En Büyüğü)
+                          if (typeof cell === 'number') {
+                              if (cell >= 1000 && cell <= 999999) {
+                                  if (cell > maxRent) maxRent = cell;
+                              }
+                              continue;
+                          } else {
+                              const numVal = parseFloat(cellStr.replace(/,/g, '.').replace(/[^\d.-]/g, ''));
+                              if (!isNaN(numVal) && numVal >= 1000 && numVal <= 999999) {
+                                  if (numVal > maxRent) maxRent = numVal;
+                                  continue;
+                              }
+                          }
+
+                          // 5. Ad Soyad Kontrolü (Harf barındıran en olası string)
+                          if (cellStr.match(/[A-Za-zÇĞİÖŞÜçğıöşü]/) && cellStr.length > 3 && !nameRaw) {
+                              // Rastgele oda kodlarına benzemiyorsa isimdir
+                              if (!cellUpper.match(/^[A-Z]\s*[-_]?\s*\d{1,4}$/)) {
+                                  nameRaw = cellUpper;
+                              }
+                          }
+                      }
+
+                      if (!nameRaw && roomsRaw.length === 0) continue; // Geçersiz veya boş satır
+
+                      // Exceldeki Telefon Numarası = Sistemdeki Müşteri Numarası Yapılır
+                      let customerNo = phoneRaw || Math.floor(10000 + Math.random() * 90000).toString();
+                      
+                      let existingCust = customers.find(c => (phoneRaw && c.phone === phoneRaw) || c.name === nameRaw) || newCustomers.find(c => (phoneRaw && c.phone === phoneRaw) || c.name === nameRaw);
+
+                      if (!existingCust && nameRaw) {
+                          existingCust = {
+                              id: Date.now() + Math.random(),
+                              customerNo: customerNo,
+                              name: nameRaw,
+                              tc: '',
+                              phone: phoneRaw,
+                              altPhone: '', address: '', notes: 'Excel ile otomatik aktarıldı.',
+                              hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null,
+                              type: 'bireysel',
+                              createdAt: new Date().toLocaleDateString('tr-TR'),
+                              invoices: [], documentPhoto: null, payments: [], extraDebts: [], ledgerOverrides: []
+                          };
+                          newCustomers.push(existingCust);
+                          importedCustomerCount++;
+                      }
+
+                      // Müşterinin odalarını eşleştirip kiralamayı başlat
+                      if (roomsRaw.length > 0 && existingCust) {
+                          roomsRaw.forEach(rName => {
+                              roomUpdates[rName] = {
+                                  customerName: existingCust.name,
+                                  entryDate: validDate,
+                                  paymentDate: validDate,
+                                  monthlyFee: maxRent > 0 ? maxRent : 0, // En büyük sayıyı kiraya aktar
+                                  hasKdv: true, // Varsayılan KDV ile
+                                  paidMonths: []
+                              };
+                              updatedRoomCount++;
+                          });
+                      }
+                  }
+
+      if (newCustomers.length > 0 && db && firebaseUser) {
+                      for (const cust of newCustomers) {
+                          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), cust);
+                      }
+                  }
+
+                  if (Object.keys(roomUpdates).length > 0 && db && firebaseUser) {
+                      for (const rName of Object.keys(roomUpdates)) {
+                          const roomToUpdate = rooms.find(r => r.name === rName);
+                          if (roomToUpdate) {
+                              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomToUpdate.id)), roomUpdates[rName], { merge: true });
+                          }
+                      }
+                  }
+
+                  setCustomerImportResult({ importedCustomerCount, updatedRoomCount });
+
+              } catch (err) {
+                  console.error(err);
+                  alert("Dosya okunurken bir hata oluştu. Lütfen formatı kontrol edin.");
+              } finally {
+                  setIsCustomerUploading(false);
+              }
+          };
+          reader.readAsArrayBuffer(file);
+      } catch (error) {
+          alert("Excel kütüphanesi yüklenirken bir hata oluştu.");
+          setIsCustomerUploading(false);
       }
-    }
-
-    // FIREBASE 1: Müşterinin Cari Hesabını Güncelle (Nakliye ve Gün Farkı varsa)
-    const customerToUpdate = customers.find(c => c.name === rentData.customerName);
-    if (customerToUpdate && (transportDebtAmount > 0 || proratedDebtAmount > 0)) {
-        let existingDebts = customerToUpdate.extraDebts || [];
-        let existingPayments = customerToUpdate.payments || []; 
-        
-        if (transportDebtAmount > 0) {
-            const hasSameDayTransport = existingDebts.some(d => d.type === 'transport' && d.date === rentData.entryDate);
-            if (!hasSameDayTransport) {
-                existingDebts = [...existingDebts, { id: Date.now() + 1, type: 'transport', date: rentData.entryDate, amount: transportDebtAmount, desc: 'Sembol Nakliyat Taşıma / Nakliye Bedeli' }];
-                existingPayments = [...existingPayments, { id: Date.now() + 3, amount: transportDebtAmount, date: rentData.entryDate, note: 'Sembol Nakliyat Taşıma / Nakliye Bedeli Tahsilatı (Otomatik)' }];
-            }
-        }
-
-        if (proratedDebtAmount > 0) {
-            existingDebts = [...existingDebts, { id: Date.now() + 2, type: 'prorated', date: rentData.entryDate, amount: proratedDebtAmount, desc: `Gün Farkı Bedeli (${dayDiff} Gün)` }];
-        }
-
-        if (db && firebaseUser) {
-            try {
-                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
-                    extraDebts: existingDebts,
-                    payments: existingPayments
-                }, { merge: true });
-            } catch(e) { console.error("Firebase Cari Güncelleme Hatası:", e); }
-        }
-    }
-
-    // FIREBASE 2: Oda Bilgilerini Güncelle
-    const roomUpdates = {
-      customerName: rentData.customerName, 
-      entryDate: rentData.entryDate, 
-      paymentDate: rentData.paymentDate, 
-      monthlyFee: rentData.monthlyFee, 
-      hasKdv: rentData.hasKdv, 
-      sealNo: rentData.sealNo,
-      broughtBy: rentData.broughtBy,
-      teamList: rentData.teamList,
-      hasDamage: rentData.hasDamage,
-      damageDescription: rentData.damageDescription,
-      transportPrice: rentData.transportPrice,
-      transportHasKdv: rentData.transportHasKdv,
-      entryPhoto: rentData.entryPhoto,
-      paidMonths: [] 
-    };
-
-    if (db && firebaseUser) {
-        try {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), roomUpdates, { merge: true });
-        } catch(e) { console.error("Firebase Kiralama Hatası:", e); }
-    }
-
-    setIsRentRoomModalOpen(false); setIsRentSuccessModalOpen(true);
-    setRentData({ customerName: '', entryDate: new Date().toISOString().split('T')[0], paymentDate: new Date().toISOString().split('T')[0], monthlyFee: '', hasKdv: true, sealNo: '', broughtBy: 'kendisi', teamList: '', hasDamage: false, damageDescription: '', transportPrice: '', transportHasKdv: false, entryPhoto: null });
-    setRentCustomerSearch('');
+      e.target.value = '';
   };
 
-  const handleGlobalPayment = () => {
+const handleRentRoom = async () => {
+      if (!rentData.customerName || !rentData.monthlyFee) return;
+
+      // 1. Gün Farkı (Kıstelyevm) Bedeli Hesaplaması
+      let proratedDebtAmount = 0;
+      const eDate = new Date(rentData.entryDate);
+      const pDate = new Date(rentData.paymentDate);
+      const timeDiff = pDate.getTime() - eDate.getTime();
+      const dayDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+      
+      if (dayDiff > 0) {
+          let dailyRate = Number(rentData.monthlyFee) / 30;
+          proratedDebtAmount = dailyRate * dayDiff;
+          if (rentData.hasKdv) proratedDebtAmount = proratedDebtAmount * 1.20;
+      }
+
+      // 2. Nakliye Bedeli Cari Hesaplaması
+      let transportDebtAmount = 0;
+      if (rentData.broughtBy === 'sembol' && rentData.transportPrice) {
+          transportDebtAmount = Number(rentData.transportPrice);
+          if (rentData.transportHasKdv) {
+              transportDebtAmount = transportDebtAmount * 1.20;
+          }
+      }
+
+      // 3. FİREBASE CARİ HESAP GÜNCELLEMESİ (Müşteri)
+      const customerToUpdate = customers.find(c => c.name === rentData.customerName);
+      if (customerToUpdate && (transportDebtAmount > 0 || proratedDebtAmount > 0)) {
+          let existingDebts = customerToUpdate.extraDebts || [];
+          let existingPayments = customerToUpdate.payments || []; 
+          
+          if (transportDebtAmount > 0) {
+              const hasSameDayTransport = existingDebts.some(d => d.type === 'transport' && d.date === rentData.entryDate);
+              if (!hasSameDayTransport) {
+                  existingDebts = [...existingDebts, { id: Date.now() + 1, type: 'transport', date: rentData.entryDate, amount: transportDebtAmount, desc: 'Sembol Nakliyat Taşıma Bedeli' }];
+                  existingPayments = [...existingPayments, { id: Date.now() + 3, amount: transportDebtAmount, date: rentData.entryDate, note: 'Sembol Nakliyat Taşıma Tahsilatı (Otomatik)' }];
+              }
+          }
+          if (proratedDebtAmount > 0) {
+              existingDebts = [...existingDebts, { id: Date.now() + 2, type: 'prorated', date: rentData.entryDate, amount: proratedDebtAmount, desc: `Gün Farkı Bedeli (${dayDiff} Gün)` }];
+          }
+
+          if (db && firebaseUser) {
+              try {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                      extraDebts: existingDebts,
+                      payments: existingPayments
+                  }, { merge: true });
+              } catch(e) { console.error("Firebase Cari Güncelleme Hatası:", e); }
+          }
+      }
+
+      // 4. FİREBASE ODA GÜNCELLEMESİ
+      const roomUpdates = {
+          customerName: rentData.customerName, 
+          entryDate: rentData.entryDate, 
+          paymentDate: rentData.paymentDate, 
+          monthlyFee: rentData.monthlyFee, 
+          hasKdv: rentData.hasKdv, 
+          sealNo: rentData.sealNo,
+          broughtBy: rentData.broughtBy,
+          teamList: rentData.teamList,
+          hasDamage: rentData.hasDamage,
+          damageDescription: rentData.damageDescription,
+          transportPrice: rentData.transportPrice,
+          transportHasKdv: rentData.transportHasKdv,
+          entryPhoto: rentData.entryPhoto,
+          paidMonths: [],
+          isReserved: false, // Varsa rezerveyi iptal et
+          reservedName: null,
+          reservedPhone: null,
+          reserveExpiry: null,
+          reserveExpiryTimestamp: null
+      };
+
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), roomUpdates, { merge: true });
+          } catch(e) { console.error("Firebase Oda Kiralama Hatası:", e); }
+      }
+
+      // 5. EKRAN DURUMLARINI SIFIRLAMA
+      setIsRentRoomModalOpen(false); 
+      setIsRentSuccessModalOpen(true);
+      setRentData({ customerName: '', entryDate: new Date().toISOString().split('T')[0], paymentDate: new Date().toISOString().split('T')[0], monthlyFee: '', hasKdv: true, sealNo: '', broughtBy: 'kendisi', teamList: '', hasDamage: false, damageDescription: '', transportPrice: '', transportHasKdv: false, entryPhoto: null });
+      setRentCustomerSearch('');
+  };
+
+const handleGlobalPayment = async () => {
     if (!globalPaymentData.customerId || !globalPaymentData.amount) return;
 
-    if (globalPaymentData.customerId === 'askida') {
-        const newPending = {
-            id: Date.now(),
-            amount: Number(globalPaymentData.amount),
-            date: globalPaymentData.date,
-            note: globalPaymentData.note
-        };
-        setPendingCollections([newPending, ...pendingCollections]);
-    } else {
-        const newPayment = {
-            id: Date.now(),
-            amount: Number(globalPaymentData.amount),
-            date: globalPaymentData.date,
-            note: globalPaymentData.note
-        };
+    const paymentId = Date.now();
+    const newPayment = {
+        id: paymentId,
+        amount: Number(globalPaymentData.amount),
+        date: globalPaymentData.date,
+        note: globalPaymentData.note
+    };
 
-        setCustomers(customers.map(c => 
-            c.id === parseInt(globalPaymentData.customerId) 
-              ? { ...c, payments: [...(c.payments || []), newPayment] } 
-              : c
-        ));
+    if (globalPaymentData.customerId === 'askida') {
+        if (db && firebaseUser) {
+            try {
+                // Askıdaki ödemeleri 'pendingCollections' tablosuna kaydet
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(paymentId)), newPayment);
+            } catch(e) { console.error("Askıda Ödeme Kayıt Hatası:", e); }
+        }
+    } else {
+        const customerId = parseInt(globalPaymentData.customerId);
+        const customerToUpdate = customers.find(c => c.id === customerId);
+        if (customerToUpdate && db && firebaseUser) {
+            try {
+                const existingPayments = customerToUpdate.payments || [];
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
+                    payments: [...existingPayments, newPayment]
+                }, { merge: true });
+            } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
+        }
     }
 
     setIsGlobalPaymentSuccess(true);
     setGlobalPaymentData({ customerId: '', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
-    setTimeout(() => setIsGlobalPaymentSuccess(false), 3000); 
+    setTimeout(() => setIsGlobalPaymentSuccess(false), 3000);
   };
 
-  const handleSaveEditRent = () => {
-    setRooms(rooms.map(r => r.id === selectedRoomId ? { ...r, customerName: editRentData.customerName, entryDate: editRentData.entryDate, paymentDate: editRentData.paymentDate, monthlyFee: editRentData.monthlyFee, hasKdv: editRentData.hasKdv, sealNo: editRentData.sealNo } : r));
-    setIsEditRentModalOpen(false);
+const handleSaveEditRent = async () => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                  customerName: editRentData.customerName,
+                  entryDate: editRentData.entryDate,
+                  paymentDate: editRentData.paymentDate,
+                  monthlyFee: editRentData.monthlyFee,
+                  hasKdv: editRentData.hasKdv,
+                  sealNo: editRentData.sealNo
+              }, { merge: true });
+          } catch (e) { console.error("Firebase Oda Düzenleme Hatası:", e); }
+      }
+      setIsEditRentModalOpen(false);
   };
 
-// --- DEPODAN ÇIKIŞ YAP (FİREBASE) ---
-  const handleEndRentConfirm = async () => {
-    const room = rooms.find(r => r.id === selectedRoomId);
-    if (!room) return;
-    
-    const entryD = new Date(room.entryDate || Date.now()); 
-    const exitD = new Date(endRentData.exitDate);
-    const diffTime = Math.abs(exitD - entryD); 
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    const months = Math.floor(diffDays / 30); 
-    const durationStr = months > 0 ? `${months} Ay` : `${diffDays} Gün`;
-    
-    const historyRecord = { id: Date.now(), customerName: room.customerName, entryDate: room.entryDate, exitDate: endRentData.exitDate, duration: durationStr, monthlyFee: room.monthlyFee, status: 'Çıkış Yaptı', photo: endRentData.photo, entryPhoto: room.entryPhoto, entryExitHistory: room.entryExitHistory };
-    
-    const roomUpdates = {
-        customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null, broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null, paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
-        history: [historyRecord, ...(room.history || [])]
-    };
+const handleEndRentConfirm = async () => {
+      const room = rooms.find(r => r.id === selectedRoomId);
+      if (!room) return;
+      
+      const entryD = new Date(room.entryDate || Date.now()); 
+      const exitD = new Date(endRentData.exitDate);
+      const diffTime = Math.abs(exitD - entryD); 
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const months = Math.floor(diffDays / 30); 
+      const durationStr = months > 0 ? `${months} Ay` : `${diffDays} Gün`;
+      
+      const historyRecord = { id: Date.now(), customerName: room.customerName, entryDate: room.entryDate, exitDate: endRentData.exitDate, duration: durationStr, monthlyFee: room.monthlyFee, status: 'Çıkış Yaptı', photo: endRentData.photo, entryPhoto: room.entryPhoto, entryExitHistory: room.entryExitHistory };
+      
+      const roomUpdates = {
+          customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null, broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null, paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
+          history: [historyRecord, ...(room.history || [])]
+      };
 
-    if (db && firebaseUser) {
-        try {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), roomUpdates, { merge: true });
-        } catch(e) { console.error("Firebase Çıkış Yapma Hatası:", e); }
-    }
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), roomUpdates, { merge: true });
+          } catch(e) { console.error("Firebase Çıkış Yapma Hatası:", e); }
+      }
 
-    setIsEndRentModalOpen(false); 
-    setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null });
+      setIsEndRentModalOpen(false); 
+      setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null });
   };
 
-  const handleChangeRoomConfirm = () => {
+const handleChangeRoomConfirm = async () => {
     if(!changeRoomTargetRoomId) return;
     const oldRoom = rooms.find(r => r.id === selectedRoomId);
     const newRoom = rooms.find(r => r.id === parseInt(changeRoomTargetRoomId));
@@ -2029,17 +2314,19 @@ if (db && firebaseUser) {
         entryPhoto: oldRoom.entryPhoto, entryExitHistory: oldRoom.entryExitHistory
     };
 
-    setRooms(rooms.map(r => {
-        if(r.id === oldRoom.id) {
-            return {
-                ...r, customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null,
+    if (db && firebaseUser) {
+        try {
+            // 1. Eski odayı boşalt ve geçmişe ekle
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(oldRoom.id)), {
+                customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null,
                 broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null,
-                paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, history: [historyRecord, ...(r.history || [])]
-            };
-        }
-        if(r.id === newRoom.id) {
-            return {
-                ...r, customerName: oldRoom.customerName, entryDate: oldRoom.entryDate, paymentDate: oldRoom.paymentDate,
+                paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
+                history: [historyRecord, ...(oldRoom.history || [])]
+            }, { merge: true });
+
+            // 2. Yeni odaya müşterinin tüm verilerini taşı
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), {
+                customerName: oldRoom.customerName, entryDate: oldRoom.entryDate, paymentDate: oldRoom.paymentDate,
                 monthlyFee: oldRoom.monthlyFee, hasKdv: oldRoom.hasKdv, sealNo: oldRoom.sealNo,
                 broughtBy: oldRoom.broughtBy, teamList: oldRoom.teamList, hasDamage: oldRoom.hasDamage,
                 damageDescription: oldRoom.damageDescription, transportPrice: oldRoom.transportPrice,
@@ -2047,10 +2334,10 @@ if (db && firebaseUser) {
                 entryExitHistory: oldRoom.entryExitHistory, paidMonths: oldRoom.paidMonths || [],
                 movedFrom: oldRoom.name, isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null,
                 isFreeRoom: oldRoom.isFreeRoom, freeRoomReason: oldRoom.freeRoomReason, giftMonths: oldRoom.giftMonths
-            };
-        }
-        return r;
-    }));
+            }, { merge: true });
+
+        } catch (e) { console.error("Firebase Oda Değiştirme Hatası:", e); }
+    }
 
     setIsChangeRoomModalOpen(false);
     setChangeRoomWarehouseId('');
@@ -2090,7 +2377,7 @@ if (db && firebaseUser) {
       setIncreasePercentage(perc.toString());
   };
 
-  const handleConfirmIncrease = () => {
+  const handleConfirmIncrease = async () => {
       if (!increaseModalData || !newRentAmount) return;
 
       const newFee = Number(newRentAmount);
@@ -2107,24 +2394,125 @@ if (db && firebaseUser) {
           yearsPassed: increaseModalData.yearsPassed
       };
 
-      setRooms(rooms.map(r => r.id === increaseModalData.id ? {
-          ...r,
-          monthlyFee: newRentAmount,
-          priceHistory: [...(r.priceHistory || []), historyEntry]
-      } : r));
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(increaseModalData.id)), {
+                  monthlyFee: newRentAmount,
+                  priceHistory: [...(increaseModalData.priceHistory || []), historyEntry]
+              }, { merge: true });
+          } catch(e) { console.error("Firebase Zam Kayıt Hatası:", e); }
+      }
 
       setIsApplyIncreaseModalOpen(false);
       setIncreaseModalData(null);
   };
 
-  // --- TÜMÜNÜ SIFIRLAMA ---
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const handleResetAll = () => {
-    const clearedRooms = rooms.map(r => ({ ...r, customerName: null, isReserved: false, paidMonths: [] }));
-    setRooms(clearedRooms); setIsResetModalOpen(false);
+const handleSavePastIncrease = async () => {
+      if (!pastIncreaseData.date || !pastIncreaseData.amount) return;
+      
+      const startDate = new Date(pastIncreaseData.date);
+      const amount = Number(pastIncreaseData.amount);
+      const hasKdv = selectedRoomDetail.hasKdv !== false;
+      const monthlyTotal = hasKdv ? amount * 1.20 : amount;
+
+      const newOverrides = [];
+      let loopDate = new Date(startDate);
+      // 12 ay (1 yıl) boyunca üstüne yazma kuralı ekle
+      for(let i = 0; i < 12; i++) {
+          const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
+          const txId = `debt-${selectedRoomId}-${key}`;
+          const monthName = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'][loopDate.getMonth()];
+          newOverrides.push({
+              txId, 
+              date: new Date(loopDate).getTime(), // Firebase timestamp uyumluluğu
+              desc: `${selectedRoomDetail.name} Odası - Geçmiş Zamlı Kira (${monthName} ${loopDate.getFullYear()})`,
+              debt: monthlyTotal, 
+              baseDebt: amount, 
+              kdvDebt: hasKdv ? amount * 0.20 : 0, 
+              credit: 0
+          });
+          loopDate.setMonth(loopDate.getMonth() + 1);
+      }
+
+      const customerToUpdate = customers.find(c => c.name === selectedRoomDetail.customerName);
+      
+      if (db && firebaseUser) {
+          try {
+              // Cari hesap üzerine yazılanları kaydet
+              if (customerToUpdate) {
+                  const existingOverrides = customerToUpdate.ledgerOverrides || [];
+                  const filtered = existingOverrides.filter(o => !newOverrides.some(n => n.txId === o.txId));
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                      ledgerOverrides: [...filtered, ...newOverrides]
+                  }, { merge: true });
+              }
+
+              // Oda fiyat geçmişine kaydet
+              const historyEntry = {
+                  id: Date.now(), date: startDate.toLocaleDateString('tr-TR'), oldFee: 'Manuel Düzenleme', newFee: amount,
+                  percentage: 'Geçmiş Zam', anniversaryYear: startDate.getFullYear(), yearsPassed: 'Manuel'
+              };
+              const roomToUpdate = rooms.find(r => r.id === selectedRoomId);
+              if (roomToUpdate) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                      priceHistory: [...(roomToUpdate.priceHistory || []), historyEntry]
+                  }, { merge: true });
+              }
+          } catch(e) { console.error("Firebase Geçmiş Zam Hatası:", e); }
+      }
+
+      setIsPastIncreaseModalOpen(false);
+      setPastIncreaseData({ date: new Date().toISOString().split('T')[0], amount: '' });
   };
 
-  const handleSaveAppointment = () => {
+const handleSaveSpecificMonthEdit = async () => {
+      if (!specificMonthEditData || !specificMonthEditData.newAmount) return;
+      
+      const amount = Number(specificMonthEditData.newAmount);
+      const hasKdv = selectedRoomDetail.hasKdv !== false;
+      const baseDebt = hasKdv ? amount / 1.20 : amount;
+      const kdvDebt = hasKdv ? amount - baseDebt : 0;
+      
+      const customerToUpdate = customers.find(c => c.name === selectedRoomDetail.customerName);
+
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              const existingOverrides = customerToUpdate.ledgerOverrides || [];
+              const filtered = existingOverrides.filter(o => o.txId !== specificMonthEditData.txId);
+              
+              const newOverride = {
+                  txId: specificMonthEditData.txId,
+                  date: specificMonthEditData.date ? new Date(specificMonthEditData.date).getTime() : Date.now(),
+                  desc: specificMonthEditData.desc,
+                  debt: amount, baseDebt: baseDebt, kdvDebt: kdvDebt, credit: 0
+              };
+              
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                  ledgerOverrides: [...filtered, newOverride]
+              }, { merge: true });
+          } catch(e) { console.error("Firebase Aylık Kira Düzenleme Hatası:", e); }
+      }
+
+      setIsEditSpecificMonthModalOpen(false);
+      setSpecificMonthEditData(null);
+  };
+
+  // --- TÜMÜNÜ SIFIRLAMA ---
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+const handleResetAll = async () => {
+      if (db && firebaseUser) {
+          try {
+              for (const r of rooms) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(r.id)), {
+                      customerName: null, isReserved: false, paidMonths: []
+                  }, { merge: true });
+              }
+          } catch (e) { console.error("Sıfırlama Hatası:", e); }
+      }
+      setIsResetModalOpen(false);
+  };
+
+const handleSaveAppointment = async () => {
     if (appointmentData.customerType === 'registered' && !appointmentData.customerId) return;
     if (appointmentData.customerType === 'unregistered' && (!appointmentData.unregisteredName || !appointmentData.unregisteredPhone)) return;
     if (!appointmentData.warehouseId || !appointmentData.date || !appointmentData.time) return;
@@ -2134,7 +2522,8 @@ if (db && firebaseUser) {
     let cId = null;
 
     if (appointmentData.customerType === 'registered') {
-        const cust = customers.find(c => c.id === parseInt(appointmentData.customerId));
+        // String veya Number ID eşleşme garantisi
+        const cust = customers.find(c => String(c.id) === String(appointmentData.customerId));
         if (cust) {
             customerName = cust.name;
             customerPhone = cust.phone;
@@ -2154,7 +2543,13 @@ if (db && firebaseUser) {
         purpose: appointmentData.purpose
     };
 
-    setAppointments([...appointments, newAppt]);
+    // FİREBASE'E KAYIT İŞLEMİ
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', String(newAppt.id)), newAppt);
+        } catch(e) { console.error("Firebase Randevu Kayıt Hatası:", e); }
+    }
+
     setAppointmentData({
         customerType: 'registered',
         customerId: '',
@@ -2165,6 +2560,7 @@ if (db && firebaseUser) {
         time: '10:00 - 11:00',
         purpose: 'giris-cikis'
     });
+    
     setSelectedCalendarDate(appointmentData.date);
     const d = new Date(appointmentData.date);
     setCalendarMonth(d.getMonth());
@@ -2176,6 +2572,37 @@ if (db && firebaseUser) {
   const getFirstDayOfMonth = (month, year) => {
       let day = new Date(year, month, 1).getDay();
       return day === 0 ? 6 : day - 1; // Pzt=0, Paz=6 yapıyoruz
+  };
+
+  const handleUpdateAllLedgers = () => {
+      setIsUpdateAllModalOpen(true);
+      setIsUpdatingAll(true);
+
+      // Tarama hissi yaratmak için küçük bir gecikme ekliyoruz
+      setTimeout(() => {
+          let totalUnpaid = 0;
+          let affectedCustomers = 0;
+
+          customers.forEach(c => {
+              // Sistem girdiği gün ile bugünün tarihi arasını zaten dinamik tarar
+              const { balance } = getCustomerLedger(c);
+              if (balance > 0) {
+                  totalUnpaid += balance;
+                  affectedCustomers++;
+              }
+          });
+
+          // Uygulamadaki tüm state'i güncellemek (force re-render) için spread kullanıyoruz
+          setCustomers([...customers]);
+          setRooms([...rooms]);
+
+          setUpdateAllStats({
+              totalUnpaid,
+              affectedCustomers,
+              date: new Date().toLocaleDateString('tr-TR')
+          });
+          setIsUpdatingAll(false);
+      }, 2000);
   };
 
   const appointmentPurposes = {
@@ -2196,7 +2623,8 @@ if (db && firebaseUser) {
         { id: 'tahsilat-hareketleri', label: 'Tahsilat Hareketleri' },
         { id: 'gunu-gelen-odalar', label: 'Günü Gelen Odalar' },
         { id: 'senesi-dolan-odalar', label: 'Senesi Dolan Odalar' },
-        { id: 'aylik-odeme', label: 'Aylık Borç Takip' }
+        { id: 'aylik-odeme', label: 'Aylık Borç Takip' },
+        { id: 'depo-odemeleri-guncelle', label: 'Depo Ödemeleri', action: handleUpdateAllLedgers }
     ] },
     { id: 'depo', label: 'Depo Listesi', icon: Box },
     { id: 'finans-yonetimi', label: 'Finans Yönetimi', icon: TrendingUp, subItems: [
@@ -2215,44 +2643,6 @@ if (db && firebaseUser) {
 
   const selectedRoomDetail = rooms.find(r => r.id === selectedRoomId);
 
-const uploadFileToServer = async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await fetch('https://www.depoevim.com/crm/upload.php', {
-        method: 'POST',
-        body: formData,
-      });
-      const text = await res.text();
-      
-      let finalUrl = '';
-      try {
-        const json = JSON.parse(text);
-        finalUrl = json.url || json.fileName || json.file || text;
-      } catch (err) {
-        finalUrl = text.trim();
-      }
-
-      // --- BEYAZ EKRAN/KIRIK RESİM ÇÖZÜMÜ İÇİN EKLENEN KISIM ---
-      if (typeof finalUrl === 'string') {
-          if (!finalUrl.includes('http') && !finalUrl.includes('uploads/')) {
-              finalUrl = `https://www.depoevim.com/crm/uploads/${finalUrl}`;
-          }
-          else if (finalUrl.startsWith('http://')) {
-              finalUrl = finalUrl.replace('http://', 'https://');
-          }
-      }
-      
-      return finalUrl;
-
-    } catch (err) {
-      console.error("Yükleme hatası:", err);
-      alert("Görsel yüklenemedi. Lütfen internet bağlantınızı kontrol edin.");
-      return null;
-    }
-  };
-
-  // BU KISIM HİÇ DEĞİŞMEDEN AYNI KALIYOR
   const parseDateLocal = (dateString) => {
     if (!dateString) return new Date();
     const parts = dateString.split('-');
@@ -2348,6 +2738,9 @@ const uploadFileToServer = async (file) => {
     const today = new Date();
     today.setHours(23, 59, 59, 999);
 
+    const customer = customers.find(c => c.name === selectedRoomDetail.customerName);
+    const overrides = customer?.ledgerOverrides || [];
+
     const periods = [];
     let loopDate = new Date(paymentAnchorDate);
     let payIdCounter = 0;
@@ -2361,28 +2754,44 @@ const uploadFileToServer = async (file) => {
           end.setMonth(end.getMonth() + 1);
 
           const paymentKey = `${start.getFullYear()}-${start.getMonth()}`;
+          const txId = `debt-${selectedRoomDetail.id}-${paymentKey}`;
+          
+          let displayTotalAmount = totalAmount;
+          let displayBaseAmount = baseAmount;
+          let displayKdvAmount = kdvAmount;
+
+          const override = overrides.find(o => o.txId === txId);
+          if (override && !override.isDeleted && override.debt !== undefined) {
+              displayTotalAmount = override.debt;
+              displayBaseAmount = override.baseDebt !== undefined ? override.baseDebt : (hasKdv ? displayTotalAmount / 1.20 : displayTotalAmount);
+              displayKdvAmount = override.kdvDebt !== undefined ? override.kdvDebt : (hasKdv ? displayTotalAmount - displayBaseAmount : 0);
+          }
+
           const isPaid = selectedRoomDetail.paidMonths?.includes(paymentKey);
           const isGifted = selectedRoomDetail.giftMonths && monthCounter < selectedRoomDetail.giftMonths;
           const isFree = selectedRoomDetail.isFreeRoom;
 
-          let stat = isPaid ? 'Ödeme Yapıldı' : (isFree ? 'Ücretsiz Oda' : (isGifted ? 'Hediye Edildi' : 'Ödenmedi'));
-          let statColor = isPaid ? 'text-green-600 bg-green-50 border-green-200' : (isFree ? 'text-cyan-600 bg-cyan-50 border-cyan-200' : (isGifted ? 'text-purple-600 bg-purple-50 border-purple-200' : 'text-red-600 bg-red-50 border-red-200'));
+          let stat = isPaid ? 'Ödeme Yapıldı' : (isFree ? 'Ücretsiz Oda' : (isGifted ? 'Hediye Edildi' : 'Bekliyor'));
+          let statColor = isPaid ? 'text-green-600 bg-green-50 border-green-200' : (isFree ? 'text-cyan-600 bg-cyan-50 border-cyan-200' : (isGifted ? 'text-purple-600 bg-purple-50 border-purple-200' : 'text-orange-600 bg-orange-50 border-orange-200'));
 
           periods.push({
             id: payIdCounter,
             month: monthsStr[start.getMonth()],
             year: start.getFullYear(),
-            amount: (isGifted || isFree) ? 0 : totalAmount,
-            baseAmount: (isGifted || isFree) ? 0 : baseAmount,
-            kdvAmount: (isGifted || isFree) ? 0 : kdvAmount,
+            amount: (isGifted || isFree) ? 0 : displayTotalAmount,
+            baseAmount: (isGifted || isFree) ? 0 : displayBaseAmount,
+            kdvAmount: (isGifted || isFree) ? 0 : displayKdvAmount,
             hasKdv: hasKdv,
             status: stat,
             color: statColor,
             title: `${start.getDate()} ${monthsStr[start.getMonth()]} ${start.getFullYear()} - ${end.getDate()} ${monthsStr[end.getMonth()]} ${end.getFullYear()} Arası Kira Bedeli`,
             payDay: start.getDate(),
             paymentKey: paymentKey,
+            txId: txId,
+            dateObj: start,
             isGifted: isGifted,
-            isFree: isFree
+            isFree: isFree,
+            isPaid: isPaid
           });
         }
       }
@@ -2412,13 +2821,24 @@ const uploadFileToServer = async (file) => {
     const hasKdv = selectedRoomDetail.hasKdv !== undefined ? selectedRoomDetail.hasKdv : true;
     const monthlyTotal = hasKdv ? baseAmount * 1.20 : baseAmount;
 
+    const customer = customers.find(c => c.name === selectedRoomDetail.customerName);
+    const overrides = customer?.ledgerOverrides || [];
+
     while (loopDate <= today) {
       const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
+      const txId = `debt-${selectedRoomDetail.id}-${key}`;
+      
+      let currentMonthlyTotal = monthlyTotal;
+      const override = overrides.find(o => o.txId === txId);
+      if (override && !override.isDeleted && override.debt !== undefined) {
+          currentMonthlyTotal = override.debt;
+      }
+
       const isGifted = selectedRoomDetail.giftMonths && monthCounter < selectedRoomDetail.giftMonths;
       const isFree = selectedRoomDetail.isFreeRoom;
       
       if (!selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !isFree) {
-        totalUnpaid += monthlyTotal;
+        totalUnpaid += currentMonthlyTotal;
       }
       loopDate.setMonth(loopDate.getMonth() + 1);
       monthCounter++;
@@ -2751,6 +3171,9 @@ const uploadFileToServer = async (file) => {
                             buttonClass = isSubActive 
                                 ? 'bg-[#1bc5bd] text-white shadow-md font-bold' 
                                 : 'bg-teal-50/50 text-teal-700 border border-teal-200 hover:bg-teal-100/50 hover:border-teal-300 font-bold shadow-sm';
+                        } else if (sub.id === 'depo-odemeleri-guncelle') {
+                            layoutClass = 'w-[85%] ml-auto mr-3 pl-3 pr-2 py-2 rounded-md text-[13px] mt-3 mb-1';
+                            buttonClass = 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-500/30 font-bold hover:from-purple-700 hover:to-indigo-700 transition-all';
                         } else {
                             buttonClass = isSubActive 
                                 ? 'bg-orange-50 text-orange-600' 
@@ -2761,6 +3184,7 @@ const uploadFileToServer = async (file) => {
                           <button key={sub.id} onClick={() => { if (sub.action) { sub.action(); } else { setActiveMenu(sub.id); setSelectedCustomerId(null); setIsSidebarOpen(false); } }} className={`flex items-center justify-between text-left transition-colors font-medium ${layoutClass} ${buttonClass}`}>
                             {sub.label}
                             {sub.id === 'odeme-girisi' && <Plus size={14} className={isSubActive ? 'text-white' : 'text-teal-600'} />}
+                            {sub.id === 'depo-odemeleri-guncelle' && <RefreshCcw size={14} className="text-white" />}
                           </button>
                         );
                       })}
@@ -2895,7 +3319,7 @@ const uploadFileToServer = async (file) => {
             <div className="relative">
                 <button onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)} className="flex items-center gap-2 hover:bg-gray-50 p-1 sm:p-1.5 rounded-lg transition-colors">
                   {currentUserProfile.avatar ? (
-                      <img src={currentUserProfile.avatar} alt="Profile" referrerPolicy="no-referrer" className="h-7 w-7 sm:h-8 sm:w-8 rounded-full object-cover border border-gray-200 shadow-sm" />
+                      <img src={currentUserProfile.avatar} alt="Profile" className="h-7 w-7 sm:h-8 sm:w-8 rounded-full object-cover border border-gray-200 shadow-sm" />
                   ) : (
                       <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold text-xs sm:text-sm shadow-sm">
                           {currentUserProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
@@ -3232,7 +3656,7 @@ const uploadFileToServer = async (file) => {
                            <div className="flex flex-col items-center">
                               <Check size={32} className="text-green-500 mb-2" />
                               <span className="text-sm font-bold text-green-600">Belge Eklendi</span>
-                              <img src={newCustomer.documentPhoto} alt="Belge" referrerPolicy="no-referrer" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                              <img src={newCustomer.documentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
                            </div>
                         ) : (
                            <>
@@ -3241,7 +3665,7 @@ const uploadFileToServer = async (file) => {
                              <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                            </>
                         )}
-                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, documentPhoto: reader.result, documentPhotoFile: file}); reader.readAsDataURL(file); } }} />
+                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, documentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
                       </label>
                   </div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Özel Notlar</label><textarea value={newCustomer.notes} onChange={(e) => setNewCustomer({...newCustomer, notes: e.target.value})} rows="3" placeholder="Müşteri hakkında eklemek istediğiniz notlar..." className="border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 resize-none font-medium text-slate-700"></textarea></div>
@@ -3272,7 +3696,7 @@ const uploadFileToServer = async (file) => {
                                    <div className="flex flex-col items-center">
                                       <Check size={32} className="text-indigo-500 mb-2" />
                                       <span className="text-sm font-bold text-indigo-600">Vekalet Belgesi Eklendi</span>
-                                      <img src={newCustomer.proxyDocumentPhoto} alt="Belge" referrerPolicy="no-referrer" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                                      <img src={newCustomer.proxyDocumentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
                                    </div>
                                 ) : (
                                    <>
@@ -3281,7 +3705,8 @@ const uploadFileToServer = async (file) => {
                                      <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                                    </>
                                 )}
-    <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, proxyDocumentPhoto: reader.result, proxyDocumentPhotoFile: file}); reader.readAsDataURL(file); } }} />                              </label>
+                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, proxyDocumentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
+                              </label>
                           </div>
                       </div>
                   )}
@@ -3296,16 +3721,35 @@ const uploadFileToServer = async (file) => {
             <div className="max-w-7xl mx-auto flex flex-col h-full bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="flex justify-between items-center mb-6">
                 <div><h2 className="text-2xl font-bold text-slate-800">{activeMenu === 'mevcut-musteriler' ? 'Mevcut Müşteriler' : 'Tüm Müşteriler'}</h2><p className="text-sm text-gray-500 mt-1">{activeMenu === 'mevcut-musteriler' ? 'Şu anda depolarda aktif odası bulunan müşteriler.' : 'Sisteme kayıtlı geçmiş ve mevcut tüm müşteriler.'}</p></div>
+                <div className="flex gap-2">
+                    <label className={`bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-colors cursor-pointer flex items-center gap-2 ${isCustomerUploading ? 'opacity-50 pointer-events-none' : ''}`} title="Otomatik Taramalı Excel Aktarımı">
+                        {isCustomerUploading ? <RefreshCcw size={16} className="animate-spin" /> : <Upload size={16} />}
+                        <span className="hidden sm:inline">Excel'den Müşteri Aktar</span>
+                        <span className="sm:hidden">Aktar</span>
+                        <input type="file" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" className="hidden" onChange={handleBulkCustomerUpload} disabled={isCustomerUploading} />
+                    </label>
+                </div>
               </div>
+
+              {customerImportResult && (
+                <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl flex items-start sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-emerald-100 p-1.5 rounded-full shrink-0"><Check size={16} className="text-emerald-600" strokeWidth={3}/></div>
+                        <span className="font-medium text-sm">İşlem Tamamlandı: <strong>{customerImportResult.importedCustomerCount}</strong> yeni müşteri eklendi, <strong>{customerImportResult.updatedRoomCount}</strong> oda müşterilere başarıyla kiralandı.</span>
+                    </div>
+                    <button onClick={() => setCustomerImportResult(null)} className="text-emerald-500 hover:text-emerald-700 shrink-0"><X size={16}/></button>
+                </div>
+              )}
+
               <div className="flex justify-between items-center mb-4 text-sm text-gray-600">
                 <div className="flex items-center gap-2"><span>Show</span><select className="border border-gray-300 rounded p-1 outline-none focus:border-cyan-400"><option>10</option><option>25</option><option>50</option></select><span>entries</span></div>
                 <div className="flex items-center gap-2"><span>Search:</span><input type="text" value={customerSearchTerm} onChange={(e) => setCustomerSearchTerm(e.target.value)} className="border border-gray-300 rounded p-1.5 outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 w-48 lg:w-64" /></div>
               </div>
-              <div className="overflow-x-auto border border-gray-200 rounded-lg flex-1 bg-slate-50 flex items-center justify-center">
+              <div className="overflow-x-auto border border-gray-200 rounded-lg flex-1 bg-slate-50 w-full block">
                  {(() => {
                     const displayedCustomers = activeMenu === 'mevcut-musteriler' ? customers.filter(c => rooms.some(r => r.customerName === c.name)) : customers;
                     const finalFiltered = displayedCustomers.filter(c => c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()));
-                    if (finalFiltered.length === 0) return (<div className="text-center py-20 w-full"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><Users size={32} /></div><h3 className="text-lg font-bold text-gray-600 mb-1">Müşteri Kaydı Bulunmuyor</h3><p className="text-sm text-gray-400 max-w-sm mx-auto">Bu listede gösterilecek müşteri bulunamadı. Soldaki menüden "Yeni Müşteri Ekle" diyerek ekleme yapabilirsiniz.</p></div>);
+                    if (finalFiltered.length === 0) return (<div className="flex flex-col items-center justify-center text-center py-20 w-full min-h-[300px]"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><Users size={32} /></div><h3 className="text-lg font-bold text-gray-600 mb-1">Müşteri Kaydı Bulunmuyor</h3><p className="text-sm text-gray-400 max-w-sm mx-auto">Bu listede gösterilecek müşteri bulunamadı. Soldaki menüden "Yeni Müşteri Ekle" diyerek ekleme yapabilirsiniz.</p></div>);
 
                     return (
                       <table className="w-full text-sm text-left text-gray-600 min-w-[800px] h-full self-start">
@@ -3408,7 +3852,7 @@ const uploadFileToServer = async (file) => {
                                                 <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Vekil Kimlik Belgesi</span>
                                                 <div className="border border-indigo-200 rounded p-2 bg-white w-max shadow-sm">
                                                     <a href={customer.proxyDocumentPhoto} target="_blank" rel="noreferrer">
-                                                        <img src={customer.proxyDocumentPhoto} alt="Vekil Belge" referrerPolicy="no-referrer" className="h-24 object-contain rounded" />
+                                                        <img src={customer.proxyDocumentPhoto} alt="Vekil Belge" className="h-24 object-contain rounded" />
                                                     </a>
                                                 </div>
                                             </div>
@@ -3428,7 +3872,7 @@ const uploadFileToServer = async (file) => {
                                        {customer.documentPhoto ? (
                                            <div className="border border-gray-200 rounded p-2 bg-white w-max relative group shadow-sm hover:shadow transition-shadow">
                                                <a href={customer.documentPhoto} target="_blank" rel="noreferrer">
-                                                   <img src={customer.documentPhoto} alt="Belge" referrerPolicy="no-referrer" className="h-32 object-contain rounded" />
+                                                   <img src={customer.documentPhoto} alt="Belge" className="h-32 object-contain rounded" />
                                                </a>
                                            </div>
                                        ) : (
@@ -3461,7 +3905,7 @@ const uploadFileToServer = async (file) => {
                                                            {doc.url.includes('pdf') || doc.url.startsWith('data:application/pdf') ? (
                                                                <FileTextIcon size={24} className="text-red-500" />
                                                            ) : (
-                                                               <img src={doc.url} alt={`Ek Belge ${idx+1}`} referrerPolicy="no-referrer" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                                               <img src={doc.url} alt={`Ek Belge ${idx+1}`} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                                                            )}
                                                        </a>
                                                        <span className="text-[9px] text-gray-500 font-medium truncate w-full text-center px-1" title={doc.name}>{doc.name || `Belge ${idx+1}`}</span>
@@ -3566,33 +4010,18 @@ const uploadFileToServer = async (file) => {
                       {customerRooms.length > 0 ? (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                            {customerRooms.map((room) => {
+                             const customer = customers.find(c => c.name === room.customerName);
+                             const overrides = customer?.ledgerOverrides || [];
+
                              const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              const paymentAnchorDate = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryDate;
                              const today = new Date(); today.setHours(23, 59, 59, 999);
                              const baseAmount = Number(room.monthlyFee || 0);
                              const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
                              const monthlyTotal = hasKdv ? baseAmount * 1.20 : baseAmount;
-                             
-                             let loopDate = new Date(paymentAnchorDate);
-                             let monthCounter = 0;
-                             let totalTahakkukEden = 0; 
-                             let totalOdenenAySayisi = room.paidMonths ? room.paidMonths.length : 0;
-                             
-                             while (loopDate <= today) {
-                               const isGifted = room.giftMonths && monthCounter < room.giftMonths;
-                               const isFree = room.isFreeRoom;
-                               if (!isGifted && !isFree) {
-                                 totalTahakkukEden += monthlyTotal;
-                               }
-                               loopDate.setMonth(loopDate.getMonth() + 1);
-                               monthCounter++;
-                             }
-
-                             const totalOdenen = totalOdenenAySayisi * monthlyTotal;
-                             const kalanBorc = totalTahakkukEden - totalOdenen;
 
                              return (
-                               <div key={room.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow relative overflow-hidden">
+                               <div key={room.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow relative overflow-hidden flex flex-col">
                                   <div className="absolute top-0 right-0 p-3"><span className="bg-cyan-50 text-cyan-600 px-3 py-1 rounded-full text-[10px] font-bold border border-cyan-100 uppercase">Aktif Kiralama</span></div>
                                   <div className="flex items-center gap-3 mb-4">
                                      <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center text-gray-400"><Box size={20}/></div>
@@ -3600,12 +4029,9 @@ const uploadFileToServer = async (file) => {
                                   </div>
                                   <div className="bg-gray-50 rounded-xl p-4 mb-4 border border-gray-100 flex flex-col gap-2">
                                      <div className="flex justify-between items-center"><span className="text-xs text-gray-500 font-semibold">Aylık Kira Bedeli:</span><span className="text-sm font-bold text-gray-700">{monthlyTotal} TL {hasKdv && <span className="text-[9px] text-gray-400 font-normal">(KDV Dahil)</span>}</span></div>
-                                     <div className="flex justify-between items-center"><span className="text-xs text-gray-500 font-semibold">Oluşan Toplam Borç:</span><span className="text-sm font-bold text-gray-700">{totalTahakkukEden} TL</span></div>
-                                     <div className="flex justify-between items-center"><span className="text-xs text-gray-500 font-semibold">Tahsil Edilen (Ödenen):</span><span className="text-sm font-bold text-green-600">{totalOdenen} TL</span></div>
                                   </div>
-                                  <div className="flex items-center justify-between pt-2">
-                                     <div><p className="text-[10px] font-bold text-red-400 uppercase mb-0.5">Kalan Depo Borcu</p><p className="font-extrabold text-2xl text-red-600">{kalanBorc} TL</p></div>
-                                     <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(blocks.find(b => b.id === room.blockId)?.warehouseId); setSelectedBlockId(room.blockId); setSelectedRoomId(room.id); setSelectedCustomerId(null); }} className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm">Odaya Git</button>
+                                  <div className="flex items-center justify-end pt-2 mt-auto">
+                                     <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(blocks.find(b => b.id === room.blockId)?.warehouseId); setSelectedBlockId(room.blockId); setSelectedRoomId(room.id); setSelectedCustomerId(null); }} className="bg-gray-800 hover:bg-gray-900 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5">Odaya Git &rarr;</button>
                                   </div>
                                </div>
                              );
@@ -4383,20 +4809,96 @@ const uploadFileToServer = async (file) => {
              </div>
           ) : activeMenu === 'depo' ? (
             <div className="max-w-7xl mx-auto flex flex-col h-full bg-slate-50 relative">
-              {!selectedWarehouseId ? (
+              {activeSizeFilter ? (
+                 <div className="animate-in fade-in duration-300">
+                    <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-purple-200 bg-purple-50/30">
+                        <div>
+                            <button onClick={() => setActiveSizeFilter(null)} className="text-xs font-bold text-gray-500 hover:text-purple-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
+                            <h2 className="text-2xl font-bold text-purple-900">Boş Depo Arama: {sizeFilters.find(f => f.id === activeSizeFilter)?.label}</h2>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-6 pb-8">
+                        {(() => {
+                            const filterOpt = sizeFilters.find(f => f.id === activeSizeFilter);
+                            const filteredEmptyRooms = rooms.filter(r => {
+                                const isEmpty = !r.customerName && (!r.isReserved || r.reserveExpiryTimestamp < Date.now());
+                                const m3 = Number(r.m3 || 0);
+                                return isEmpty && m3 >= filterOpt.min && m3 <= filterOpt.max;
+                            });
+
+                            if (filteredEmptyRooms.length === 0) {
+                                return (
+                                    <div className="col-span-full py-16 text-center bg-white rounded-xl border border-dashed border-gray-300 shadow-sm">
+                                        <Search size={40} className="mx-auto text-gray-300 mb-4" />
+                                        <h3 className="text-lg font-bold text-gray-700">Bu Kriterlere Uygun Boş Oda Bulunamadı</h3>
+                                        <p className="text-sm text-gray-500 mt-1">Seçtiğiniz m³ aralığında tamamen boş olan bir oda mevcut değil.</p>
+                                    </div>
+                                );
+                            }
+
+                            return filteredEmptyRooms.map((oda) => {
+                                const block = blocks.find(b => b.id === oda.blockId);
+                                const warehouse = warehouses.find(w => w.id === block?.warehouseId);
+                                
+                                return (
+                                    <div key={oda.id} onClick={() => {
+                                        setSelectedWarehouseId(warehouse?.id);
+                                        setSelectedBlockId(block?.id);
+                                        setSelectedRoomId(oda.id);
+                                        setActiveSizeFilter(null);
+                                    }} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
+                                        <div className="px-4 py-3 flex justify-between items-center bg-[#1bc5bd] text-white shadow-md z-10">
+                                            <div className="flex flex-col min-w-0 mr-2">
+                                                <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
+                                                <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
+                                            </div>
+                                            <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner shrink-0">{oda.m3} m³</span>
+                                        </div>
+                                        <div className="flex-1 relative flex flex-col justify-center items-center min-h-[140px]"
+                                            style={{ backgroundImage: 'repeating-linear-gradient(to bottom, #f8fafc, #f8fafc 12px, #e2e8f0 12px, #e2e8f0 14px)' }}>
+                                            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-10 h-3 bg-slate-300 border border-slate-400 rounded-sm flex items-center justify-center shadow-sm">
+                                                <div className="w-3 h-1 bg-slate-500 rounded-full"></div>
+                                            </div>
+                                            <div className="px-3 py-2 rounded-lg border-2 shadow-sm font-bold uppercase text-[11px] text-center max-w-[90%] truncate bg-white text-teal-600 border-teal-200">
+                                                BOŞ ODA
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            });
+                        })()}
+                    </div>
+                 </div>
+              ) : !selectedWarehouseId ? (
                 <>
-<div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-  <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
-  <div className="flex items-center gap-2">
-    <button onClick={handleMigrateDataToFirebase} className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded text-sm font-medium transition-colors">
-      Verileri Canlıya Aktar
-    </button>
-    <button onClick={() => setIsAddWarehouseModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">
-      Depo Ekle <Plus size={16} />
-    </button>
-  </div>
-</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-8">
+                  <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-col sm:flex-row gap-4 sm:gap-0">
+                    <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="relative">
+                            <button onClick={() => setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen)} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
+                                <Search size={16} /> Depo Boyutu Bul
+                            </button>
+                            {isSizeFilterDropdownOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsSizeFilterDropdownOpen(false)}></div>
+                                    <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-100 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                                        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase flex items-center justify-between">
+                                            <span>Boş Depo Filtreleri</span>
+                                            <button onClick={() => setIsSizeFilterDropdownOpen(false)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
+                                        </div>
+                                        {sizeFilters.map(f => (
+                                            <button key={f.id} onClick={() => { setActiveSizeFilter(f.id); setIsSizeFilterDropdownOpen(false); }} className="w-full text-left px-4 py-3 text-sm font-bold text-gray-700 hover:bg-purple-50 hover:text-purple-700 border-b border-gray-50 last:border-0 transition-colors flex items-center justify-between group">
+                                                <div className="flex items-center gap-2"><Box size={16} className="text-purple-400 group-hover:text-purple-600 transition-colors" /> {f.label}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <button onClick={() => setIsAddWarehouseModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors shadow-sm">Depo Ekle <Plus size={16} /></button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-8">
                   {warehouses.map((depo, index) => {
                     const stats = getWarehouseStats(depo.id);
                     const occupied = getWarehouseOccupiedM3(depo.id);
@@ -4537,13 +5039,19 @@ const uploadFileToServer = async (file) => {
                       if (oda.customerName) { headerBg = 'bg-[#c81e3a]'; badgeStyle = 'bg-red-50 text-red-600 border-red-200'; statusText = oda.customerName; } 
                       else if (isValidReservation) { headerBg = 'bg-orange-500'; badgeStyle = 'bg-orange-50 text-orange-600 border-orange-200'; statusText = `REZERVELİ`; }
 
+                      const currentBlock = blocks.find(b => b.id === oda.blockId);
+                      const currentWarehouse = warehouses.find(w => w.id === currentBlock?.warehouseId);
+
                       return (
                       <div key={oda.id} onClick={() => setSelectedRoomId(oda.id)} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
                         
                         {/* Oda Kapı Üst Pervazı (Duruma Göre Renkli) */}
                         <div className={`px-4 py-3 flex justify-between items-center ${headerBg} text-white shadow-md z-10`}>
-                            <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm">{oda.name}</h3>
-                            <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner">{oda.m3} m³</span>
+                            <div className="flex flex-col min-w-0 mr-2">
+                                <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
+                                <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${currentWarehouse?.name} - ${currentBlock?.name}`}>{currentWarehouse?.name} - {currentBlock?.name}</span>
+                            </div>
+                            <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner shrink-0">{oda.m3} m³</span>
                         </div>
                         
                         {/* Oda Kapısı Dokusu (Kepenk Görünümü) */}
@@ -4630,7 +5138,7 @@ const uploadFileToServer = async (file) => {
                            <h3 className="text-xl font-bold text-gray-800 mb-2">Bu Oda Rezerve Edilmiş</h3><p className="text-sm text-gray-500 mb-4 max-w-md">Bu oda <strong>{selectedRoomDetail.reservedName}</strong> ({selectedRoomDetail.reservedPhone}) adına rezerve edilmiştir. Son geçerlilik tarihi: <strong>{selectedRoomDetail.reserveExpiry}</strong></p>
                            <div className="flex gap-4 mt-4">
                               <button onClick={() => setIsRentRoomModalOpen(true)} className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-6 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 shadow-sm"><Key size={18} /> Rezerveyi Kiralamaya Çevir</button>
-                              <button onClick={() => setRooms(rooms.map(r => r.id === selectedRoomId ? { ...r, isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null } : r))} className="bg-red-500 hover:bg-red-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"><X size={18} /> Rezerveyi İptal Et</button>
+                              <button onClick={handleCancelReservation} className="bg-red-500 hover:bg-red-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"><X size={18} /> Rezerveyi İptal Et</button>
                            </div>
                         </div>
                      ) : (
@@ -4680,7 +5188,7 @@ const uploadFileToServer = async (file) => {
                                 {selectedRoomDetail?.entryPhoto && (
                                     <div className="flex flex-col gap-1.5 md:col-span-2">
                                        <label className="text-[11px] text-gray-500 font-semibold">Depo İlk Giriş Görseli</label>
-                                       <div className="border border-gray-200 rounded p-2 bg-white w-max"><a href={selectedRoomDetail.entryPhoto} target="_blank" rel="noreferrer"><img src={selectedRoomDetail.entryPhoto} alt="Giriş Görseli" referrerPolicy="no-referrer" className="h-32 object-contain rounded" /></a></div>
+                                       <div className="border border-gray-200 rounded p-2 bg-white w-max"><a href={selectedRoomDetail.entryPhoto} target="_blank" rel="noreferrer"><img src={selectedRoomDetail.entryPhoto} alt="Giriş Görseli" className="h-32 object-contain rounded" /></a></div>
                                     </div>
                                 )}
 
@@ -4700,7 +5208,7 @@ const uploadFileToServer = async (file) => {
                                                            <div className="flex-1 flex flex-col gap-1">
                                                                <span className="text-[9px] text-gray-500 text-center font-medium">Tutanak</span>
                                                                <a href={item.protocolPhoto} target="_blank" rel="noreferrer" className="block border border-gray-200 rounded overflow-hidden bg-white">
-                                                                   <img src={item.protocolPhoto} alt="Tutanak" referrerPolicy="no-referrer" className="h-16 w-full object-cover hover:scale-105 transition-transform" />
+                                                                   <img src={item.protocolPhoto} alt="Tutanak" className="h-16 w-full object-cover hover:scale-105 transition-transform" />
                                                                </a>
                                                            </div>
                                                        ) : (
@@ -4712,7 +5220,7 @@ const uploadFileToServer = async (file) => {
                                                            <div className="flex-1 flex flex-col gap-1">
                                                                <span className="text-[9px] text-gray-500 text-center font-medium">Son Hal</span>
                                                                <a href={item.finalPhoto} target="_blank" rel="noreferrer" className="block border border-gray-200 rounded overflow-hidden bg-white">
-                                                                   <img src={item.finalPhoto} alt="Son Hal" referrerPolicy="no-referrer" className="h-16 w-full object-cover hover:scale-105 transition-transform" />
+                                                                   <img src={item.finalPhoto} alt="Son Hal" className="h-16 w-full object-cover hover:scale-105 transition-transform" />
                                                                </a>
                                                            </div>
                                                        ) : (
@@ -4772,7 +5280,8 @@ const uploadFileToServer = async (file) => {
 
                            <div className="mb-6 flex justify-between items-center">
                                <h3 className="text-xl font-bold text-slate-800">Aylık Kiralama Dökümü</h3>
-                               <div className="flex items-center gap-3">
+                               <div className="flex flex-wrap items-center gap-2">
+                                   <button onClick={() => setIsPastIncreaseModalOpen(true)} className="text-xs bg-orange-50 text-orange-600 hover:bg-orange-100 px-3 py-1.5 rounded-lg font-bold border border-orange-200 transition-colors flex items-center gap-1.5"><Edit size={14}/> Geçmiş Zamları Düzenle</button>
                                    {selectedRoomDetail?.priceHistory && selectedRoomDetail.priceHistory.length > 0 && (
                                        <button onClick={() => setIsPriceHistoryModalOpen(true)} className="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1.5 rounded-lg font-bold border border-indigo-200 transition-colors flex items-center gap-1.5"><TrendingUp size={14}/> Zam Geçmişi</button>
                                    )}
@@ -4818,8 +5327,23 @@ const uploadFileToServer = async (file) => {
                                     </div>
                                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-8 w-full sm:w-auto">
                                        <div className="flex flex-col sm:items-end">
-                                         <span className={`font-extrabold text-2xl ${payment.isGifted ? 'text-purple-600' : (payment.isFree ? 'text-cyan-600' : 'text-gray-800')}`}>{payment.amount} TL</span>
-                                         <span className="text-[11px] text-gray-400 font-medium mt-1">Net: {payment.baseAmount} TL {payment.hasKdv && `+ KDV (%20): ${payment.kdvAmount} TL`}</span>
+                                         <div className="flex items-center gap-3">
+                                            <span className={`font-extrabold text-2xl ${payment.isGifted ? 'text-purple-600' : (payment.isFree ? 'text-cyan-600' : 'text-gray-800')}`}>{payment.amount} TL</span>
+                                            {!payment.isGifted && !payment.isFree && (
+                                                <button onClick={() => {
+                                                    setSpecificMonthEditData({
+                                                        txId: payment.txId,
+                                                        title: payment.title,
+                                                        currentAmount: payment.amount,
+                                                        newAmount: payment.amount,
+                                                        date: payment.dateObj,
+                                                        desc: `${selectedRoomDetail.name} Odası - Kira Düzenlemesi (${payment.month} ${payment.year})`
+                                                    });
+                                                    setIsEditSpecificMonthModalOpen(true);
+                                                }} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-2 rounded-lg transition-colors shadow-sm" title="Bu ayın kirasını düzenle"><Edit size={16}/></button>
+                                            )}
+                                         </div>
+                                         <span className="text-[11px] text-gray-400 font-medium mt-1">Net: {payment.baseAmount.toFixed(2)} TL {payment.hasKdv && `+ KDV: ${payment.kdvAmount.toFixed(2)} TL`}</span>
                                        </div>
                                     </div>
                                  </div>
@@ -4882,7 +5406,7 @@ const uploadFileToServer = async (file) => {
                           <textarea rows="2" value={contractSettings.ibanWarning} onChange={(e) => setContractSettings({...contractSettings, ibanWarning: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700 resize-none"></textarea>
                         </div>
                         <div className="md:col-span-2 flex justify-end mt-4">
-                          <button className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-8 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors">Tüm Ayarları Kaydet</button>
+                          <button onClick={handleSaveContractSettings} className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-8 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors">Tüm Ayarları Kaydet</button>
                         </div>
                       </div>
                     </div>
@@ -4919,7 +5443,7 @@ const uploadFileToServer = async (file) => {
                       </div>
 
                       <div className="flex justify-end mt-8">
-                         <button className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-8 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors">Değişiklikleri Kaydet</button>
+                         <button onClick={handleSaveContractSettings} className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-8 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors">Değişiklikleri Kaydet</button>
                       </div>
                     </div>
                   )}
@@ -4977,7 +5501,7 @@ const uploadFileToServer = async (file) => {
 
                   </div>
                   <div className="flex justify-end mt-10 border-t border-gray-100 pt-6">
-                      <button className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-lg shadow-teal-500/30 transition-all transform hover:-translate-y-0.5 flex items-center gap-2">
+<button onClick={handleSaveCollectionRates} className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-lg shadow-teal-500/30 transition-all transform hover:-translate-y-0.5 flex items-center gap-2">
                           <Check size={18} strokeWidth={3} /> Oranları Kaydet
                       </button>
                   </div>
@@ -5734,7 +6258,7 @@ const uploadFileToServer = async (file) => {
                                       <td className="px-6 py-4">
                                           <div className="flex items-center gap-3">
                                               <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0 overflow-hidden">
-                                                  {user.avatar ? <img src={user.avatar} referrerPolicy="no-referrer" className="w-full h-full object-cover"/> : user.name.charAt(0)}
+                                                  {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover"/> : user.name.charAt(0)}
                                               </div>
                                               <div>
                                                   <div className="font-bold text-gray-800 text-[15px]">{user.name}</div>
@@ -6033,11 +6557,12 @@ const uploadFileToServer = async (file) => {
                  <div className="bg-slate-50 p-5 rounded-xl border border-gray-200">
                     <label className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-white hover:border-[#1bc5bd] transition-colors cursor-pointer group bg-white/50">
                      {rentData.entryPhoto ? (
-                       <div className="text-[#1bc5bd] font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Görsel Eklendi</span><img src={rentData.entryPhoto} alt="Önizleme" referrerPolicy="no-referrer" className="h-16 w-16 object-cover rounded mt-2 border border-gray-200"/></div>
+                       <div className="text-[#1bc5bd] font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Görsel Eklendi</span><img src={rentData.entryPhoto} alt="Önizleme" className="h-16 w-16 object-cover rounded mt-2 border border-gray-200"/></div>
                      ) : (
                        <><Upload size={20} className="text-gray-400 mb-2 group-hover:text-[#1bc5bd] transition-colors" /><span className="text-xs text-gray-500 font-medium">Depoya yerleşim yapıldıktan sonraki fotoğrafı yükleyin</span><span className="text-[10px] text-gray-400 mt-1">PNG, JPG formatlarında</span></>
                      )}
-<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setRentData({...rentData, entryPhoto: url})); } }}/>                   </label>
+                     <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setRentData({...rentData, entryPhoto: reader.result}); reader.readAsDataURL(file); } }}/>
+                   </label>
                  </div>
                </div>
                
@@ -6176,7 +6701,8 @@ const uploadFileToServer = async (file) => {
                    <label className="text-xs font-semibold text-gray-600">Boş Depo Görseli (İsteğe Bağlı)</label>
                    <label className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 transition-colors cursor-pointer group">
                      {endRentData.photo ? (<div className="text-green-500 font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Fotoğraf Eklendi</span></div>) : (<><Upload size={20} className="text-gray-400 mb-2 group-hover:text-cyan-500 transition-colors" /><span className="text-xs text-gray-500">Çıkış yapılan boş deponun fotoğrafını yükle</span></>)}
-<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEndRentData({...endRentData, photo: url})); } }}/>                   </label>
+                     <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEndRentData({...endRentData, photo: reader.result}); reader.readAsDataURL(file); } }}/>
+                   </label>
                  </div>
                </div>
                <div className="flex justify-end gap-3"><button onClick={() => setIsEndRentModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded text-sm font-medium">İptal</button><button onClick={handleEndRentConfirm} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded text-sm font-medium flex items-center gap-2"><LogOut size={16} /> Çıkışı Onayla</button></div>
@@ -6332,6 +6858,74 @@ const uploadFileToServer = async (file) => {
         </div>
       )}
 
+      {/* GEÇMİŞ ZAMLARI DÜZENLE MODALI */}
+      {isPastIncreaseModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-in fade-in zoom-in">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-orange-50 rounded-t-2xl">
+                 <h3 className="text-lg font-bold text-orange-700 flex items-center gap-2"><Edit size={20} /> Geçmiş Zamları Düzenle</h3>
+                 <button onClick={() => setIsPastIncreaseModalOpen(false)} className="text-orange-400 hover:text-orange-600 bg-white p-1 rounded shadow-sm"><X size={20} /></button>
+             </div>
+             <div className="p-6 md:p-8">
+               <p className="text-sm text-gray-500 mb-6 text-center">Bu menüden geçmiş bir tarihe zam uygulayabilirsiniz. Belirttiğiniz tarihten itibaren <strong>1 yıl boyunca (12 ay)</strong> kira bedeli yeni girdiğiniz tutar olarak ayarlanacaktır. Öncesi ve sonrası değişmez.</p>
+               
+               <div className="flex flex-col gap-5 mb-8">
+                 <div className="flex flex-col gap-2">
+                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Zammın Geçerli Olacağı Tarih</label>
+                     <input type="date" value={pastIncreaseData.date} onChange={(e) => setPastIncreaseData({...pastIncreaseData, date: e.target.value})} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-500 font-bold text-slate-700" />
+                 </div>
+                 <div className="flex flex-col gap-2">
+                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Uygulanacak Yeni Kira Bedeli (TL)</label>
+                     <div className="relative">
+                         <input type="number" placeholder="Örn: 2500" value={pastIncreaseData.amount} onChange={(e) => setPastIncreaseData({...pastIncreaseData, amount: e.target.value})} className="w-full border-2 border-orange-200 rounded-xl px-4 py-3 text-lg font-bold focus:outline-none focus:border-orange-500 bg-orange-50/50 text-orange-900" />
+                         <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-orange-400">TL</span>
+                     </div>
+                 </div>
+               </div>
+               
+               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                   <button onClick={() => setIsPastIncreaseModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-xl text-sm font-bold transition-colors">İptal</button>
+                   <button onClick={handleSavePastIncrease} disabled={!pastIncreaseData.date || !pastIncreaseData.amount} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 transition-colors flex items-center gap-2"><Check strokeWidth={3} size={18}/> Geçmiş Zammı Uygula</button>
+               </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* BELİRLİ AYIN KİRASINI DÜZENLE MODALI */}
+      {isEditSpecificMonthModalOpen && specificMonthEditData && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-orange-50 rounded-t-2xl">
+                 <h3 className="text-lg font-bold text-orange-700 flex items-center gap-2"><Edit size={20} /> Kira Düzenle</h3>
+                 <button onClick={() => setIsEditSpecificMonthModalOpen(false)} className="text-orange-400 hover:text-orange-600 bg-white p-1 rounded shadow-sm"><X size={20} /></button>
+             </div>
+             <div className="p-6">
+               <p className="text-sm text-gray-500 mb-6 text-center">Sadece bu ay için geçerli olacak yeni kira tutarını belirleyin. Bu tutar cari hesaba doğrudan işlenecektir.</p>
+               
+               <div className="flex flex-col gap-4 mb-6">
+                 <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 text-center">
+                     <span className="text-xs font-bold text-gray-500 block mb-1">İlgili Dönem</span>
+                     <span className="text-sm font-bold text-gray-800">{specificMonthEditData.title}</span>
+                 </div>
+                 <div className="flex flex-col gap-2">
+                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Yeni Kira Tutarını Girin (TL)</label>
+                     <div className="relative">
+                         <input type="number" value={specificMonthEditData.newAmount} onChange={(e) => setSpecificMonthEditData({...specificMonthEditData, newAmount: e.target.value})} className="w-full border-2 border-orange-200 rounded-xl px-4 py-3 text-xl font-black focus:outline-none focus:border-orange-500 bg-orange-50/30 text-orange-900" />
+                         <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-orange-400">TL</span>
+                     </div>
+                 </div>
+               </div>
+               
+               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                   <button onClick={() => setIsEditSpecificMonthModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl text-sm font-bold transition-colors">İptal</button>
+                   <button onClick={handleSaveSpecificMonthEdit} disabled={!specificMonthEditData.newAmount} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 transition-colors flex items-center gap-2"><Check strokeWidth={3} size={16}/> Tutarla Güncelle</button>
+               </div>
+             </div>
+          </div>
+        </div>
+      )}
+
       {isResetModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
@@ -6465,13 +7059,15 @@ const uploadFileToServer = async (file) => {
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Giriş-Çıkış Tutanağı</label>
                       <label className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24">
                         {entryExitData.protocolPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500">Tutanak Yükle</span></>)}
-<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEntryExitData({...entryExitData, protocolPhoto: url})); } }}/>                      </label>
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEntryExitData({...entryExitData, protocolPhoto: reader.result}); reader.readAsDataURL(file); } }}/>
+                      </label>
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Depo Son Hali</label>
                       <label className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24">
                         {entryExitData.finalPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500">Son Halini Yükle</span></>)}
-<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEntryExitData({...entryExitData, finalPhoto: url})); } }}/>                      </label>
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEntryExitData({...entryExitData, finalPhoto: reader.result}); reader.readAsDataURL(file); } }}/>
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -6528,14 +7124,10 @@ const uploadFileToServer = async (file) => {
                         </div>
                         <div>
                             <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fatura Görseli/PDF (Zorunlu)</label>
-<input type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setNewInvoice({...newInvoice, file: url})); } else { setNewInvoice({...newInvoice, file: null}); } }} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100" />                        </div>
+                            <input type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewInvoice({...newInvoice, file: reader.result}); reader.readAsDataURL(file); } else { setNewInvoice({...newInvoice, file: null}); } }} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100" />
+                        </div>
                         <div className="sm:col-span-2 flex justify-end mt-1">
-                            <button onClick={() => {
-                                if(!newInvoice.date || !newInvoice.file) return;
-                                const inv = { id: Date.now(), ...newInvoice };
-                                setCustomers(customers.map(c => c.id === selectedCustomerId ? { ...c, invoices: [...(c.invoices || []), inv] } : c));
-                                setNewInvoice({ invoiceNo: '', amount: '', date: new Date().toISOString().split('T')[0], file: null });
-                            }} disabled={!newInvoice.date || !newInvoice.file} className="bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors whitespace-nowrap">Ekle</button>
+                            <button onClick={handleAddInvoice} disabled={!newInvoice.date || !newInvoice.file} className="bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors whitespace-nowrap">Ekle</button>
                         </div>
                     </div>
                 </div>
@@ -6562,9 +7154,7 @@ const uploadFileToServer = async (file) => {
                                             {inv.file ? <a href={inv.file} target="_blank" rel="noreferrer" className="text-indigo-500 hover:underline font-medium text-xs">İncele</a> : <span className="text-gray-400 text-xs">-</span>}
                                         </td>
                                         <td className="p-3 text-center">
-                                            <button onClick={() => {
-                                                setCustomers(customers.map(c => c.id === selectedCustomerId ? { ...c, invoices: c.invoices.filter(i => i.id !== inv.id) } : c));
-                                            }} className="text-red-500 hover:text-red-700 p-1 rounded transition-colors"><Trash2 size={16}/></button>
+                                            <button onClick={() => handleDeleteInvoice(inv.id)} className="text-red-500 hover:text-red-700 p-1 rounded transition-colors"><Trash2 size={16}/></button>
                                         </td>
                                     </tr>
                                 ));
@@ -6608,7 +7198,7 @@ const uploadFileToServer = async (file) => {
                            <div className="flex flex-col items-center">
                               <Check size={32} className="text-[#1bc5bd] mb-2" />
                               <span className="text-sm font-bold text-teal-600">Belge Eklendi</span>
-                              <img src={editCustomerData.documentPhoto} alt="Belge" referrerPolicy="no-referrer" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                              <img src={editCustomerData.documentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
                            </div>
                         ) : (
                            <>
@@ -6617,7 +7207,8 @@ const uploadFileToServer = async (file) => {
                              <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                            </>
                         )}
-<input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEditCustomerData({...editCustomerData, documentPhoto: url})); } }} />                      </label>
+                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEditCustomerData({...editCustomerData, documentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
+                      </label>
                       {editCustomerData.documentPhoto && (
                           <div className="flex justify-center mt-2">
                               <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, documentPhoto: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Mevcut Belgeyi Kaldır</button>
@@ -6652,7 +7243,7 @@ const uploadFileToServer = async (file) => {
                                    <div className="flex flex-col items-center">
                                       <Check size={32} className="text-indigo-500 mb-2" />
                                       <span className="text-sm font-bold text-indigo-600">Vekalet Belgesi Eklendi</span>
-                                      <img src={editCustomerData.proxyDocumentPhoto} alt="Belge" referrerPolicy="no-referrer" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                                      <img src={editCustomerData.proxyDocumentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
                                    </div>
                                 ) : (
                                    <>
@@ -6661,7 +7252,8 @@ const uploadFileToServer = async (file) => {
                                      <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                                    </>
                                 )}
-<input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { uploadFileToServer(file).then(url => setEditCustomerData({...editCustomerData, proxyDocumentPhoto: url})); } }} />                              </label>
+                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEditCustomerData({...editCustomerData, proxyDocumentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
+                              </label>
                               {editCustomerData.proxyDocumentPhoto && (
                                   <div className="flex justify-center mt-2">
                                       <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, proxyDocumentPhoto: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Mevcut Vekil Belgesini Kaldır</button>
@@ -7107,7 +7699,7 @@ const uploadFileToServer = async (file) => {
                       <div className="relative group cursor-pointer">
                           <div className="w-32 h-32 rounded-full border-4 border-gray-100 shadow-md overflow-hidden bg-gray-50 flex items-center justify-center">
                               {currentUserProfile.avatar ? (
-                                  <img src={currentUserProfile.avatar} alt="Avatar" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                                  <img src={currentUserProfile.avatar} alt="Avatar" className="w-full h-full object-cover" />
                               ) : (
                                   <span className="text-4xl font-bold text-gray-300">
                                       {currentUserProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
@@ -7283,6 +7875,47 @@ const uploadFileToServer = async (file) => {
                     <button onClick={handleUpdateSystemUser} disabled={!editUserData.username || !editUserData.password || !editUserData.name} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-8 py-2.5 rounded-xl text-sm font-bold shadow-sm shadow-blue-500/30 transition-colors flex items-center gap-2"><Check size={16} strokeWidth={3}/> Değişiklikleri Kaydet</button>
                 </div>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* TÜM CARİLERİ (DEPO ÖDEMELERİ) GÜNCELLEME MODALI */}
+      {isUpdateAllModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md animate-in zoom-in overflow-hidden flex flex-col">
+             {isUpdatingAll ? (
+                 <div className="p-10 flex flex-col items-center justify-center text-center h-[350px]">
+                     <RefreshCcw size={56} className="text-indigo-500 animate-spin mb-6" />
+                     <h3 className="text-xl font-bold text-gray-800 mb-2">Hesaplar Güncelleniyor...</h3>
+                     <p className="text-sm text-gray-500 leading-relaxed font-medium">Tüm odaların giriş tarihleri ve bugünün tarihi karşılaştırılarak cari hesaplar yeniden hesaplanıyor.</p>
+                 </div>
+             ) : (
+                 <>
+                     <div className="p-6 bg-gradient-to-r from-purple-600 to-indigo-600 flex justify-center">
+                         <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg">
+                             <Check size={40} className="text-indigo-600" strokeWidth={3} />
+                         </div>
+                     </div>
+                     <div className="p-8 text-center">
+                         <h3 className="text-2xl font-black text-gray-800 mb-2 tracking-tight">Güncelleme Tamamlandı!</h3>
+                         <p className="text-sm text-gray-500 mb-6 font-medium">Sistemdeki tüm müşterilerin cari hesapları bugünün tarihi olan <strong>{updateAllStats?.date}</strong> baz alınarak tarandı ve güncel kiralar hesaplara işlendi.</p>
+                         
+                         <div className="bg-slate-50 rounded-2xl p-4 border border-gray-100 mb-8 flex gap-4 shadow-inner">
+                             <div className="flex-1">
+                                 <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Borçlu Müşteri</div>
+                                 <div className="text-2xl font-black text-slate-700">{updateAllStats?.affectedCustomers}</div>
+                             </div>
+                             <div className="w-px bg-gray-200"></div>
+                             <div className="flex-1">
+                                 <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Toplam Alacak</div>
+                                 <div className="text-xl font-black text-red-500 mt-1">{updateAllStats?.totalUnpaid?.toLocaleString('tr-TR')} TL</div>
+                             </div>
+                         </div>
+                         
+                         <button onClick={() => setIsUpdateAllModalOpen(false)} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 py-3.5 rounded-xl font-bold transition-colors">Pencereyi Kapat</button>
+                     </div>
+                 </>
+             )}
           </div>
         </div>
       )}
