@@ -1930,11 +1930,21 @@ const handleCancelReservation = async () => {
           }
       }
 
-      if (unmatchedCount > 0 && db && firebaseUser) {
+if (unmatchedCount > 0 && db && firebaseUser) {
           for (const pending of newPendingCollections) {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)), pending, { merge: true });
           }
       }
+
+      setBulkProcessResult({
+          matchedCount,
+          unmatchedCount,
+          totalMatchedAmount,
+          totalUnmatchedAmount,
+          addedPaymentIds,
+          addedPendingIds
+      });
+  };
 
   const handleUndoBulkProcess = async () => {
       if (!bulkProcessResult) return;
@@ -7922,4 +7932,5 @@ const handleSaveAppointment = async () => {
 
     </div>
   );
+}
 }
