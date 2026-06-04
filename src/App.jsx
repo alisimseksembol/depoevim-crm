@@ -7933,4 +7933,3 @@ const handleSaveAppointment = async () => {
     </div>
   );
 }
-}
