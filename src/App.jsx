@@ -49,16 +49,19 @@ import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query } from
 // ============================================================================
 // 🗄️ FIREBASE ENTEGRASYON HAZIRLIĞI VE YAPILANDIRMASI
 // ============================================================================
-const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-const firebaseConfig = firebaseConfigStr ? JSON.parse(firebaseConfigStr) : null;
-let app, auth, db, appId;
+const firebaseConfig = {
+    apiKey: "AIzaSyAK-4baYcG60nDIryh_ia_bJ5bsnVdIsaA",
+    authDomain: "depoevim-crm.firebaseapp.com",
+    projectId: "depoevim-crm",
+    storageBucket: "depoevim-crm.firebasestorage.app",
+    messagingSenderId: "805423278855",
+    appId: "1:805423278855:web:e16e8131eff6dc5e1eb3a2"
+};
 
-if (firebaseConfig) {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-}
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = 'depoevim-crm';
 // ============================================================================
 
 // Mini grafik bileşeni
