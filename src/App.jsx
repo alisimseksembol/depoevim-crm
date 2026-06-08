@@ -44,7 +44,7 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc } from 'firebase/firestore';
 
 // ============================================================================
 // 🗄️ FIREBASE ENTEGRASYON HAZIRLIĞI VE YAPILANDIRMASI
@@ -61,8 +61,41 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = 'depoevim-crm';
+
+// appId Canvas / Önizleme ortamına uygun şekilde dinamik hale getirildi.
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'depoevim-crm';
 // ============================================================================
+
+// Mini grafik bileşeni
+// ============================================================================
+
+// --- RESİM/DOSYA YÜKLEME YARDIMCI FONKSİYONU ---
+const uploadImageToServer = async (file) => {
+    if (!file) return null;
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        // İstenen yükleme adresi (Sunucudaki upload.php endpoint'iniz)
+        const response = await fetch('https://www.depoevim.com/crm/upload.php', {
+            method: 'POST',
+            body: formData
+        });
+        if (response.ok) {
+            const data = await response.json();
+            if (data.url) return data.url; 
+        }
+    } catch (error) {
+        console.warn('Sunucuya yüklenemedi (API yok veya CORS hatası), Base64 olarak devam ediliyor.', error);
+    }
+    
+    // Sunucu başarısız olursa veya henüz PHP hazır değilse çökmeyi engellemek için Base64'e çevir
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+    });
+};
 
 // Mini grafik bileşeni
 const Sparkline = ({ data, color }) => {
@@ -1155,10 +1188,9 @@ const handleAddExtraDocument = async (e, customerId) => {
       if (!customerToUpdate || !db || !firebaseUser) return;
 
       const promises = files.map(file => {
-          return new Promise((resolve) => {
-              const reader = new FileReader();
-              reader.onloadend = () => { resolve({ id: Date.now() + Math.random(), url: reader.result, name: file.name }); };
-              reader.readAsDataURL(file);
+          return new Promise(async (resolve) => {
+              const url = await uploadImageToServer(file);
+              resolve({ id: Date.now() + Math.random(), url: url, name: file.name });
           });
       });
 
@@ -3678,8 +3710,7 @@ const handleSaveAppointment = async () => {
                              <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                            </>
                         )}
-                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, documentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
-                      </label>
+ <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setNewCustomer({...newCustomer, documentPhoto: url}); } }} />                      </label>
                   </div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Özel Notlar</label><textarea value={newCustomer.notes} onChange={(e) => setNewCustomer({...newCustomer, notes: e.target.value})} rows="3" placeholder="Müşteri hakkında eklemek istediğiniz notlar..." className="border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 resize-none font-medium text-slate-700"></textarea></div>
                   
@@ -3718,8 +3749,7 @@ const handleSaveAppointment = async () => {
                                      <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                                    </>
                                 )}
-                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewCustomer({...newCustomer, proxyDocumentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
-                              </label>
+    <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setNewCustomer({...newCustomer, proxyDocumentPhoto: url}); } }} />                              </label>
                           </div>
                       </div>
                   )}
@@ -6574,8 +6604,7 @@ const handleSaveAppointment = async () => {
                      ) : (
                        <><Upload size={20} className="text-gray-400 mb-2 group-hover:text-[#1bc5bd] transition-colors" /><span className="text-xs text-gray-500 font-medium">Depoya yerleşim yapıldıktan sonraki fotoğrafı yükleyin</span><span className="text-[10px] text-gray-400 mt-1">PNG, JPG formatlarında</span></>
                      )}
-                     <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setRentData({...rentData, entryPhoto: reader.result}); reader.readAsDataURL(file); } }}/>
-                   </label>
+<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url}); } }}/>                   </label>
                  </div>
                </div>
                
@@ -6714,8 +6743,7 @@ const handleSaveAppointment = async () => {
                    <label className="text-xs font-semibold text-gray-600">Boş Depo Görseli (İsteğe Bağlı)</label>
                    <label className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 transition-colors cursor-pointer group">
                      {endRentData.photo ? (<div className="text-green-500 font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Fotoğraf Eklendi</span></div>) : (<><Upload size={20} className="text-gray-400 mb-2 group-hover:text-cyan-500 transition-colors" /><span className="text-xs text-gray-500">Çıkış yapılan boş deponun fotoğrafını yükle</span></>)}
-                     <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEndRentData({...endRentData, photo: reader.result}); reader.readAsDataURL(file); } }}/>
-                   </label>
+<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEndRentData({...endRentData, photo: url}); } }}/>                   </label>
                  </div>
                </div>
                <div className="flex justify-end gap-3"><button onClick={() => setIsEndRentModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded text-sm font-medium">İptal</button><button onClick={handleEndRentConfirm} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded text-sm font-medium flex items-center gap-2"><LogOut size={16} /> Çıkışı Onayla</button></div>
@@ -7072,15 +7100,13 @@ const handleSaveAppointment = async () => {
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Giriş-Çıkış Tutanağı</label>
                       <label className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24">
                         {entryExitData.protocolPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500">Tutanak Yükle</span></>)}
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEntryExitData({...entryExitData, protocolPhoto: reader.result}); reader.readAsDataURL(file); } }}/>
-                      </label>
+<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEntryExitData({...entryExitData, protocolPhoto: url}); } }}/>                      </label>
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Depo Son Hali</label>
                       <label className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24">
                         {entryExitData.finalPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500">Son Halini Yükle</span></>)}
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEntryExitData({...entryExitData, finalPhoto: reader.result}); reader.readAsDataURL(file); } }}/>
-                      </label>
+<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEntryExitData({...entryExitData, finalPhoto: url}); } }}/>                      </label>
                     </div>
                   </div>
                 </div>
@@ -7220,8 +7246,7 @@ const handleSaveAppointment = async () => {
                              <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                            </>
                         )}
-                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEditCustomerData({...editCustomerData, documentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
-                      </label>
+<input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEditCustomerData({...editCustomerData, documentPhoto: url}); } }} />                      </label>
                       {editCustomerData.documentPhoto && (
                           <div className="flex justify-center mt-2">
                               <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, documentPhoto: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Mevcut Belgeyi Kaldır</button>
@@ -7265,8 +7290,7 @@ const handleSaveAppointment = async () => {
                                      <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
                                    </>
                                 )}
-                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setEditCustomerData({...editCustomerData, proxyDocumentPhoto: reader.result}); reader.readAsDataURL(file); } }} />
-                              </label>
+<input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEditCustomerData({...editCustomerData, proxyDocumentPhoto: url}); } }} />                              </label>
                               {editCustomerData.proxyDocumentPhoto && (
                                   <div className="flex justify-center mt-2">
                                       <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, proxyDocumentPhoto: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Mevcut Vekil Belgesini Kaldır</button>
@@ -7722,14 +7746,13 @@ const handleSaveAppointment = async () => {
                           <label className="absolute inset-0 bg-black/50 text-white flex flex-col items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
                               <Upload size={24} className="mb-1" />
                               <span className="text-xs font-bold mt-1">Fotoğraf<br/>Değiştir</span>
-                              <input type="file" accept="image/*" className="hidden" onChange={(e) => {
-                                  const file = e.target.files[0];
-                                  if(file) {
-                                      const reader = new FileReader();
-                                      reader.onloadend = () => setCurrentUserProfile({...currentUserProfile, avatar: reader.result});
-                                      reader.readAsDataURL(file);
-                                  }
-                              }}/>
+<input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+    const file = e.target.files[0];
+    if(file) {
+        const url = await uploadImageToServer(file);
+        setCurrentUserProfile({...currentUserProfile, avatar: url});
+    }
+}}/>
                           </label>
                       </div>
                       <div className="text-center">
