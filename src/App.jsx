@@ -83,7 +83,10 @@ const uploadImageToServer = async (file) => {
         });
         if (response.ok) {
             const data = await response.json();
-            if (data.url) return data.url; 
+            if (data.url) {
+                // YENİ EKLENEN: Eğer PHP dosyası sadece "uploads/resim.jpg" gibi yarım bir link dönüyorsa başına site adresini ekle
+                return data.url.startsWith('http') ? data.url : `https://www.depoevim.com/crm/${data.url}`;
+            }
         }
     } catch (error) {
         console.warn('Sunucuya yüklenemedi (API yok veya CORS hatası), Base64 olarak devam ediliyor.', error);
@@ -210,7 +213,7 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
 
-  // --- YENİ EKLENEN: MOBİL UYUMLULUK VE TAM EKRAN (VIEWPORT) AYARI ---
+// --- YENİ EKLENEN: MOBİL UYUMLULUK VE TAM EKRAN (VIEWPORT) AYARI ---
   useEffect(() => {
       // Tarayıcıya uygulamanın mobil cihazın kendi çözünürlüğünde çalışması gerektiğini söylüyoruz
       let meta = document.querySelector('meta[name="viewport"]');
@@ -222,6 +225,17 @@ export default function App() {
       // initial-scale=1.0 ve user-scalable=0 ile uzaklaştırma/yakınlaştırma ihtiyacını ortadan kaldırır
       meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0';
       
+      // --- YENİ EKLENEN: Hotlink (Referrer) Korumasını Aşmak İçin ---
+      // Resimler link olarak açılıp uygulama içinde görünmüyorsa bu ayar onu çözer.
+      let metaReferrer = document.querySelector('meta[name="referrer"]');
+      if (!metaReferrer) {
+          metaReferrer = document.createElement('meta');
+          metaReferrer.name = 'referrer';
+          document.head.appendChild(metaReferrer);
+      }
+      metaReferrer.content = 'no-referrer';
+      // --------------------------------------------------------------
+
       // Yatay kaymaları tamamen engellemek için genel stiller
       document.body.style.overflowX = 'hidden';
       document.documentElement.style.overflowX = 'hidden';
