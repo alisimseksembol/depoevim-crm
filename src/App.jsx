@@ -255,6 +255,52 @@ export default function App() {
   
   const [firebaseUser, setFirebaseUser] = useState(null);
 
+  // JSON İndirme Fonksiyonu
+  const handleExportJSON = () => {
+    // Mevcut state'lerinizdeki verileri topluyoruz
+    const backupData = {
+      customers,
+      warehouses,
+      blocks,
+      rooms,
+      settings: [] // Eğer settings state'iniz varsa buraya ekleyin
+    };
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `depoevim_yedek_${new Date().toISOString().slice(0,10)}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  // JSON Yükleme Fonksiyonu
+  const handleImportJSON = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const importedData = JSON.parse(e.target.result);
+        
+        // ÖNEMLİ: Toplu veri yüklemesi yaparken Firebase üzerindeki günlük 50.000 işlem kotasını 
+        // hızlıca doldurmamak adına, sadece gerçekten değişen veya yeni verileri yazacak 
+        // bir döngü mantığı kurmak ileride faydalı olabilir. Şimdilik basit logluyoruz.
+        
+        console.log("İçe aktarılacak veriler:", importedData);
+        alert("Dosya başarıyla okundu! Veritabanına yazma işlemini (Firestore setDoc) buraya entegre edebilirsiniz.");
+        
+        // Örnek: importedData.customers.forEach(customer => { setDoc(...) })
+      } catch (error) {
+        alert("Geçersiz JSON dosyası!");
+        console.error(error);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   // 1. Firebase Kimlik Doğrulama
   useEffect(() => {
       if (!auth) return;
@@ -2694,11 +2740,12 @@ const handleSaveAppointment = async () => {
         { id: 'panel-kullanicilari', label: 'Panel Kullanıcıları' },
         { id: 'kullanici-rolleri', label: 'Kullanıcı Rolleri' }
     ] },
-    { id: 'sistem-ayarlari', label: 'Sistem Ayarları', icon: Settings, subItems: [
+{ id: 'sistem-ayarlari', label: 'Sistem Ayarları', icon: Settings, 
+    subItems: [
         { id: 'pdf-sozlesme', label: 'PDF & Sözleşme Ayarları' },
-        { id: 'tahsilat-oranlari', label: 'Tahsilat Oranları' }
+        { id: 'tahsilat-oranlari', label: 'Tahsilat Oranları' },
+        { id: 'sistem-yedekleme', label: 'Sistem Yedekleme' }
     ] },
-  ];
 
   const selectedRoomDetail = rooms.find(r => r.id === selectedRoomId);
 
@@ -5560,8 +5607,41 @@ const handleSaveAppointment = async () => {
                   <div className="flex justify-end mt-10 border-t border-gray-100 pt-6">
 <button onClick={handleSaveCollectionRates} className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-lg shadow-teal-500/30 transition-all transform hover:-translate-y-0.5 flex items-center gap-2">
                           <Check size={18} strokeWidth={3} /> Oranları Kaydet
-                      </button>
+</button>
                   </div>
+              </div>
+            </div>
+          ) : activeMenu === 'sistem-yedekleme' ? (
+            <div className="max-w-5xl mx-auto pb-10 animate-in fade-in duration-300">
+              <div className="mb-6">
+                <h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Sistem Ayarları</h1>
+                <h2 className="text-2xl font-bold text-slate-800">Sistem Yedekleme</h2>
+                <p className="text-sm text-gray-500 mt-1">Tüm veritabanını JSON olarak indirin veya geri yükleyin.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
+                  <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-4">
+                    <Download size={32} />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800 mb-2">Yedek İndir</h3>
+                  <p className="text-sm text-gray-500 mb-6">Müşteriler, odalar, bloklar ve tüm sistem ayarlarını bilgisayarınıza JSON dosyası olarak indirin.</p>
+                  <button onClick={handleExportJSON} className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30">
+                    <Download size={18} /> JSON Olarak İndir
+                  </button>
+                </div>
+
+                <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
+                  <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mb-4">
+                    <Upload size={32} />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800 mb-2">Yedek Yükle</h3>
+                  <p className="text-sm text-gray-500 mb-6">Daha önce aldığınız bir JSON yedeğini sisteme yükleyerek verileri geri getirin.</p>
+                  <label className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 cursor-pointer">
+                    <Upload size={18} /> JSON Dosyası Seç
+                    <input type="file" accept=".json" className="hidden" onChange={handleImportJSON} />
+                  </label>
+                </div>
               </div>
             </div>
           ) : activeMenu === 'finans-rapor' ? (
