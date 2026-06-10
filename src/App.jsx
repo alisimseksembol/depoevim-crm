@@ -2702,6 +2702,7 @@ const handleSaveAppointment = async () => {
         { id: 'tahsilat-oranlari', label: 'Tahsilat Oranları' },
         { id: 'sistem-yedekleme', label: 'Sistem Yedekleme' }
     ] },
+  ]; // <-- İŞTE EKSİK OLAN KAPANIŞ PARANTEZİ BU!
 
   const selectedRoomDetail = rooms.find(r => r.id === selectedRoomId);
 
