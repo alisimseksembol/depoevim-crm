@@ -256,17 +256,9 @@ export default function App() {
   
   const [firebaseUser, setFirebaseUser] = useState(null);
 
-  // JSON İndirme Fonksiyonu
+// JSON İndirme Fonksiyonu
   const handleExportJSON = () => {
-    // Mevcut state'lerinizdeki verileri topluyoruz
-    const backupData = {
-      customers,
-      warehouses,
-      blocks,
-      rooms,
-      settings: [] // Eğer settings state'iniz varsa buraya ekleyin
-    };
-
+    const backupData = { customers, warehouses, blocks, rooms };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
@@ -280,27 +272,20 @@ export default function App() {
   const handleImportJSON = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         const importedData = JSON.parse(e.target.result);
-        
-        // ÖNEMLİ: Toplu veri yüklemesi yaparken Firebase üzerindeki günlük 50.000 işlem kotasını 
-        // hızlıca doldurmamak adına, sadece gerçekten değişen veya yeni verileri yazacak 
-        // bir döngü mantığı kurmak ileride faydalı olabilir. Şimdilik basit logluyoruz.
-        
         console.log("İçe aktarılacak veriler:", importedData);
-        alert("Dosya başarıyla okundu! Veritabanına yazma işlemini (Firestore setDoc) buraya entegre edebilirsiniz.");
-        
-        // Örnek: importedData.customers.forEach(customer => { setDoc(...) })
+        alert("Dosya başarıyla okundu! Yüklenen veriler konsolda görünüyor.");
       } catch (error) {
         alert("Geçersiz JSON dosyası!");
-        console.error(error);
       }
     };
     reader.readAsText(file);
   };
+
+  if (!isAuthenticated) { // <-- Senin arattığın satır burası
 
   // 1. Firebase Kimlik Doğrulama
   useEffect(() => {
