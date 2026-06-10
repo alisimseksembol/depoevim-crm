@@ -34,12 +34,13 @@ import {
   MessageCircle,
   Phone,
   FileText as FileTextIcon,
-  History,
+History,
   Download,
   Info,
   Key,
   Check,
-  Gift
+  Gift,
+  Database
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
