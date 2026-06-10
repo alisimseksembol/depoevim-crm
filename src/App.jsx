@@ -254,41 +254,11 @@ export default function App() {
   // Firebase'e bağlandığında, burası tüm uygulamanın verilerinin çekildiği ve 
   // dinlendiği ana merkez olacaktır. Data eklemeye / eşleştirmeye buradan başlayabilirsiniz.
   
-  const [firebaseUser, setFirebaseUser] = useState(null);
-
-// JSON İndirme Fonksiyonu
-  const handleExportJSON = () => {
-    const backupData = { customers, warehouses, blocks, rooms };
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `depoevim_yedek_${new Date().toISOString().slice(0,10)}.json`);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
-  };
-
-  // JSON Yükleme Fonksiyonu
-  const handleImportJSON = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const importedData = JSON.parse(e.target.result);
-        console.log("İçe aktarılacak veriler:", importedData);
-        alert("Dosya başarıyla okundu! Yüklenen veriler konsolda görünüyor.");
-      } catch (error) {
-        alert("Geçersiz JSON dosyası!");
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  if (!isAuthenticated) { // <-- Senin arattığın satır burası
+const [firebaseUser, setFirebaseUser] = useState(null);
 
   // 1. Firebase Kimlik Doğrulama
   useEffect(() => {
+
       if (!auth) return;
       const initAuth = async () => {
           try {
@@ -3168,10 +3138,41 @@ const handleSaveAppointment = async () => {
     return rooms.filter(r => whBlockIds.includes(r.blockId)).reduce((sum, room) => sum + Number(room.m3 || 0), 0);
   };
   const getBlockOccupiedM3 = (blockId) => rooms.filter(r => r.blockId === blockId && (r.customerName || (r.isReserved && (!r.reserveExpiryTimestamp || r.reserveExpiryTimestamp > Date.now())))).reduce((sum, room) => sum + Number(room.m3 || 0), 0);
-  const getWarehouseOccupiedM3 = (warehouseId) => {
+const getWarehouseOccupiedM3 = (warehouseId) => {
     const whBlockIds = blocks.filter(b => b.warehouseId === warehouseId).map(b => b.id);
     return rooms.filter(r => whBlockIds.includes(r.blockId) && (r.customerName || (r.isReserved && (!r.reserveExpiryTimestamp || r.reserveExpiryTimestamp > Date.now())))).reduce((sum, room) => sum + Number(room.m3 || 0), 0);
   };
+
+  // ==========================================
+  // YEDEKLEME FONKSİYONLARI
+  // ==========================================
+  const handleExportJSON = () => {
+    const backupData = { customers, warehouses, blocks, rooms };
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `depoevim_yedek_${new Date().toISOString().slice(0,10)}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleImportJSON = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const importedData = JSON.parse(e.target.result);
+        console.log("İçe aktarılacak veriler:", importedData);
+        alert("Dosya başarıyla okundu! Yüklenen veriler konsolda görünüyor.");
+      } catch (error) {
+        alert("Geçersiz JSON dosyası!");
+      }
+    };
+    reader.readAsText(file);
+  };
+  // ==========================================
 
   if (!isAuthenticated) {
       return (
