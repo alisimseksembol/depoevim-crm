@@ -285,7 +285,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const unsubBlocks = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() })); if (fetchedData.length > 0) setBlocks(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubRooms = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() })); if (fetchedData.length > 0) setRooms(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubPendingCollections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pendingCollections'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setPendingCollections(fetchedData); }, (error) => console.error("Hata:", error));
-      const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Mustafa Beşinci', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
+      const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
       const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
       
       // 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
@@ -308,7 +308,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   
-  const [systemUsers, setSystemUsers] = useState([]);
+  const [systemUsers, setSystemUsers] = useState([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]);
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserData, setNewUserData] = useState({ username: '', password: '', name: '', role: 'Personel', email: '', phone: '' });
 
@@ -630,8 +630,8 @@ const handleAssignPendingPayment = async () => {
       const paymentToAssign = pendingCollections.find(p => p.id === assignData.paymentId);
       if (!paymentToAssign) return;
 
-      const customerId = parseInt(assignData.customerId);
-      const customerToUpdate = customers.find(c => c.id === customerId);
+      const customerId = assignData.customerId;
+      const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
 
       if (customerToUpdate && db && firebaseUser) {
           try {
@@ -1231,7 +1231,7 @@ const handleAddExtraDocument = async (e, customerId) => {
   const [customers, setCustomers] = useState([]);
 
 const handleSaveCustomer = async () => {
-      if (!newCustomer.name) return;
+      if (!newCustomer.name || !newCustomer.tc || !newCustomer.phone) return;
       let newNo = '';
       let isUnique = false;
       while (!isUnique) {
@@ -1510,6 +1510,9 @@ const handleAddInvoice = async () => {
   const [isEditWarehouseModalOpen, setIsEditWarehouseModalOpen] = useState(false);
   const [editWarehouseData, setEditWarehouseData] = useState(null);
 
+  const [isDeleteWarehouseModalOpen, setIsDeleteWarehouseModalOpen] = useState(false);
+  const [warehouseToDelete, setWarehouseToDelete] = useState(null);
+
   const [warehouses, setWarehouses] = useState([]);
 
   const handleAddWarehouse = async () => {
@@ -1527,6 +1530,25 @@ const handleAddInvoice = async () => {
           } catch (e) { console.error("Firebase Depo Güncelleme Hatası:", e); }
       }
       setIsEditWarehouseModalOpen(false); setEditWarehouseData(null);
+  };
+
+  const handleDeleteWarehouseClick = (e, id) => {
+      e.stopPropagation();
+      setWarehouseToDelete(id);
+      setIsDeleteWarehouseModalOpen(true);
+  };
+
+  const confirmDeleteWarehouse = async () => {
+      if (!warehouseToDelete) return;
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(warehouseToDelete)));
+          } catch (e) { console.error("Firebase Depo Silme Hatası:", e); }
+      } else {
+          setWarehouses(warehouses.filter(w => w.id !== warehouseToDelete));
+      }
+      setIsDeleteWarehouseModalOpen(false);
+      setWarehouseToDelete(null);
   };
 
   const moveWarehouseUp = (index, e) => {
@@ -2295,8 +2317,8 @@ const handleGlobalPayment = async () => {
             } catch(e) { console.error("Askıda Ödeme Kayıt Hatası:", e); }
         }
     } else {
-        const customerId = parseInt(globalPaymentData.customerId);
-        const customerToUpdate = customers.find(c => c.id === customerId);
+        const customerId = globalPaymentData.customerId;
+        const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
         if (customerToUpdate && db && firebaseUser) {
             try {
                 const existingPayments = customerToUpdate.payments || [];
@@ -3738,9 +3760,9 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                     <label className="text-xs font-bold text-[#1bc5bd] uppercase tracking-wider">Müşteri Numarası (Sistem Ataması)</label>
                     <input type="text" readOnly value="Kayıt tamamlandığında otomatik olarak 5 haneli benzersiz numara atanacaktır." className="border-2 border-[#1bc5bd]/20 bg-teal-50/50 rounded-xl px-4 py-2.5 text-sm focus:outline-none font-semibold text-teal-700 cursor-not-allowed" />
                   </div>
-                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'Ad Soyad' : 'Firma Adı / Yetkili Kişi'}</label><input type="text" value={newCustomer.name} onChange={(e) => setNewCustomer({...newCustomer, name: e.target.value})} placeholder={customerType === 'bireysel' ? 'Ad Soyad' : 'Firma Adı'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
-                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'TC Kimlik Numarası' : 'Vergi Numarası / Dairesi'}</label><input type="text" value={newCustomer.tc} onChange={(e) => setNewCustomer({...newCustomer, tc: e.target.value})} placeholder={customerType === 'bireysel' ? 'TC Kimlik No' : 'Vergi No'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
-                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Telefon Numarası</label><input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({...newCustomer, phone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
+                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'Ad Soyad (Zorunlu)' : 'Firma Adı / Yetkili Kişi (Zorunlu)'}</label><input type="text" value={newCustomer.name} onChange={(e) => setNewCustomer({...newCustomer, name: e.target.value})} placeholder={customerType === 'bireysel' ? 'Ad Soyad' : 'Firma Adı'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
+                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'TC Kimlik Numarası (Zorunlu)' : 'Vergi Numarası / Dairesi (Zorunlu)'}</label><input type="text" value={newCustomer.tc} onChange={(e) => setNewCustomer({...newCustomer, tc: e.target.value})} placeholder={customerType === 'bireysel' ? 'TC Kimlik No' : 'Vergi No'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
+                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Telefon Numarası (Zorunlu)</label><input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({...newCustomer, phone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Alternatif Telefon (İsteğe Bağlı)</label><input type="text" value={newCustomer.altPhone} onChange={(e) => setNewCustomer({...newCustomer, altPhone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Müşteri Adresi</label><input type="text" value={newCustomer.address} onChange={(e) => setNewCustomer({...newCustomer, address: e.target.value})} placeholder="Tam Adres" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2 mt-2">
@@ -3805,7 +3827,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
 
                 </div>
                 <div className="mt-8 flex justify-end gap-4 border-t border-gray-100 pt-6">
-                  <button onClick={handleSaveCustomer} disabled={!newCustomer.name} className="bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold text-lg transition-colors shadow-lg shadow-red-500/30">Kişiyi Kaydet</button>
+                  <button onClick={handleSaveCustomer} disabled={!newCustomer.name || !newCustomer.tc || !newCustomer.phone} className="bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold text-lg transition-colors shadow-lg shadow-red-500/30">Kişiyi Kaydet</button>
                 </div>
               </div>
             </div>
@@ -4051,7 +4073,11 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                            <td className="px-6 py-3 text-right font-semibold text-red-500">{tx.debt > 0 ? `${(tx.baseDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL` : '-'}</td>
                                            <td className="px-6 py-3 text-right font-semibold text-orange-500">{tx.debt > 0 ? `${(tx.kdvDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL` : '-'}</td>
                                            <td className="px-6 py-3 text-right font-semibold text-green-600">{tx.credit > 0 ? `${tx.credit.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL` : '-'}</td>
-                                           <td className="px-6 py-3 text-right font-bold text-gray-800">{tx.balance.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
+                                           <td className="px-6 py-3 text-right">
+                                               <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-black border shadow-sm ${tx.balance > 0 ? 'bg-red-50 text-red-700 border-red-200' : tx.balance < 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                                                   {tx.balance.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL
+                                               </span>
+                                           </td>
                                         </tr>
                                      )) : (
                                         <tr>
@@ -4066,7 +4092,11 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                            <td className="px-6 py-4 text-right text-red-600">{ledger.reduce((sum, tx) => sum + (tx.baseDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
                                            <td className="px-6 py-4 text-right text-orange-600">{ledger.reduce((sum, tx) => sum + (tx.kdvDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
                                            <td className="px-6 py-4 text-right text-green-600">{ledger.reduce((sum, tx) => sum + tx.credit, 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
-                                           <td className="px-6 py-4 text-right text-slate-800">{runningBalance.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
+                                           <td className="px-6 py-4 text-right">
+                                               <span className={`inline-block px-3 py-1.5 rounded-lg text-sm font-black text-white shadow-md ${runningBalance > 0 ? 'bg-red-500 shadow-red-500/30' : runningBalance < 0 ? 'bg-green-500 shadow-green-500/30' : 'bg-slate-600 shadow-slate-500/30'}`}>
+                                                   {runningBalance.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL
+                                               </span>
+                                           </td>
                                         </tr>
                                      </tfoot>
                                   )}
@@ -5023,7 +5053,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                           </div>
                           <div className="flex gap-1.5 z-10" onClick={e => e.stopPropagation()}>
                             <button onClick={(e) => { e.stopPropagation(); setEditWarehouseData({...depo}); setIsEditWarehouseModalOpen(true); }} className="bg-gray-100 hover:bg-[#1bc5bd] hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="Düzenle"><Edit size={14} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); setWarehouses(warehouses.filter(w => w.id !== depo.id)); }} className="bg-gray-100 hover:bg-[#f64e60] hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="Depoyu Sil"><Trash2 size={14} /></button>
+                            <button onClick={(e) => handleDeleteWarehouseClick(e, depo.id)} className="bg-gray-100 hover:bg-[#f64e60] hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="Depoyu Sil"><Trash2 size={14} /></button>
                             <div className="flex flex-col gap-1 ml-1">
                               <button onClick={(e) => moveWarehouseUp(index, e)} disabled={index === 0} className="bg-gray-100 hover:bg-gray-200 text-gray-400 p-0.5 rounded transition-colors disabled:opacity-30"><ArrowUp size={12} /></button>
                               <button onClick={(e) => moveWarehouseDown(index, e)} disabled={index === warehouses.length - 1} className="bg-gray-100 hover:bg-gray-200 text-gray-400 p-0.5 rounded transition-colors disabled:opacity-30"><ArrowDown size={12} /></button>
@@ -7991,6 +8021,27 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                 <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-gray-100">
                     <button onClick={() => setIsEditUserModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl text-sm font-bold transition-colors">İptal</button>
                     <button onClick={handleUpdateSystemUser} disabled={!editUserData.username || !editUserData.password || !editUserData.name} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-8 py-2.5 rounded-xl text-sm font-bold shadow-sm shadow-blue-500/30 transition-colors flex items-center gap-2"><Check size={16} strokeWidth={3}/> Değişiklikleri Kaydet</button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* DEPO SİL ONAY MODALI */}
+      {isDeleteWarehouseModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+                 <h3 className="text-xl font-bold text-red-600 mx-auto w-full text-center">Şubeyi Sil</h3>
+                 <button onClick={() => setIsDeleteWarehouseModalOpen(false)} className="absolute right-5 text-gray-400 hover:text-red-500"><X size={20} /></button>
+             </div>
+             <div className="p-6 text-center">
+                <div className="mx-auto bg-red-50 text-red-500 w-16 h-16 flex items-center justify-center rounded-full mb-4"><AlertCircle size={32} /></div>
+                <p className="text-gray-700 font-bold mb-2">Bu şubeyi silmek istediğinizden emin misiniz?</p>
+                <p className="text-gray-500 text-sm mb-6">Bu işlem geri alınamaz!</p>
+                <div className="flex justify-center gap-3">
+                    <button onClick={() => setIsDeleteWarehouseModalOpen(false)} className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2.5 rounded-lg font-bold transition-colors text-sm w-1/2">Hayır</button>
+                    <button onClick={confirmDeleteWarehouse} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg font-bold transition-colors flex items-center justify-center gap-2 text-sm w-1/2 shadow-lg shadow-red-500/30"><Trash2 size={16} /> Evet, Sil</button>
                 </div>
              </div>
           </div>
