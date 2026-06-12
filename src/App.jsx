@@ -1059,8 +1059,8 @@ const handleSaveEditPending = async () => {
 
       const d = new Date(tx.date);
       const dateStr = !isNaN(d.getTime()) ? `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}` : tx.date;
-      const netAmount = (tx.amount / 1.20).toFixed(0);
-      const kdvAmount = (tx.amount - netAmount).toFixed(0);
+      const netAmount = (tx.amount / 1.20).toFixed(2);
+      const kdvAmount = (tx.amount - netAmount).toFixed(2);
       const invoiceNo = tx.eInvoiceNo || 'MBT' + Math.floor(100000000 + Math.random() * 900000000);
 
       iframe.contentWindow.document.open();
@@ -7943,8 +7943,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
           const customer = customers.find(c => c.id === eInvoiceModalData.customerId);
           // Net ve KDV hesaplama örneği (KDV %20 varsayılmıştır)
           const totalAmount = eInvoiceModalData.amount;
-          const netAmount = (totalAmount / 1.20).toFixed(0);
-          const kdvAmount = (totalAmount - netAmount).toFixed(0);
+          const netAmount = (totalAmount / 1.20).toFixed(2);
+          const kdvAmount = (totalAmount - netAmount).toFixed(2);
           
           return (
             <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
