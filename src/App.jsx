@@ -281,9 +281,9 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       if (!firebaseUser || !db) return;
       
       const unsubCustomers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setCustomers(fetchedData); }, (error) => console.error("Hata:", error));
-      const unsubWarehouses = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'warehouses'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() })); if (fetchedData.length > 0) setWarehouses(fetchedData); }, (error) => console.error("Hata:", error));
-      const unsubBlocks = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() })); if (fetchedData.length > 0) setBlocks(fetchedData); }, (error) => console.error("Hata:", error));
-      const unsubRooms = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id), ...doc.data() })); if (fetchedData.length > 0) setRooms(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubWarehouses = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'warehouses'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setWarehouses(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubBlocks = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setBlocks(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubRooms = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setRooms(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubPendingCollections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pendingCollections'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setPendingCollections(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
       const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
@@ -427,11 +427,13 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       name: '', tc: '', phone: '', altPhone: '', address: '', notes: '',
       hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null
   });
+  const [customerSaveError, setCustomerSaveError] = useState('');
 
   // --- YENİ EKLENEN STATE'LER (Fatura ve Silme Modalları İçin) ---
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [newInvoice, setNewInvoice] = useState({ invoiceNo: '', amount: '', date: new Date().toISOString().split('T')[0], file: null });
   const [isDeleteCustomerModalOpen, setIsDeleteCustomerModalOpen] = useState(false);
+  const [customerToDeleteId, setCustomerToDeleteId] = useState(null);
   const [isEditCustomerModalOpen, setIsEditCustomerModalOpen] = useState(false);
   const [editCustomerData, setEditCustomerData] = useState(null);
 
@@ -448,6 +450,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
 
   const [debtMonthFilter, setDebtMonthFilter] = useState('all');
   const [debtSearchTerm, setDebtSearchTerm] = useState('');
+  const [ledgerFilterYear, setLedgerFilterYear] = useState(new Date().getFullYear().toString());
 
   // --- TAHSİLAT HAREKETLERİ STATE'LERİ ---
   const [collectionFilter, setCollectionFilter] = useState('all');
@@ -902,7 +905,7 @@ const handleSaveEditPending = async () => {
       }, 500);
   };
 
-  const handlePrintLedger = (customer, ledgerTransactions, finalBalance) => {
+  const handlePrintLedger = (customer, ledgerTransactions, finalBalance, periodStr = 'all') => {
       const iframe = document.createElement('iframe');
       iframe.style.display = 'none';
       document.body.appendChild(iframe);
@@ -911,10 +914,10 @@ const handleSaveEditPending = async () => {
           <tr>
               <td style="padding: 10px; border-bottom: 1px solid #eee;">${tx.dateStr}</td>
               <td style="padding: 10px; border-bottom: 1px solid #eee;">${tx.desc}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #dc2626; font-weight: bold;">${tx.debt > 0 ? (tx.baseDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' TL' : '-'}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #f97316; font-weight: bold;">${tx.debt > 0 ? (tx.kdvDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' TL' : '-'}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #16a34a; font-weight: bold;">${tx.credit > 0 ? tx.credit.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' TL' : '-'}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold; color: #1f2937;">${tx.balance.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #dc2626; font-weight: bold;">${tx.debt > 0 ? (tx.baseDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' TL' : '-'}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #f97316; font-weight: bold;">${tx.debt > 0 ? (tx.kdvDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' TL' : '-'}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #16a34a; font-weight: bold;">${tx.credit > 0 ? tx.credit.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' TL' : '-'}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold; color: #1f2937;">${tx.balance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
           </tr>
       `).join('');
 
@@ -941,7 +944,7 @@ const handleSaveEditPending = async () => {
           <body>
               <div class="watermark">Depoevim</div>
               <div class="header">
-                  <h2>MÜŞTERİ CARİ HESAP DÖKÜMÜ (EKSTRE)</h2>
+                  <h2>MÜŞTERİ CARİ HESAP DÖKÜMÜ (EKSTRE) ${periodStr !== 'all' ? `- ${periodStr} YILI` : ''}</h2>
               </div>
               <div class="info-box">
                   <div>
@@ -951,7 +954,7 @@ const handleSaveEditPending = async () => {
                   </div>
                   <div style="text-align: right;">
                       <div style="margin-bottom: 8px;"><strong>Belge Tarihi:</strong> ${new Date().toLocaleDateString('tr-TR')}</div>
-                      <div><strong>Güncel Bakiye:</strong> <span style="color: ${finalBalance > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold; font-size: 16px;">${finalBalance.toLocaleString('tr-TR')} TL</span></div>
+                      <div><strong>Güncel Bakiye:</strong> <span style="color: ${finalBalance > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold; font-size: 16px;">${finalBalance.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</span></div>
                   </div>
               </div>
               <table>
@@ -968,11 +971,11 @@ const handleSaveEditPending = async () => {
                   <tbody>
                       ${tableRows}
                       <tr class="total-row">
-                          <td colspan="2" style="text-align: right; color: #475569;">GENEL TOPLAM GÜNCEL BAKİYE:</td>
-                          <td style="text-align: right; color: #dc2626;">${ledgerTransactions.reduce((sum, tx) => sum + (tx.baseDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
-                          <td style="text-align: right; color: #f97316;">${ledgerTransactions.reduce((sum, tx) => sum + (tx.kdvDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
-                          <td style="text-align: right; color: #16a34a;">${ledgerTransactions.reduce((sum, tx) => sum + tx.credit, 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
-                          <td style="text-align: right; color: ${finalBalance > 0 ? '#dc2626' : '#16a34a'}; font-size: 16px;">${finalBalance.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
+                          <td colspan="2" style="text-align: right; color: #475569;">DÖNEM TOPLAMI / GÜNCEL BAKİYE:</td>
+                          <td style="text-align: right; color: #dc2626;">${ledgerTransactions.reduce((sum, tx) => sum + (tx.baseDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+                          <td style="text-align: right; color: #f97316;">${ledgerTransactions.reduce((sum, tx) => sum + (tx.kdvDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+                          <td style="text-align: right; color: #16a34a;">${ledgerTransactions.reduce((sum, tx) => sum + tx.credit, 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+                          <td style="text-align: right; color: ${finalBalance > 0 ? '#dc2626' : '#16a34a'}; font-size: 16px;">${finalBalance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
                       </tr>
                   </tbody>
               </table>
@@ -1031,7 +1034,7 @@ const handleSaveEditPending = async () => {
                   </div>
               </div>
               <div class="amount-box">
-                  Tahsil Edilen Tutar: ${tx.amount.toLocaleString('tr-TR')} TL
+                  Tahsil Edilen Tutar: ${tx.amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL
               </div>
               <div class="details">
                   <p><strong>Açıklama / Dekont Notu:</strong> ${tx.note}</p>
@@ -1056,8 +1059,8 @@ const handleSaveEditPending = async () => {
 
       const d = new Date(tx.date);
       const dateStr = !isNaN(d.getTime()) ? `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}` : tx.date;
-      const netAmount = (tx.amount / 1.20).toFixed(2);
-      const kdvAmount = (tx.amount - netAmount).toFixed(2);
+      const netAmount = (tx.amount / 1.20).toFixed(0);
+      const kdvAmount = (tx.amount - netAmount).toFixed(0);
       const invoiceNo = tx.eInvoiceNo || 'MBT' + Math.floor(100000000 + Math.random() * 900000000);
 
       iframe.contentWindow.document.open();
@@ -1139,7 +1142,7 @@ const handleSaveEditPending = async () => {
                       </tr>
                       <tr>
                           <td><strong>Vergiler Dahil Toplam Tutar</strong></td>
-                          <td style="text-align: right; font-weight: bold; font-size: 14px;">${tx.amount.toLocaleString('tr-TR')} TL</td>
+                          <td style="text-align: right; font-weight: bold; font-size: 14px;">${tx.amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</td>
                       </tr>
                   </table>
                   <div class="footer">
@@ -1167,7 +1170,7 @@ const handleSaveEditPending = async () => {
       const iban = contractSettings.iban;
       const bank = contractSettings.bankFullName;
       const owner = contractSettings.accountHolder;
-      const formattedBalance = balance.toLocaleString('tr-TR');
+      const formattedBalance = balance.toLocaleString('tr-TR', { maximumFractionDigits: 0 });
       
       let text = "";
       if (type === 'reminder') {
@@ -1232,6 +1235,15 @@ const handleAddExtraDocument = async (e, customerId) => {
 
 const handleSaveCustomer = async () => {
       if (!newCustomer.name || !newCustomer.tc || !newCustomer.phone) return;
+
+      // YENİ EKLENEN KONTROL: Aynı TC/VKN sistemde kayıtlı mı kontrolü
+      const existingCust = customers.find(c => c.tc && c.tc.trim() === newCustomer.tc.trim());
+      if (existingCust) {
+          setCustomerSaveError(`Girdiğiniz TC/Vergi Numarası sistemde halihazırda "${existingCust.name}" adına kayıtlıdır. Lütfen bilgileri kontrol ediniz.`);
+          setTimeout(() => setCustomerSaveError(''), 6000); // 6 saniye sonra uyarı gizlenir
+          return; // Kaydetme işlemini iptal et
+      }
+
       let newNo = '';
       let isUnique = false;
       while (!isUnique) {
@@ -1269,6 +1281,7 @@ const handleSaveCustomer = async () => {
           } catch (e) { console.error("Firebase Kayıt Hatası:", e); }
       }
       
+      setCustomerSaveError('');
       setNewCustomer({ name: '', tc: '', phone: '', altPhone: '', address: '', notes: '', documentPhoto: null, hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null });
       setActiveMenu('tum-musteriler');
   };
@@ -1292,7 +1305,10 @@ const handleDeleteCustomer = async (customerId) => {
           } catch (e) { console.error("Firebase Silme Hatası:", e); }
       }
       setIsDeleteCustomerModalOpen(false);
-      setSelectedCustomerId(null);
+      if (selectedCustomerId === customerId) {
+          setSelectedCustomerId(null);
+      }
+      setCustomerToDeleteId(null);
   };
 
 const handleUpdateCustomer = async () => {
@@ -1517,7 +1533,7 @@ const handleAddInvoice = async () => {
 
   const handleAddWarehouse = async () => {
       if (!newDepoName) return;
-      const newWarehouse = { id: Date.now(), name: newDepoName, m3: newDepoM3 || 0 };
+      const newWarehouse = { id: Date.now(), name: newDepoName, m3: newDepoM3 || 0, orderIndex: warehouses.length };
       if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouse.id)), newWarehouse);
       setIsAddWarehouseModalOpen(false); setNewDepoName(''); setNewDepoM3('');
   };
@@ -1551,20 +1567,32 @@ const handleAddInvoice = async () => {
       setWarehouseToDelete(null);
   };
 
-  const moveWarehouseUp = (index, e) => {
+  const moveWarehouseUp = async (index, e) => {
     e.stopPropagation(); if (index === 0) return;
     const newWarehouses = [...warehouses];
     const temp = newWarehouses[index - 1];
     newWarehouses[index - 1] = newWarehouses[index];
-    newWarehouses[index] = temp; setWarehouses(newWarehouses);
+    newWarehouses[index] = temp; 
+    setWarehouses(newWarehouses);
+    if (db && firebaseUser) {
+        for (let i = 0; i < newWarehouses.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouses[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
   };
 
-  const moveWarehouseDown = (index, e) => {
+  const moveWarehouseDown = async (index, e) => {
     e.stopPropagation(); if (index === warehouses.length - 1) return;
     const newWarehouses = [...warehouses];
     const temp = newWarehouses[index + 1];
     newWarehouses[index + 1] = newWarehouses[index];
-    newWarehouses[index] = temp; setWarehouses(newWarehouses);
+    newWarehouses[index] = temp; 
+    setWarehouses(newWarehouses);
+    if (db && firebaseUser) {
+        for (let i = 0; i < newWarehouses.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouses[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
   };
 
   // --- BLOK LİSTESİ STATE'LERİ ---
@@ -1573,11 +1601,15 @@ const handleAddInvoice = async () => {
   const [newBlockName, setNewBlockName] = useState('');
   const [newBlockM3, setNewBlockM3] = useState('');
   
+  const [isDeleteBlockModalOpen, setIsDeleteBlockModalOpen] = useState(false);
+  const [blockToDelete, setBlockToDelete] = useState(null);
+
   const [blocks, setBlocks] = useState([]);
 
   const handleAddBlock = async () => {
       if (!newBlockName || !selectedWarehouseId) return;
-      const newBlock = { id: Date.now(), warehouseId: selectedWarehouseId, name: newBlockName, m3: newBlockM3 || 0 };
+      const currentBlocks = blocks.filter(b => b.warehouseId === selectedWarehouseId);
+      const newBlock = { id: Date.now(), warehouseId: selectedWarehouseId, name: newBlockName, m3: newBlockM3 || 0, orderIndex: currentBlocks.length };
       if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(newBlock.id)), newBlock);
       setIsAddBlockModalOpen(false); setNewBlockName(''); setNewBlockM3('');
   };
@@ -1595,22 +1627,63 @@ const handleAddInvoice = async () => {
       setIsEditBlockModalOpen(false); setEditBlockData(null);
   };
 
-  const moveBlockUp = (index, filteredList, e) => {
+  const handleDeleteBlockClick = (e, id) => {
+      e.stopPropagation();
+      setBlockToDelete(id);
+      setIsDeleteBlockModalOpen(true);
+  };
+
+  const confirmDeleteBlock = async () => {
+      if (!blockToDelete) return;
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(blockToDelete)));
+          } catch (e) { console.error("Firebase Blok Silme Hatası:", e); }
+      } else {
+          setBlocks(blocks.filter(b => b.id !== blockToDelete));
+      }
+      setIsDeleteBlockModalOpen(false);
+      setBlockToDelete(null);
+  };
+
+  const moveBlockUp = async (index, filteredList, e) => {
     e.stopPropagation(); if (index === 0) return;
     const newBlocks = [...blocks];
     const id1 = filteredList[index - 1].id; const id2 = filteredList[index].id;
     const idx1 = newBlocks.findIndex(b => b.id === id1); const idx2 = newBlocks.findIndex(b => b.id === id2);
     const temp = newBlocks[idx1]; newBlocks[idx1] = newBlocks[idx2]; newBlocks[idx2] = temp;
     setBlocks(newBlocks);
+    
+    const newFilteredList = [...filteredList];
+    const tempF = newFilteredList[index - 1];
+    newFilteredList[index - 1] = newFilteredList[index];
+    newFilteredList[index] = tempF;
+    
+    if (db && firebaseUser) {
+        for (let i = 0; i < newFilteredList.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(newFilteredList[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
   };
 
-  const moveBlockDown = (index, filteredList, e) => {
+  const moveBlockDown = async (index, filteredList, e) => {
     e.stopPropagation(); if (index === filteredList.length - 1) return;
     const newBlocks = [...blocks];
     const id1 = filteredList[index].id; const id2 = filteredList[index + 1].id;
     const idx1 = newBlocks.findIndex(b => b.id === id1); const idx2 = newBlocks.findIndex(b => b.id === id2);
     const temp = newBlocks[idx1]; newBlocks[idx1] = newBlocks[idx2]; newBlocks[idx2] = temp;
     setBlocks(newBlocks);
+    
+    const newFilteredList = [...filteredList];
+    const tempF = newFilteredList[index + 1];
+    newFilteredList[index + 1] = newFilteredList[index];
+    newFilteredList[index] = tempF;
+
+    if (db && firebaseUser) {
+        for (let i = 0; i < newFilteredList.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(newFilteredList[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
   };
 
   // --- ODA LİSTESİ STATE'LERİ ---
@@ -1618,12 +1691,16 @@ const handleAddInvoice = async () => {
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [newRoomM3, setNewRoomM3] = useState('');
+  
+  const [isDeleteRoomModalOpen, setIsDeleteRoomModalOpen] = useState(false);
+  const [roomToDelete, setRoomToDelete] = useState(null);
 
   const [rooms, setRooms] = useState([]);
 
   const handleAddRoom = async () => {
       if (!newRoomName || !selectedBlockId) return;
-      const newRoom = { id: Date.now(), blockId: selectedBlockId, name: newRoomName, customerName: null, m3: newRoomM3 || 0, isReserved: false, paidMonths: [] };
+      const currentRooms = rooms.filter(r => r.blockId === selectedBlockId);
+      const newRoom = { id: Date.now(), blockId: selectedBlockId, name: newRoomName, customerName: null, m3: newRoomM3 || 0, isReserved: false, paidMonths: [], orderIndex: currentRooms.length };
       if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), newRoom);
       setIsAddRoomModalOpen(false); setNewRoomName(''); setNewRoomM3('');
   };
@@ -1641,20 +1718,61 @@ const handleAddInvoice = async () => {
       setIsEditRoomModalOpen(false); setEditRoomData(null);
   };
 
-  const moveRoomUp = (index, filteredList, e) => {
+  const handleDeleteRoomClick = (e, id) => {
+      e.stopPropagation();
+      setRoomToDelete(id);
+      setIsDeleteRoomModalOpen(true);
+  };
+
+  const confirmDeleteRoom = async () => {
+      if (!roomToDelete) return;
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomToDelete)));
+          } catch (e) { console.error("Firebase Oda Silme Hatası:", e); }
+      } else {
+          setRooms(rooms.filter(r => r.id !== roomToDelete));
+      }
+      setIsDeleteRoomModalOpen(false);
+      setRoomToDelete(null);
+  };
+
+  const moveRoomUp = async (index, filteredList, e) => {
     e.stopPropagation(); if (index === 0) return;
     const newRooms = [...rooms];
     const id1 = filteredList[index - 1].id; const id2 = filteredList[index].id;
     const idx1 = newRooms.findIndex(r => r.id === id1); const idx2 = newRooms.findIndex(r => r.id === id2);
     const temp = newRooms[idx1]; newRooms[idx1] = newRooms[idx2]; newRooms[idx2] = temp; setRooms(newRooms);
+    
+    const newFilteredList = [...filteredList];
+    const tempF = newFilteredList[index - 1];
+    newFilteredList[index - 1] = newFilteredList[index];
+    newFilteredList[index] = tempF;
+    
+    if (db && firebaseUser) {
+        for (let i = 0; i < newFilteredList.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newFilteredList[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
   };
 
-  const moveRoomDown = (index, filteredList, e) => {
+  const moveRoomDown = async (index, filteredList, e) => {
     e.stopPropagation(); if (index === filteredList.length - 1) return;
     const newRooms = [...rooms];
     const id1 = filteredList[index].id; const id2 = filteredList[index + 1].id;
     const idx1 = newRooms.findIndex(r => r.id === id1); const idx2 = newRooms.findIndex(r => r.id === id2);
     const temp = newRooms[idx1]; newRooms[idx1] = newRooms[idx2]; newRooms[idx2] = temp; setRooms(newRooms);
+
+    const newFilteredList = [...filteredList];
+    const tempF = newFilteredList[index + 1];
+    newFilteredList[index + 1] = newFilteredList[index];
+    newFilteredList[index] = tempF;
+    
+    if (db && firebaseUser) {
+        for (let i = 0; i < newFilteredList.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newFilteredList[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
   };
 
   // --- ODA DETAY MODALLARI ---
@@ -1668,7 +1786,7 @@ const handleAddInvoice = async () => {
       { id: '1+1', label: '1+1 (13 - 18 m³)', min: 13, max: 18 },
       { id: '2+1', label: '2+1 (19 - 27 m³)', min: 19, max: 27 },
       { id: '3+1', label: '3+1 (28 - 37 m³)', min: 28, max: 37 },
-      { id: '4+1', label: '4+1 (38 - 45 m³)', min: 38, max: 45 }
+      { id: '4+1', label: '4+1 ( 38+ m3 )', min: 38, max: Infinity }
   ];
 
   const [isEndRentModalOpen, setIsEndRentModalOpen] = useState(false);
@@ -2156,6 +2274,7 @@ const reader = new FileReader();
                               hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null,
                               type: 'bireysel',
                               createdAt: new Date().toLocaleDateString('tr-TR'),
+                              createdBy: currentUserProfile.name,
                               invoices: [], documentPhoto: null, payments: [], extraDebts: [], ledgerOverrides: []
                           };
                           newCustomers.push(existingCust);
@@ -2171,7 +2290,8 @@ const reader = new FileReader();
                                   paymentDate: validDate,
                                   monthlyFee: maxRent > 0 ? maxRent : 0, // En büyük sayıyı kiraya aktar
                                   hasKdv: true, // Varsayılan KDV ile
-                                  paidMonths: []
+                                  paidMonths: [],
+                                  rentedBy: currentUserProfile.name
                               };
                               updatedRoomCount++;
                           });
@@ -2278,6 +2398,7 @@ const handleRentRoom = async () => {
           transportHasKdv: rentData.transportHasKdv,
           entryPhoto: rentData.entryPhoto,
           paidMonths: [],
+          rentedBy: currentUserProfile.name,
           isReserved: false, // Varsa rezerveyi iptal et
           reservedName: null,
           reservedPhone: null,
@@ -2415,6 +2536,7 @@ const handleChangeRoomConfirm = async () => {
                 damageDescription: oldRoom.damageDescription, transportPrice: oldRoom.transportPrice,
                 transportHasKdv: oldRoom.transportHasKdv, entryPhoto: oldRoom.entryPhoto,
                 entryExitHistory: oldRoom.entryExitHistory, paidMonths: oldRoom.paidMonths || [],
+                rentedBy: oldRoom.rentedBy || currentUserProfile.name,
                 movedFrom: oldRoom.name, isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null,
                 isFreeRoom: oldRoom.isFreeRoom, freeRoomReason: oldRoom.freeRoomReason, giftMonths: oldRoom.giftMonths
             }, { merge: true });
@@ -2574,6 +2696,34 @@ const handleSaveSpecificMonthEdit = async () => {
                   ledgerOverrides: [...filtered, newOverride]
               }, { merge: true });
           } catch(e) { console.error("Firebase Aylık Kira Düzenleme Hatası:", e); }
+      }
+
+      setIsEditSpecificMonthModalOpen(false);
+      setSpecificMonthEditData(null);
+  };
+
+const handleGiftSpecificMonth = async () => {
+      if (!specificMonthEditData) return;
+      
+      const customerToUpdate = customers.find(c => c.name === selectedRoomDetail.customerName);
+
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              const existingOverrides = customerToUpdate.ledgerOverrides || [];
+              const filtered = existingOverrides.filter(o => o.txId !== specificMonthEditData.txId);
+              
+              const newOverride = {
+                  txId: specificMonthEditData.txId,
+                  date: specificMonthEditData.date ? new Date(specificMonthEditData.date).getTime() : Date.now(),
+                  desc: `${selectedRoomDetail.name} Odası - Bu Ay Hediye Edildi`,
+                  debt: 0, baseDebt: 0, kdvDebt: 0, credit: 0,
+                  isSpecificGift: true
+              };
+              
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                  ledgerOverrides: [...filtered, newOverride]
+              }, { merge: true });
+          } catch(e) { console.error("Firebase Özel Hediye Ay Düzenleme Hatası:", e); }
       }
 
       setIsEditSpecificMonthModalOpen(false);
@@ -2844,28 +2994,30 @@ const handleSaveAppointment = async () => {
           let displayTotalAmount = totalAmount;
           let displayBaseAmount = baseAmount;
           let displayKdvAmount = kdvAmount;
+          let isSpecificGift = false;
 
           const override = overrides.find(o => o.txId === txId);
           if (override && !override.isDeleted && override.debt !== undefined) {
               displayTotalAmount = override.debt;
               displayBaseAmount = override.baseDebt !== undefined ? override.baseDebt : (hasKdv ? displayTotalAmount / 1.20 : displayTotalAmount);
               displayKdvAmount = override.kdvDebt !== undefined ? override.kdvDebt : (hasKdv ? displayTotalAmount - displayBaseAmount : 0);
+              if (override.isSpecificGift) isSpecificGift = true;
           }
 
           const isPaid = selectedRoomDetail.paidMonths?.includes(paymentKey);
           const isGifted = selectedRoomDetail.giftMonths && monthCounter < selectedRoomDetail.giftMonths;
           const isFree = selectedRoomDetail.isFreeRoom;
 
-          let stat = isPaid ? 'Ödeme Yapıldı' : (isFree ? 'Ücretsiz Oda' : (isGifted ? 'Hediye Edildi' : 'Bekliyor'));
-          let statColor = isPaid ? 'text-green-600 bg-green-50 border-green-200' : (isFree ? 'text-cyan-600 bg-cyan-50 border-cyan-200' : (isGifted ? 'text-purple-600 bg-purple-50 border-purple-200' : 'text-orange-600 bg-orange-50 border-orange-200'));
+          let stat = isPaid ? 'Ödeme Yapıldı' : (isFree ? 'Ücretsiz Oda' : ((isGifted || isSpecificGift) ? 'Hediye Edildi' : 'Bekliyor'));
+          let statColor = isPaid ? 'text-green-600 bg-green-50 border-green-200' : (isFree ? 'text-cyan-600 bg-cyan-50 border-cyan-200' : ((isGifted || isSpecificGift) ? 'text-purple-600 bg-purple-50 border-purple-200' : 'text-orange-600 bg-orange-50 border-orange-200'));
 
           periods.push({
             id: payIdCounter,
             month: monthsStr[start.getMonth()],
             year: start.getFullYear(),
-            amount: (isGifted || isFree) ? 0 : displayTotalAmount,
-            baseAmount: (isGifted || isFree) ? 0 : displayBaseAmount,
-            kdvAmount: (isGifted || isFree) ? 0 : displayKdvAmount,
+            amount: (isGifted || isFree || isSpecificGift) ? 0 : displayTotalAmount,
+            baseAmount: (isGifted || isFree || isSpecificGift) ? 0 : displayBaseAmount,
+            kdvAmount: (isGifted || isFree || isSpecificGift) ? 0 : displayKdvAmount,
             hasKdv: hasKdv,
             status: stat,
             color: statColor,
@@ -2874,7 +3026,7 @@ const handleSaveAppointment = async () => {
             paymentKey: paymentKey,
             txId: txId,
             dateObj: start,
-            isGifted: isGifted,
+            isGifted: isGifted || isSpecificGift,
             isFree: isFree,
             isPaid: isPaid
           });
@@ -2942,56 +3094,66 @@ const handleSaveAppointment = async () => {
       // 1. Oda Kiraları
       customerRooms.forEach(room => {
           const entryD = parseDateLocal(room.entryDate || '2026-01-01');
-          const paymentAnchorD = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryD;
+          let paymentAnchorD = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryD;
           const baseAmt = Number(room.monthlyFee || 0);
           const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
           const monthlyTotal = hasKdv ? baseAmt * 1.20 : baseAmt;
 
-          let loopDate = new Date(paymentAnchorD);
+          // Ödeme gününü (day) sabitle, aylar eklendikçe değişmesin
+          const targetDay = room.paymentDate && !room.paymentDate.includes('-') ? parseInt(room.paymentDate) : paymentAnchorD.getDate();
+
+          let loopDate = new Date(paymentAnchorD.getFullYear(), paymentAnchorD.getMonth(), 1); // Ayın başına sabitle (overflow'u engellemek için)
           let monthCounter = 0;
           const today = new Date();
           today.setHours(23, 59, 59, 999);
-
-          while (loopDate <= today) {
+          
+          // Bugüne kadar olan ayları tara (Yıl ve Ay kıyası)
+          while (loopDate.getFullYear() < today.getFullYear() || (loopDate.getFullYear() === today.getFullYear() && loopDate.getMonth() <= today.getMonth())) {
               const year = loopDate.getFullYear();
               const month = loopDate.getMonth();
               const key = `${year}-${month}`;
               
-              const isGifted = room.giftMonths && monthCounter < room.giftMonths;
-              const isFree = room.isFreeRoom;
-              const appliedMonthlyTotal = (isGifted || isFree) ? 0 : monthlyTotal;
-              const appliedBaseAmt = (isGifted || isFree) ? 0 : baseAmt;
-              const appliedKdvDebt = (isGifted || isFree) ? 0 : (hasKdv ? baseAmt * 0.20 : 0);
+              // O ayki borcun vadesi geldi mi kontrolü (Örn: Bugün 15'i, kira 20'si ise bu ayın borcunu daha yazma)
+              let maxDayInMonth = new Date(year, month + 1, 0).getDate(); // O ayın son günü
+              let actualPayDay = Math.min(targetDay, maxDayInMonth); // Eğer hedef gün 31 ise ve ay 28 çekiyorsa 28'ine çek
+              let txDate = new Date(year, month, actualPayDay);
 
-              ledgerTransactions.push({
-                  id: `debt-${room.id}-${key}`,
-                  date: new Date(loopDate),
-                  dateStr: `${loopDate.getDate().toString().padStart(2, '0')}.${(month + 1).toString().padStart(2, '0')}.${year}`,
-                  desc: `${room.name} Odası - ${monthsStr[month]} ${year} Kirası${isFree ? ' (ÜCRETSİZ)' : (isGifted ? ' (HEDİYE)' : '')}`,
-                  debt: appliedMonthlyTotal,
-                  baseDebt: appliedBaseAmt,
-                  kdvDebt: appliedKdvDebt,
-                  credit: 0
-              });
+              if (txDate <= today) {
+                  const isGifted = room.giftMonths && monthCounter < room.giftMonths;
+                  const isFree = room.isFreeRoom;
+                  const appliedMonthlyTotal = (isGifted || isFree) ? 0 : monthlyTotal;
+                  const appliedBaseAmt = (isGifted || isFree) ? 0 : baseAmt;
+                  const appliedKdvDebt = (isGifted || isFree) ? 0 : (hasKdv ? baseAmt * 0.20 : 0);
 
-              const isPaid = room.paidMonths?.includes(key);
-              const paymentDay = room.paymentDate && !room.paymentDate.includes('-') ? parseInt(room.paymentDate) : loopDate.getDate();
-              const txDate = new Date(year, month, paymentDay);
-
-              if (isPaid && !isGifted && !isFree) {
                   ledgerTransactions.push({
-                      id: `credit-${room.id}-${key}`,
-                      date: new Date(txDate.getTime() + 1000),
-                      dateStr: `${paymentDay.toString().padStart(2, '0')}.${(month + 1).toString().padStart(2, '0')}.${year}`,
-                      desc: `${room.name} Odası - ${monthsStr[month]} ${year} Tahsilatı`,
-                      debt: 0,
-                      baseDebt: 0,
-                      kdvDebt: 0,
-                      credit: monthlyTotal
+                      id: `debt-${room.id}-${key}`,
+                      date: txDate,
+                      dateStr: `${actualPayDay.toString().padStart(2, '0')}.${(month + 1).toString().padStart(2, '0')}.${year}`,
+                      desc: `${room.name} Odası - ${monthsStr[month]} ${year} Kirası${isFree ? ' (ÜCRETSİZ)' : (isGifted ? ' (HEDİYE)' : '')}`,
+                      debt: appliedMonthlyTotal,
+                      baseDebt: appliedBaseAmt,
+                      kdvDebt: appliedKdvDebt,
+                      credit: 0
                   });
+
+                  const isPaid = room.paidMonths?.includes(key);
+
+                  if (isPaid && !isGifted && !isFree) {
+                      ledgerTransactions.push({
+                          id: `credit-${room.id}-${key}`,
+                          date: new Date(txDate.getTime() + 1000),
+                          dateStr: `${actualPayDay.toString().padStart(2, '0')}.${(month + 1).toString().padStart(2, '0')}.${year}`,
+                          desc: `${room.name} Odası - ${monthsStr[month]} ${year} Tahsilatı`,
+                          debt: 0,
+                          baseDebt: 0,
+                          kdvDebt: 0,
+                          credit: monthlyTotal
+                      });
+                  }
+                  monthCounter++;
               }
+              // Bir sonraki aya geç
               loopDate.setMonth(loopDate.getMonth() + 1);
-              monthCounter++;
           }
       });
 
@@ -3751,6 +3913,12 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
             <div className="max-w-4xl mx-auto">
               <div className="mb-6"><h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Müşteri Yönetimi</h1><h2 className="text-2xl font-bold text-slate-800">Yeni Müşteri Ekle</h2><p className="text-sm text-gray-500 mt-1">Sisteme yeni bir bireysel veya kurumsal müşteri tanımlayın.</p></div>
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
+                {customerSaveError && (
+                    <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2 shadow-sm">
+                        <div className="bg-red-100 p-1.5 rounded-full shrink-0"><AlertCircle size={18} className="text-red-600"/></div>
+                        <span className="font-bold text-sm leading-relaxed">{customerSaveError}</span>
+                    </div>
+                )}
                 <div className="flex gap-6 mb-8 pb-4 border-b border-gray-100">
                   <label className="flex items-center gap-2 cursor-pointer group"><input type="radio" name="customerType" value="bireysel" checked={customerType === 'bireysel'} onChange={() => setCustomerType('bireysel')} className="w-5 h-5 text-red-500 border-gray-300 focus:ring-red-500"/><span className={`text-sm font-bold transition-colors ${customerType === 'bireysel' ? 'text-slate-800' : 'text-gray-500'}`}>Bireysel Müşteri</span></label>
                   <label className="flex items-center gap-2 cursor-pointer group"><input type="radio" name="customerType" value="kurumsal" checked={customerType === 'kurumsal'} onChange={() => setCustomerType('kurumsal')} className="w-5 h-5 text-red-500 border-gray-300 focus:ring-red-500"/><span className={`text-sm font-bold transition-colors ${customerType === 'kurumsal' ? 'text-slate-800' : 'text-gray-500'}`}>Kurumsal Müşteri</span></label>
@@ -3888,7 +4056,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center gap-1.5 justify-center">
                                   <button onClick={() => setSelectedCustomerId(customer.id)} className="bg-slate-500 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1">Cari Hesap</button>
-                                  <button onClick={() => handleDeleteCustomer(customer.id)} className="bg-[#f64e60] hover:bg-red-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1" title="Kalıcı Olarak Sil">Sil</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setCustomerToDeleteId(customer.id); setIsDeleteCustomerModalOpen(true); }} className="bg-[#f64e60] hover:bg-red-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1" title="Kalıcı Olarak Sil">Sil</button>
                                 </div>
                               </td>
                             </tr>
@@ -3913,7 +4081,24 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                   const customerRooms = rooms.filter(r => r.customerName === customer.name);
 
                   // --- Cari Ledger (Ekstre) Hesaplama ---
-                  const { ledger, balance: runningBalance } = getCustomerLedger(customer);
+                  const { ledger: fullLedger, balance: runningBalance } = getCustomerLedger(customer);
+                  
+                  const availableYears = [...new Set(fullLedger.map(tx => {
+                      const d = new Date(tx.date);
+                      return !isNaN(d.getTime()) ? d.getFullYear() : null;
+                  }).filter(y => y !== null))].sort((a, b) => b - a);
+                  
+                  if (!availableYears.includes(new Date().getFullYear())) {
+                      availableYears.push(new Date().getFullYear());
+                      availableYears.sort((a, b) => b - a);
+                  }
+
+                  const filteredLedger = ledgerFilterYear === 'all' 
+                      ? fullLedger 
+                      : fullLedger.filter(tx => {
+                          const d = new Date(tx.date);
+                          return !isNaN(d.getTime()) && d.getFullYear().toString() === ledgerFilterYear;
+                      });
 
                   return (
                     <div className="flex flex-col gap-6">
@@ -3933,6 +4118,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                  <div className="flex gap-4 mt-2 text-xs text-gray-500 font-medium">
                                    <span className="flex items-center gap-1"><Phone size={12}/> {customer.phone}</span>
                                    <span className="flex items-center gap-1"><FileTextIcon size={12}/> {customer.tc || 'TC/VKN Yok'}</span>
+                                   {customer.createdBy && <span className="flex items-center gap-1"><UserCog size={12}/> Ekleyen: {customer.createdBy}</span>}
                                  </div>
                               </div>
                            </div>
@@ -3941,7 +4127,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <a href={`https://wa.me/90${customer.phone}`} target="_blank" rel="noreferrer" className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-teal-500/30"><MessageCircle size={14}/> WhatsApp</a>
                               <button onClick={() => handleOpenContract(customer)} className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-indigo-500/30"><Download size={14}/> Sözleşme İndir</button>
                               <button onClick={() => setIsInvoiceModalOpen(true)} className="bg-cyan-500 hover:bg-cyan-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-cyan-500/30"><FileTextIcon size={14}/> Faturalar</button>
-                              <button onClick={() => setIsDeleteCustomerModalOpen(true)} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border border-red-100"><Trash2 size={14}/> Kalıcı Sil</button>
+                              <button onClick={() => { setCustomerToDeleteId(customer.id); setIsDeleteCustomerModalOpen(true); }} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border border-red-100"><Trash2 size={14}/> Kalıcı Sil</button>
                            </div>
                          </div>
                          <div className="grid grid-cols-1 md:grid-cols-3 gap-y-4 gap-x-6 bg-slate-50 p-5 rounded-xl border border-gray-100">
@@ -4039,7 +4225,13 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                       {/* CARİ HESAP EKSTRESİ YUKARIYA TAŞINDI */}
                       <div className="mt-2 mb-2">
                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
-                             <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><History size={16} /> Detaylı Cari Hesap Dökümü (Ekstre)</h4>
+                             <div className="flex items-center gap-4">
+                                 <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><History size={16} /> Detaylı Cari Hesap Dökümü (Ekstre)</h4>
+                                 <select value={ledgerFilterYear} onChange={(e) => setLedgerFilterYear(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold text-gray-600 focus:outline-none focus:border-indigo-400 cursor-pointer bg-white">
+                                     <option value="all">Tüm Zamanlar</option>
+                                     {availableYears.map(y => <option key={y} value={y.toString()}>{y} Yılı</option>)}
+                                 </select>
+                             </div>
                              <div className="flex flex-wrap items-center gap-2">
                                  <button onClick={() => setIsEditLedgerListModalOpen(true)} className="bg-orange-50 hover:bg-orange-100 text-orange-600 border border-orange-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm">
                                      <Settings size={14}/> Cari Düzenleme
@@ -4066,35 +4258,35 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                      </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-100">
-                                     {ledger.length > 0 ? ledger.map((tx) => (
+                                     {filteredLedger.length > 0 ? filteredLedger.map((tx) => (
                                         <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
                                            <td className="px-6 py-3 whitespace-nowrap font-medium">{tx.dateStr}</td>
                                            <td className="px-6 py-3">{tx.desc}</td>
-                                           <td className="px-6 py-3 text-right font-semibold text-red-500">{tx.debt > 0 ? `${(tx.baseDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL` : '-'}</td>
-                                           <td className="px-6 py-3 text-right font-semibold text-orange-500">{tx.debt > 0 ? `${(tx.kdvDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL` : '-'}</td>
-                                           <td className="px-6 py-3 text-right font-semibold text-green-600">{tx.credit > 0 ? `${tx.credit.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL` : '-'}</td>
+                                           <td className="px-6 py-3 text-right font-semibold text-red-500">{tx.debt > 0 ? `${(tx.baseDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL` : '-'}</td>
+                                           <td className="px-6 py-3 text-right font-semibold text-orange-500">{tx.debt > 0 ? `${(tx.kdvDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL` : '-'}</td>
+                                           <td className="px-6 py-3 text-right font-semibold text-green-600">{tx.credit > 0 ? `${tx.credit.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL` : '-'}</td>
                                            <td className="px-6 py-3 text-right">
                                                <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-black border shadow-sm ${tx.balance > 0 ? 'bg-red-50 text-red-700 border-red-200' : tx.balance < 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                                                   {tx.balance.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL
+                                                   {tx.balance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL
                                                </span>
                                            </td>
                                         </tr>
                                      )) : (
                                         <tr>
-                                           <td colSpan="6" className="px-6 py-8 text-center text-gray-400 font-medium">Müşteriye ait herhangi bir hesap hareketi bulunamadı.</td>
+                                           <td colSpan="6" className="px-6 py-8 text-center text-gray-400 font-medium">Bu döneme ait herhangi bir hesap hareketi bulunamadı.</td>
                                         </tr>
                                      )}
                                   </tbody>
-                                  {ledger.length > 0 && (
+                                  {filteredLedger.length > 0 && (
                                      <tfoot className="bg-gray-50 border-t border-gray-200 font-bold text-gray-800">
                                         <tr>
-                                           <td colSpan="2" className="px-6 py-4 text-right">GENEL TOPLAM:</td>
-                                           <td className="px-6 py-4 text-right text-red-600">{ledger.reduce((sum, tx) => sum + (tx.baseDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
-                                           <td className="px-6 py-4 text-right text-orange-600">{ledger.reduce((sum, tx) => sum + (tx.kdvDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
-                                           <td className="px-6 py-4 text-right text-green-600">{ledger.reduce((sum, tx) => sum + tx.credit, 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL</td>
+                                           <td colSpan="2" className="px-6 py-4 text-right">DÖNEM TOPLAMI / GÜNCEL BAKİYE:</td>
+                                           <td className="px-6 py-4 text-right text-red-600">{filteredLedger.reduce((sum, tx) => sum + (tx.baseDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+                                           <td className="px-6 py-4 text-right text-orange-600">{filteredLedger.reduce((sum, tx) => sum + (tx.kdvDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+                                           <td className="px-6 py-4 text-right text-green-600">{filteredLedger.reduce((sum, tx) => sum + tx.credit, 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
                                            <td className="px-6 py-4 text-right">
                                                <span className={`inline-block px-3 py-1.5 rounded-lg text-sm font-black text-white shadow-md ${runningBalance > 0 ? 'bg-red-500 shadow-red-500/30' : runningBalance < 0 ? 'bg-green-500 shadow-green-500/30' : 'bg-slate-600 shadow-slate-500/30'}`}>
-                                                   {runningBalance.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL
+                                                   {runningBalance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL
                                                </span>
                                            </td>
                                         </tr>
@@ -4104,10 +4296,10 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                             </div>
                             
                             {/* YENİ EKLENEN İŞLEM BUTONLARI */}
-                            {ledger.length > 0 && (
+                            {filteredLedger.length > 0 && (
                                 <div className="bg-white border-t border-gray-200 p-4 rounded-b-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
-                                    <button onClick={() => handlePrintLedger(customer, ledger, runningBalance)} className="w-full sm:w-auto bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm">
-                                        <Download size={18} /> Tüm Dökümü PDF İndir / Paylaş
+                                    <button onClick={() => handlePrintLedger(customer, filteredLedger, runningBalance, ledgerFilterYear)} className="w-full sm:w-auto bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm">
+                                        <Download size={18} /> Dökümü PDF İndir / Paylaş
                                     </button>
                                     
                                     <div className="flex flex-wrap items-center justify-center gap-2 w-full sm:w-auto">
@@ -4253,12 +4445,12 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                       <div className="bg-green-50 border border-green-100 rounded-lg p-4">
                                           <div className="text-sm text-green-800 font-bold mb-1">Eşleşen ve Cariye İşlenen</div>
                                           <div className="text-2xl font-black text-green-600 mb-1">{bulkProcessResult.matchedCount} <span className="text-sm font-bold">Kayıt</span></div>
-                                          <div className="text-xs font-semibold text-green-700">Toplam: {bulkProcessResult.totalMatchedAmount.toLocaleString('tr-TR')} TL</div>
+                                          <div className="text-xs font-semibold text-green-700">Toplam: {bulkProcessResult.totalMatchedAmount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                                       </div>
                                       <div className="bg-orange-50 border border-orange-100 rounded-lg p-4">
                                           <div className="text-sm text-orange-800 font-bold mb-1">Eşleşmeyen (Askıya Alınan)</div>
                                           <div className="text-2xl font-black text-orange-600 mb-1">{bulkProcessResult.unmatchedCount} <span className="text-sm font-bold">Kayıt</span></div>
-                                          <div className="text-xs font-semibold text-orange-700">Toplam: {bulkProcessResult.totalUnmatchedAmount.toLocaleString('tr-TR')} TL</div>
+                                          <div className="text-xs font-semibold text-orange-700">Toplam: {bulkProcessResult.totalUnmatchedAmount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                                       </div>
                                   </div>
                                   <div className="mt-4 flex justify-end gap-3">
@@ -4380,7 +4572,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
 
                                               <div className="bg-red-50 rounded-xl p-3 border border-red-100 mb-4">
                                                   <div className="text-[10px] font-bold text-red-400 uppercase mb-0.5">Toplam Cari Borç</div>
-                                                  <div className="text-2xl font-black text-red-600">{customer.totalDebt.toLocaleString('tr-TR')} <span className="text-sm font-bold">TL</span></div>
+                                                  <div className="text-2xl font-black text-red-600">{customer.totalDebt.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-sm font-bold">TL</span></div>
                                               </div>
                                               
                                               {customer.collectionNotes && customer.collectionNotes.length > 0 ? (
@@ -4539,7 +4731,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                       <p className="text-green-600 text-sm font-medium">Filtrelenen aralıktaki toplam alınan ödeme</p>
                                   </div>
                               </div>
-                              <div className="text-3xl sm:text-4xl font-black text-green-700">{totalCollected.toLocaleString('tr-TR')} TL</div>
+                              <div className="text-3xl sm:text-4xl font-black text-green-700">{totalCollected.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                           </div>
 
                           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex-1 flex flex-col">
@@ -4566,7 +4758,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                           <div className="text-[10px] text-gray-400 mt-0.5">No: {tx.customerNo}</div>
                                                       </td>
                                                       <td className="px-6 py-4 font-medium text-gray-600">{tx.note}</td>
-                                                      <td className="px-6 py-4 text-right font-extrabold text-green-600 text-base">{tx.amount.toLocaleString('tr-TR')} TL</td>
+                                                      <td className="px-6 py-4 text-right font-extrabold text-green-600 text-base">{tx.amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</td>
                                                       <td className="px-6 py-4 text-center">
                                                           <div className="flex items-center justify-center gap-2">
                                                               {tx.hasEInvoice ? (
@@ -4709,7 +4901,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                <div className="font-extrabold text-emerald-600 text-base">{monthlyTotal.toLocaleString('tr-TR')} TL</div>
+                                                <div className="font-extrabold text-emerald-600 text-base">{monthlyTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                                                 <div className="text-[10px] text-gray-400 font-bold">KDV Dahil</div>
                                             </td>
                                             <td className="px-6 py-4 text-center">
@@ -4843,7 +5035,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                <div className="font-extrabold text-gray-800 text-base">{monthlyTotal.toLocaleString('tr-TR')} TL</div>
+                                                <div className="font-extrabold text-gray-800 text-base">{monthlyTotal.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                                                 <div className="text-[10px] text-gray-400 font-bold">KDV Dahil</div>
                                             </td>
                                             <td className="px-6 py-4 text-center">
@@ -4900,7 +5092,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                       <tr key={tx.id} className="hover:bg-orange-50/30 transition-colors">
                                           <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-700">{dateStr}</td>
                                           <td className="px-6 py-4 font-medium text-gray-600">{tx.note || '-'}</td>
-                                          <td className="px-6 py-4 text-right font-extrabold text-orange-600 text-base">{Number(tx.amount || 0).toLocaleString('tr-TR')} TL</td>
+                                          <td className="px-6 py-4 text-right font-extrabold text-orange-600 text-base">{Number(tx.amount || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</td>
                                           <td className="px-6 py-4 text-center">
                                               <div className="flex items-center justify-center gap-2">
                                                   <button onClick={() => {
@@ -5119,7 +5311,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                           </h3>
                           <div className="flex gap-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                             <button onClick={(e) => { e.stopPropagation(); setEditBlockData({...blok}); setIsEditBlockModalOpen(true); }} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 p-1.5 rounded transition-colors" title="Düzenle"><Edit size={14} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); setBlocks(blocks.filter(b => b.id !== blok.id)); }} className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded transition-colors" title="Sil"><Trash2 size={14} /></button>
+                            <button onClick={(e) => handleDeleteBlockClick(e, blok.id)} className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded transition-colors" title="Sil"><Trash2 size={14} /></button>
                             <div className="flex flex-col gap-0.5 ml-1">
                               <button onClick={(e) => moveBlockUp(index, arr, e)} disabled={index === 0} className="bg-gray-100 hover:bg-gray-200 text-gray-500 p-0.5 rounded transition-colors disabled:opacity-30"><ArrowUp size={10} /></button>
                               <button onClick={(e) => moveBlockDown(index, arr, e)} disabled={index === arr.length - 1} className="bg-gray-100 hover:bg-gray-200 text-gray-500 p-0.5 rounded transition-colors disabled:opacity-30"><ArrowDown size={10} /></button>
@@ -5193,7 +5385,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                              {/* Hover Aksiyonları */}
                              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20" onClick={e => e.stopPropagation()}>
                                 <button onClick={(e) => { e.stopPropagation(); setEditRoomData({...oda}); setIsEditRoomModalOpen(true); }} className="bg-white hover:bg-gray-100 text-gray-700 p-1.5 rounded-md shadow transition-colors" title="Düzenle"><Edit size={14} /></button>
-                                <button onClick={(e) => { e.stopPropagation(); setRooms(rooms.filter(r => r.id !== oda.id)); }} className="bg-white hover:bg-red-50 text-red-600 p-1.5 rounded-md shadow transition-colors" title="Sil"><Trash2 size={14} /></button>
+                                <button onClick={(e) => handleDeleteRoomClick(e, oda.id)} className="bg-white hover:bg-red-50 text-red-600 p-1.5 rounded-md shadow transition-colors" title="Sil"><Trash2 size={14} /></button>
                                 <div className="flex flex-col gap-0.5 ml-0.5">
                                   <button onClick={(e) => moveRoomUp(index, arr, e)} disabled={index === 0} className="bg-white hover:bg-gray-100 text-gray-500 p-0.5 rounded-md shadow transition-colors disabled:opacity-30"><ArrowUp size={10} /></button>
                                   <button onClick={(e) => moveRoomDown(index, arr, e)} disabled={index === arr.length - 1} className="bg-white hover:bg-gray-100 text-gray-500 p-0.5 rounded-md shadow transition-colors disabled:opacity-30"><ArrowDown size={10} /></button>
@@ -5224,7 +5416,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                            <h4 className="font-bold text-sm mb-1">{customerTotalBalance > 0 ? 'DİKKAT: Müşterinin Cari Borcu Bulunmaktadır!' : 'BİLGİ: Müşterinin Cari Borcu Yoktur'}</h4>
                            <p className="text-xs font-medium opacity-90 leading-relaxed">
                              {customerTotalBalance > 0
-                                ? `Müşterinin güncel toplam cari bakiyesi ${customerTotalBalance.toLocaleString('tr-TR')} TL'dir. Lütfen borç kapanana kadar yeni randevu oluşturmayınız veya nakliye hizmeti vermeyiniz.`
+                                ? `Müşterinin güncel toplam cari bakiyesi ${customerTotalBalance.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL'dir. Lütfen borç kapanana kadar yeni randevu oluşturmayınız veya nakliye hizmeti vermeyiniz.`
                                 : 'Müşterinin şu anda herhangi bir ödenmemiş cari borcu bulunmamaktadır. İşlemlerinize sorunsuz devam edebilirsiniz.'}
                            </p>
                         </div>
@@ -5302,6 +5494,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                 })()}
 
                                 <div className="flex flex-col gap-1.5 md:col-span-2 mt-2"><h4 className="text-[11px] font-bold text-gray-400 uppercase border-b border-gray-200 pb-1">Ekstra Kiralama Bilgileri</h4></div>
+                                <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">İşlemi Yapan Yetkili</label><input type="text" readOnly value={selectedRoomDetail?.rentedBy || 'Bilinmiyor'} className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium" /></div>
                                 <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">Eşyayı Getiren</label><input type="text" readOnly value={selectedRoomDetail?.broughtBy === 'sembol' ? 'Sembol Nakliyat' : 'Müşteri Kendisi'} className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium" /></div>
                                 <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">Hasar Durumu</label><input type="text" readOnly value={selectedRoomDetail?.hasDamage ? 'Hasar Var' : 'Hasar Yok'} className={`border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm font-bold ${selectedRoomDetail?.hasDamage ? 'text-orange-500' : 'text-teal-600'}`} /></div>
                                 {selectedRoomDetail?.broughtBy === 'sembol' && <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">Görevli Ekip Listesi</label><input type="text" readOnly value={selectedRoomDetail?.teamList || '-'} className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium" /></div>}
@@ -5465,7 +5658,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                 }} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-2 rounded-lg transition-colors shadow-sm" title="Bu ayın kirasını düzenle"><Edit size={16}/></button>
                                             )}
                                          </div>
-                                         <span className="text-[11px] text-gray-400 font-medium mt-1">Net: {payment.baseAmount.toFixed(2)} TL {payment.hasKdv && `+ KDV: ${payment.kdvAmount.toFixed(2)} TL`}</span>
+                                         <span className="text-[11px] text-gray-400 font-medium mt-1">Net: {payment.baseAmount.toFixed(0)} TL {payment.hasKdv && `+ KDV: ${payment.kdvAmount.toFixed(0)} TL`}</span>
                                        </div>
                                     </div>
                                  </div>
@@ -5479,7 +5672,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
 
                            <div className="bg-red-50 border-2 border-red-100 rounded-xl p-6 flex items-center justify-between">
                               <div><h4 className="text-red-800 font-bold text-lg">Müşteri Toplam Cari Bakiyesi</h4><p className="text-red-500 text-sm">Müşteriye ait tüm odaların ve ekstra hizmetlerin toplam güncel borcu.</p></div>
-                              <div className="text-3xl font-extrabold text-red-600">{customerTotalBalance.toLocaleString('tr-TR')} TL</div>
+                              <div className="text-3xl font-extrabold text-red-600">{customerTotalBalance.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                            </div>
                         </>
                      )}
@@ -5601,7 +5794,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">TL</span>
                          </div>
                          {collectionRates.sealFee && (
-                           <span className="text-[10px] font-bold text-teal-600 bg-teal-50 px-2 py-1 rounded w-max mt-1">Cariye Yansıyacak: {(Number(collectionRates.sealFee) * 1.20).toFixed(2)} TL (KDV Dahil)</span>
+                           <span className="text-[10px] font-bold text-teal-600 bg-teal-50 px-2 py-1 rounded w-max mt-1">Cariye Yansıyacak: {(Number(collectionRates.sealFee) * 1.20).toFixed(0)} TL (KDV Dahil)</span>
                          )}
                      </div>
 
@@ -5878,22 +6071,22 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Tahsil Edilen</h3>
-                                   <div className="text-3xl font-extrabold text-[#1bc5bd]">{totalTahsilEdilen.toLocaleString('tr-TR')} <span className="text-lg">₺</span></div>
+                                   <div className="text-3xl font-extrabold text-[#1bc5bd]">{totalTahsilEdilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2">Müşterilere girdiğimiz ödemeler</p>
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Bekleyen Tahsilat</h3>
-                                   <div className="text-3xl font-extrabold text-orange-500">{totalBekleyen.toLocaleString('tr-TR')} <span className="text-lg">₺</span></div>
+                                   <div className="text-3xl font-extrabold text-orange-500">{totalBekleyen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2">Müşterilerin borcu olan kısım</p>
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Toplam (Tahsil + Bekleyen)</h3>
-                                   <div className="text-3xl font-extrabold text-indigo-500">{toplamTahsilat.toLocaleString('tr-TR')} <span className="text-lg">₺</span></div>
+                                   <div className="text-3xl font-extrabold text-indigo-500">{toplamTahsilat.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2">Toplam beklenen ve alınan</p>
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Askıda Ödemeler</h3>
-                                   <div className="text-3xl font-extrabold text-gray-700">{totalAskida.toLocaleString('tr-TR')} <span className="text-lg">₺</span></div>
+                                   <div className="text-3xl font-extrabold text-gray-700">{totalAskida.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2">{askidaCount} kayıt eşleşmeyi bekliyor</p>
                                </div>
                            </div>
@@ -5943,8 +6136,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                {branchPaymentsData.map(bp => (
                                                    <tr key={bp.id} className="hover:bg-gray-50">
                                                        <td className="py-3 px-2 font-bold text-gray-700">{bp.name}</td>
-                                                       <td className="py-3 px-2 text-right font-bold text-orange-500">{bp.bekleyen.toLocaleString('tr-TR')} ₺</td>
-                                                       <td className="py-3 px-2 text-right font-black text-[#1bc5bd]">{bp.tahsil.toLocaleString('tr-TR')} ₺</td>
+                                                       <td className="py-3 px-2 text-right font-bold text-orange-500">{bp.bekleyen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ₺</td>
+                                                       <td className="py-3 px-2 text-right font-black text-[#1bc5bd]">{bp.tahsil.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ₺</td>
                                                    </tr>
                                                ))}
                                            </tbody>
@@ -6024,7 +6217,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                return (
                                                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
                                                        <td className="px-6 py-4 font-bold text-gray-800">{data.month}</td>
-                                                       <td className="px-6 py-4 text-right font-black text-gray-700">{data.revenue.toLocaleString('tr-TR')} ₺</td>
+                                                       <td className="px-6 py-4 text-right font-black text-gray-700">{data.revenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} ₺</td>
                                                        <td className="px-6 py-4 text-center font-bold text-gray-600">{data.rooms}</td>
                                                        <td className="px-6 py-4 text-center font-bold text-gray-600">{data.m3}</td>
                                                        <td className="px-6 py-4 text-right font-bold text-teal-600">{data.odaBasi.toLocaleString('tr-TR', {maximumFractionDigits:0})} ₺</td>
@@ -6126,7 +6319,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center relative overflow-hidden group hover:border-emerald-200 transition-colors">
                                    <div className="absolute -right-4 top-1/2 -translate-y-1/2 opacity-5 text-emerald-600 group-hover:scale-110 transition-transform duration-500"><Wallet size={120} /></div>
                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 relative z-10">Aylık Aktif Kira Getirisi</h3>
-                                   <div className="text-3xl font-extrabold text-emerald-500 relative z-10">{totalMonthlyRevenue.toLocaleString('tr-TR')} <span className="text-lg">₺</span></div>
+                                   <div className="text-3xl font-extrabold text-emerald-500 relative z-10">{totalMonthlyRevenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2 relative z-10">Dolu odalardan beklenen aylık ciro</p>
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center relative overflow-hidden group hover:border-orange-200 transition-colors">
@@ -6138,7 +6331,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center relative overflow-hidden group hover:border-indigo-200 transition-colors">
                                    <div className="absolute -right-4 top-1/2 -translate-y-1/2 opacity-5 text-indigo-600 group-hover:scale-110 transition-transform duration-500"><Box size={120} /></div>
                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 relative z-10">Toplam Depolama Hacmi</h3>
-                                   <div className="text-3xl font-extrabold text-indigo-500 relative z-10">{depoDetails.reduce((sum, d) => sum + d.capacityM3, 0).toLocaleString('tr-TR')} <span className="text-lg font-bold text-indigo-400">m³</span></div>
+                                   <div className="text-3xl font-extrabold text-indigo-500 relative z-10">{depoDetails.reduce((sum, d) => sum + d.capacityM3, 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg font-bold text-indigo-400">m³</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2 relative z-10">Tüm şubelerin birleşik hacmi</p>
                                </div>
                            </div>
@@ -6190,11 +6383,11 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                        </div>
                                                    </td>
                                                    <td className="px-6 py-4 text-center">
-                                                       <div className="text-xs font-bold text-slate-700">{depo.occupiedM3.toLocaleString('tr-TR')} m³</div>
-                                                       <div className="text-[10px] text-gray-400 font-medium">Toplam: {depo.capacityM3.toLocaleString('tr-TR')} m³</div>
+                                                       <div className="text-xs font-bold text-slate-700">{depo.occupiedM3.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} m³</div>
+                                                       <div className="text-[10px] text-gray-400 font-medium">Toplam: {depo.capacityM3.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} m³</div>
                                                    </td>
                                                    <td className="px-6 py-4 text-right">
-                                                       <div className="font-black text-emerald-600 text-lg tracking-tight">{depo.depoRevenue.toLocaleString('tr-TR')} TL</div>
+                                                       <div className="font-black text-emerald-600 text-lg tracking-tight">{depo.depoRevenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                                                        <div className="text-[10px] font-bold text-gray-400">Beklenen Kazanç</div>
                                                    </td>
                                                </tr>
@@ -6206,8 +6399,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                <td className="px-6 py-4 text-center text-[15px]">{totalRooms}</td>
                                                <td className="px-6 py-4 text-center text-[15px] text-red-600">{totalFullRooms} Dolu</td>
                                                <td className="px-6 py-4 text-center text-[15px]">%{occupancyRate}</td>
-                                               <td className="px-6 py-4 text-center text-[15px]">{depoDetails.reduce((sum, d) => sum + d.occupiedM3, 0).toLocaleString('tr-TR')} m³ Dolu</td>
-                                               <td className="px-6 py-4 text-right text-emerald-700 text-xl">{totalMonthlyRevenue.toLocaleString('tr-TR')} TL</td>
+                                               <td className="px-6 py-4 text-center text-[15px]">{depoDetails.reduce((sum, d) => sum + d.occupiedM3, 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} m³ Dolu</td>
+                                               <td className="px-6 py-4 text-right text-emerald-700 text-xl">{totalMonthlyRevenue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</td>
                                            </tr>
                                        </tfoot>
                                    </table>
@@ -6362,7 +6555,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                            </div>
                                                        </div>
                                                        <div className="flex flex-col sm:items-end">
-                                                           <div className="font-black text-emerald-600 text-lg tracking-tight">{fee.toLocaleString('tr-TR')} TL <span className="text-[10px] text-emerald-600/60 font-bold">/AY</span></div>
+                                                           <div className="font-black text-emerald-600 text-lg tracking-tight">{fee.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL <span className="text-[10px] text-emerald-600/60 font-bold">/AY</span></div>
                                                            <div className="text-xs text-gray-400 font-bold mt-1 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-100">Giriş: {r.entryDate}</div>
                                                        </div>
                                                    </div>
@@ -6663,7 +6856,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                      <div className="flex flex-col gap-2">
                        <input type="number" placeholder="Örn: 6600" value={rentData.monthlyFee} onChange={(e) => setRentData({...rentData, monthlyFee: e.target.value})} className="w-full border-2 border-red-200 bg-red-50 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-bold text-red-700 text-lg" />
                        <label className="flex items-center gap-2 cursor-pointer mt-1"><input type="checkbox" checked={rentData.hasKdv} onChange={(e) => setRentData({...rentData, hasKdv: e.target.checked})} className="w-4 h-4 text-[#1bc5bd] rounded focus:ring-[#1bc5bd]"/><span className="text-sm font-medium text-gray-700">+ %20 KDV Uygula</span></label>
-                       {rentData.hasKdv && rentData.monthlyFee && (<div className="text-xs font-bold text-teal-600">KDV Dahil Tahsil Edilecek: {(Number(rentData.monthlyFee) * 1.2).toFixed(2)} TL</div>)}
+                       {rentData.hasKdv && rentData.monthlyFee && (<div className="text-xs font-bold text-teal-600">KDV Dahil Tahsil Edilecek: {(Number(rentData.monthlyFee) * 1.2).toFixed(0)} TL</div>)}
                      </div>
                    </div>
                    <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Mühür Numarası</label><input type="text" placeholder="Örn: MH-78451" value={rentData.sealNo} onChange={(e) => setRentData({...rentData, sealNo: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] focus:ring-1 focus:ring-[#1bc5bd] font-medium text-slate-700 uppercase" /></div>
@@ -6699,7 +6892,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={rentData.transportHasKdv} onChange={(e) => setRentData({...rentData, transportHasKdv: e.target.checked})} className="w-4 h-4 text-[#1bc5bd] rounded focus:ring-[#1bc5bd]"/><span className="text-sm font-medium text-gray-700">+ %20 KDV Uygula</span></label>
                          </div>
                          {rentData.transportPrice && (
-                           <p className="text-[11px] font-medium text-gray-500 mt-1">Bu tutar müşterinin cari hesabına nakliye bedeli olarak eklenecektir. (Cariye yansıyacak tutar: <span className="font-bold text-gray-700">{rentData.transportHasKdv ? (Number(rentData.transportPrice) * 1.2).toFixed(2) : Number(rentData.transportPrice)} TL</span>)</p>
+                           <p className="text-[11px] font-medium text-gray-500 mt-1">Bu tutar müşterinin cari hesabına nakliye bedeli olarak eklenecektir. (Cariye yansıyacak tutar: <span className="font-bold text-gray-700">{rentData.transportHasKdv ? (Number(rentData.transportPrice) * 1.2).toFixed(0) : Number(rentData.transportPrice)} TL</span>)</p>
                          )}
                        </div>
                      </div>
@@ -6754,7 +6947,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                      <div className="flex flex-col gap-2">
                        <input type="number" placeholder="Örn: 6600" value={editRentData.monthlyFee} onChange={(e) => setEditRentData({...editRentData, monthlyFee: e.target.value})} className="w-full border-2 border-red-200 bg-red-50 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-bold text-red-700 text-lg" />
                        <label className="flex items-center gap-2 cursor-pointer mt-1"><input type="checkbox" checked={editRentData.hasKdv} onChange={(e) => setEditRentData({...editRentData, hasKdv: e.target.checked})} className="w-4 h-4 text-[#1bc5bd] rounded focus:ring-[#1bc5bd]"/><span className="text-sm font-medium text-gray-700">+ %20 KDV Uygula</span></label>
-                       {editRentData.hasKdv && editRentData.monthlyFee && (<div className="text-xs font-bold text-teal-600">KDV Dahil Tahsil Edilecek: {(Number(editRentData.monthlyFee) * 1.2).toFixed(2)} TL</div>)}
+                       {editRentData.hasKdv && editRentData.monthlyFee && (<div className="text-xs font-bold text-teal-600">KDV Dahil Tahsil Edilecek: {(Number(editRentData.monthlyFee) * 1.2).toFixed(0)} TL</div>)}
                      </div>
                    </div>
                    <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Mühür Numarası</label><input type="text" placeholder="Örn: MH-78451" value={editRentData.sealNo} onChange={(e) => setEditRentData({...editRentData, sealNo: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] focus:ring-1 focus:ring-[#1bc5bd] font-medium text-slate-700 uppercase" /></div>
@@ -7070,9 +7263,14 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                  </div>
                </div>
                
-               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                   <button onClick={() => setIsEditSpecificMonthModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl text-sm font-bold transition-colors">İptal</button>
-                   <button onClick={handleSaveSpecificMonthEdit} disabled={!specificMonthEditData.newAmount} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 transition-colors flex items-center gap-2"><Check strokeWidth={3} size={16}/> Tutarla Güncelle</button>
+               <div className="flex flex-col sm:flex-row justify-between items-center pt-4 border-t border-gray-100 w-full gap-3">
+                   <button onClick={handleGiftSpecificMonth} className="w-full sm:w-auto bg-purple-50 hover:bg-purple-100 text-purple-600 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-2 border border-purple-200 shadow-sm">
+                       <Gift size={16}/> Bu Ayı Hediye Ver
+                   </button>
+                   <div className="flex gap-3 w-full sm:w-auto justify-end">
+                       <button onClick={() => setIsEditSpecificMonthModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 sm:px-6 py-2.5 rounded-xl text-sm font-bold transition-colors">İptal</button>
+                       <button onClick={handleSaveSpecificMonthEdit} disabled={!specificMonthEditData.newAmount} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-4 sm:px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 transition-colors flex items-center gap-2"><Check strokeWidth={3} size={16}/> Güncelle</button>
+                   </div>
                </div>
              </div>
           </div>
@@ -7237,18 +7435,16 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
              <div className="p-5 border-b border-gray-100 flex justify-between items-center">
                  <h3 className="text-xl font-bold text-red-600 mx-auto w-full text-center">Müşteriyi Kalıcı Olarak Sil</h3>
-                 <button onClick={() => setIsDeleteCustomerModalOpen(false)} className="absolute right-5 text-gray-400 hover:text-red-500"><X size={20} /></button>
+                 <button onClick={() => { setIsDeleteCustomerModalOpen(false); setCustomerToDeleteId(null); }} className="absolute right-5 text-gray-400 hover:text-red-500"><X size={20} /></button>
              </div>
              <div className="p-6 text-center">
                 <div className="mx-auto bg-red-50 text-red-500 w-16 h-16 flex items-center justify-center rounded-full mb-4"><AlertCircle size={32} /></div>
                 <p className="text-gray-700 font-bold mb-2">Bu müşteriyi silmek istediğinizden emin misiniz?</p>
                 <p className="text-gray-500 text-sm mb-6">Müşteriye ait profil bilgileri, odalardaki aktif kayıtları ve cari geçmişi tamamen silinecektir. Bu işlem geri alınamaz!</p>
                 <div className="flex justify-center gap-3">
-                    <button onClick={() => setIsDeleteCustomerModalOpen(false)} className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2.5 rounded-lg font-bold transition-colors text-sm w-1/2">Hayır, İptal Et</button>
+                    <button onClick={() => { setIsDeleteCustomerModalOpen(false); setCustomerToDeleteId(null); }} className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2.5 rounded-lg font-bold transition-colors text-sm w-1/2">Hayır, İptal Et</button>
                     <button onClick={() => {
-                        handleDeleteCustomer(selectedCustomerId);
-                        setIsDeleteCustomerModalOpen(false);
-                        setSelectedCustomerId(null);
+                        handleDeleteCustomer(customerToDeleteId);
                     }} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg font-bold transition-colors flex items-center justify-center gap-2 text-sm w-1/2 shadow-lg shadow-red-500/30"><Trash2 size={16} /> Evet, Sil</button>
                 </div>
              </div>
@@ -7446,7 +7642,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                   </label>
                   {newDebtData.hasKdv && newDebtData.amount && (
                     <div className="text-[11px] font-bold text-red-600 bg-red-50 p-2 rounded">
-                      Müşterinin carisine yansıyacak toplam tutar: {(Number(newDebtData.amount) * 1.2).toFixed(2)} TL
+                      Müşterinin carisine yansıyacak toplam tutar: {(Number(newDebtData.amount) * 1.2).toFixed(0)} TL
                     </div>
                   )}
                   <div className="flex flex-col gap-1.5 mt-2">
@@ -7556,9 +7752,9 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                 <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
                                     <td className="px-4 py-3 font-medium whitespace-nowrap">{tx.dateStr}</td>
                                     <td className="px-4 py-3">{tx.desc}</td>
-                                    <td className="px-4 py-3 text-right font-semibold text-red-500">{tx.debt > 0 ? `${(tx.baseDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL` : '-'}</td>
-                                    <td className="px-4 py-3 text-right font-semibold text-orange-500">{tx.debt > 0 ? `${(tx.kdvDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL` : '-'}</td>
-                                    <td className="px-4 py-3 text-right font-semibold text-green-600">{tx.credit > 0 ? `${tx.credit.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} TL` : '-'}</td>
+                                    <td className="px-4 py-3 text-right font-semibold text-red-500">{tx.debt > 0 ? `${(tx.baseDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL` : '-'}</td>
+                                    <td className="px-4 py-3 text-right font-semibold text-orange-500">{tx.debt > 0 ? `${(tx.kdvDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL` : '-'}</td>
+                                    <td className="px-4 py-3 text-right font-semibold text-green-600">{tx.credit > 0 ? `${tx.credit.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL` : '-'}</td>
                                     <td className="px-4 py-3 text-center">
                                         <div className="flex items-center justify-center gap-1.5">
                                             <button onClick={() => {
@@ -7667,7 +7863,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-6 flex justify-between items-center">
                             <div>
                                 <div className="text-[10px] font-bold text-gray-400 uppercase">Tutar</div>
-                                <div className="font-black text-orange-600">{payment.amount.toLocaleString('tr-TR')} TL</div>
+                                <div className="font-black text-orange-600">{payment.amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                             </div>
                             <div className="text-right">
                                 <div className="text-[10px] font-bold text-gray-400 uppercase">Tarih</div>
@@ -7747,8 +7943,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
           const customer = customers.find(c => c.id === eInvoiceModalData.customerId);
           // Net ve KDV hesaplama örneği (KDV %20 varsayılmıştır)
           const totalAmount = eInvoiceModalData.amount;
-          const netAmount = (totalAmount / 1.20).toFixed(2);
-          const kdvAmount = (totalAmount - netAmount).toFixed(2);
+          const netAmount = (totalAmount / 1.20).toFixed(0);
+          const kdvAmount = (totalAmount - netAmount).toFixed(0);
           
           return (
             <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
@@ -7803,7 +7999,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                 </div>
                                 <div className="flex justify-between items-center border-t border-blue-200 pt-3 mt-1">
                                     <span className="text-sm font-black text-blue-900 uppercase">Genel Toplam</span>
-                                    <span className="text-xl font-black text-blue-700">{totalAmount.toLocaleString('tr-TR')} TL</span>
+                                    <span className="text-xl font-black text-blue-700">{totalAmount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</span>
                                 </div>
                             </div>
                             
@@ -8038,10 +8234,52 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
              <div className="p-6 text-center">
                 <div className="mx-auto bg-red-50 text-red-500 w-16 h-16 flex items-center justify-center rounded-full mb-4"><AlertCircle size={32} /></div>
                 <p className="text-gray-700 font-bold mb-2">Bu şubeyi silmek istediğinizden emin misiniz?</p>
-                <p className="text-gray-500 text-sm mb-6">Bu işlem geri alınamaz!</p>
+                <p className="text-gray-500 text-sm mb-6">Bu işlem geri alınamaz ve içerisindeki yapılar kaybolabilir!</p>
                 <div className="flex justify-center gap-3">
                     <button onClick={() => setIsDeleteWarehouseModalOpen(false)} className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2.5 rounded-lg font-bold transition-colors text-sm w-1/2">Hayır</button>
                     <button onClick={confirmDeleteWarehouse} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg font-bold transition-colors flex items-center justify-center gap-2 text-sm w-1/2 shadow-lg shadow-red-500/30"><Trash2 size={16} /> Evet, Sil</button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* BLOK SİL ONAY MODALI */}
+      {isDeleteBlockModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+                 <h3 className="text-xl font-bold text-red-600 mx-auto w-full text-center">Bloku Sil</h3>
+                 <button onClick={() => setIsDeleteBlockModalOpen(false)} className="absolute right-5 text-gray-400 hover:text-red-500"><X size={20} /></button>
+             </div>
+             <div className="p-6 text-center">
+                <div className="mx-auto bg-red-50 text-red-500 w-16 h-16 flex items-center justify-center rounded-full mb-4"><AlertCircle size={32} /></div>
+                <p className="text-gray-700 font-bold mb-2">Bu bloku silmek istediğinizden emin misiniz?</p>
+                <p className="text-gray-500 text-sm mb-6">Bu işlem kalıcıdır ve içerisindeki odalarla bağ kopabilir!</p>
+                <div className="flex justify-center gap-3">
+                    <button onClick={() => setIsDeleteBlockModalOpen(false)} className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2.5 rounded-lg font-bold transition-colors text-sm w-1/2">Hayır</button>
+                    <button onClick={confirmDeleteBlock} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg font-bold transition-colors flex items-center justify-center gap-2 text-sm w-1/2 shadow-lg shadow-red-500/30"><Trash2 size={16} /> Evet, Sil</button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ODA SİL ONAY MODALI */}
+      {isDeleteRoomModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+                 <h3 className="text-xl font-bold text-red-600 mx-auto w-full text-center">Odayı Sil</h3>
+                 <button onClick={() => setIsDeleteRoomModalOpen(false)} className="absolute right-5 text-gray-400 hover:text-red-500"><X size={20} /></button>
+             </div>
+             <div className="p-6 text-center">
+                <div className="mx-auto bg-red-50 text-red-500 w-16 h-16 flex items-center justify-center rounded-full mb-4"><AlertCircle size={32} /></div>
+                <p className="text-gray-700 font-bold mb-2">Bu odayı silmek istediğinizden emin misiniz?</p>
+                <p className="text-gray-500 text-sm mb-6">Bu işlem kalıcıdır ve geri alınamaz!</p>
+                <div className="flex justify-center gap-3">
+                    <button onClick={() => setIsDeleteRoomModalOpen(false)} className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2.5 rounded-lg font-bold transition-colors text-sm w-1/2">Hayır</button>
+                    <button onClick={confirmDeleteRoom} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg font-bold transition-colors flex items-center justify-center gap-2 text-sm w-1/2 shadow-lg shadow-red-500/30"><Trash2 size={16} /> Evet, Sil</button>
                 </div>
              </div>
           </div>
@@ -8077,7 +8315,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                              <div className="w-px bg-gray-200"></div>
                              <div className="flex-1">
                                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Toplam Alacak</div>
-                                 <div className="text-xl font-black text-red-500 mt-1">{updateAllStats?.totalUnpaid?.toLocaleString('tr-TR')} TL</div>
+                                 <div className="text-xl font-black text-red-500 mt-1">{updateAllStats?.totalUnpaid?.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                              </div>
                          </div>
                          
