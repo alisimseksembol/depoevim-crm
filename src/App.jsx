@@ -3420,20 +3420,15 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <AlertCircle size={16} /> {loginError}
                           </div>
                       )}
-<div className="flex flex-col gap-2">
-                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Uygulanacak Yeni Kira Bedeli (TL)</label>
-                     <div className="relative">
-                         <input type="number" placeholder="Örn: 2500" value={pastIncreaseData.amount} onChange={(e) => setPastIncreaseData({...pastIncreaseData, amount: e.target.value})} className="w-full border-2 border-orange-200 rounded-xl px-4 py-3 text-lg font-bold focus:outline-none focus:border-orange-500 bg-orange-50/50 text-orange-900" />
-                         <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-orange-400">TL</span>
-                     </div>
-                     <label className="flex items-center gap-2 cursor-pointer mt-1">
-                        <input type="checkbox" checked={pastIncreaseData.isKdvIncluded} onChange={(e) => setPastIncreaseData({...pastIncreaseData, isKdvIncluded: e.target.checked})} className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"/>
-                        <span className="text-sm font-bold text-gray-700">Yazdığım Tutar KDV DAHİL Tutardır</span>
-                     </label>
-                 </div>
-                      <div className="flex flex-col gap-1.5">
-                          <label className="text-xs font-bold text-gray-600 uppercase tracking-wider pl-1">Şifre</label>
+<div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-bold text-gray-600 uppercase tracking-wider pl-1">Kullanıcı Adı</label>
                           <div className="relative">
+                              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><UserCog size={18} className="text-gray-400" /></div>
+                              <input type="text" value={loginData.username} onChange={(e) => setLoginData({...loginData, username: e.target.value})} placeholder="admin" className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-50 transition-all font-semibold text-slate-700" required />
+                          </div>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-bold text-gray-600 uppercase tracking-wider pl-1">Şifre</label>                          <div className="relative">
                               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
                               </div>
@@ -7269,14 +7264,17 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Zammın Geçerli Olacağı Tarih</label>
                      <input type="date" value={pastIncreaseData.date} onChange={(e) => setPastIncreaseData({...pastIncreaseData, date: e.target.value})} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-500 font-bold text-slate-700" />
                  </div>
-                 <div className="flex flex-col gap-2">
+<div className="flex flex-col gap-2">
                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Uygulanacak Yeni Kira Bedeli (TL)</label>
                      <div className="relative">
                          <input type="number" placeholder="Örn: 2500" value={pastIncreaseData.amount} onChange={(e) => setPastIncreaseData({...pastIncreaseData, amount: e.target.value})} className="w-full border-2 border-orange-200 rounded-xl px-4 py-3 text-lg font-bold focus:outline-none focus:border-orange-500 bg-orange-50/50 text-orange-900" />
                          <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-orange-400">TL</span>
                      </div>
-                 </div>
-               </div>
+                     <label className="flex items-center gap-2 cursor-pointer mt-1">
+                        <input type="checkbox" checked={pastIncreaseData.isKdvIncluded} onChange={(e) => setPastIncreaseData({...pastIncreaseData, isKdvIncluded: e.target.checked})} className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"/>
+                        <span className="text-sm font-bold text-gray-700">Yazdığım Tutar KDV DAHİL Tutardır</span>
+                     </label>
+                 </div>               </div>
                
                <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
                    <button onClick={() => setIsPastIncreaseModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-xl text-sm font-bold transition-colors">İptal</button>
