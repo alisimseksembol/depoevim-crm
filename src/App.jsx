@@ -2922,14 +2922,19 @@ const handleSaveAppointment = async () => {
   const overdueCount = activeRentalsList.filter(r => {
       const entryD = parseDateLocal(r.entryDate || '2026-01-01');
       const paymentAnchorD = r.paymentDate && r.paymentDate.includes('-') ? parseDateLocal(r.paymentDate) : entryD;
-      const today = new Date();
+const today = new Date();
       today.setHours(0, 0, 0, 0); // Sadece geçmiş günleri al (bugün hariç)
       
-      let loopDate = new Date(paymentAnchorD);
+      const targetDay = r.paymentDate && !r.paymentDate.includes('-') ? parseInt(r.paymentDate) : paymentAnchorD.getDate();
+      let loopDate = new Date(paymentAnchorD.getFullYear(), paymentAnchorD.getMonth(), 1);
       let hasOverdue = false;
       let monthCounter = 0;
       
-      while (loopDate < today) {
+      while (loopDate.getFullYear() < today.getFullYear() || (loopDate.getFullYear() === today.getFullYear() && loopDate.getMonth() <= today.getMonth())) {
+          let maxDayInMonth = new Date(loopDate.getFullYear(), loopDate.getMonth() + 1, 0).getDate();
+          let currentIterDate = new Date(loopDate.getFullYear(), loopDate.getMonth(), Math.min(targetDay, maxDayInMonth));
+          if (currentIterDate >= today) break;
+
           const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
           const isGifted = r.giftMonths && monthCounter < r.giftMonths;
           const isFree = r.isFreeRoom;
@@ -2976,15 +2981,20 @@ const handleSaveAppointment = async () => {
     const customer = customers.find(c => c.name === selectedRoomDetail.customerName);
     const overrides = customer?.ledgerOverrides || [];
 
-    const periods = [];
-    let loopDate = new Date(paymentAnchorDate);
+const periods = [];
+    const targetDay = selectedRoomDetail.paymentDate && !selectedRoomDetail.paymentDate.includes('-') ? parseInt(selectedRoomDetail.paymentDate) : paymentAnchorDate.getDate();
+    let loopDate = new Date(paymentAnchorDate.getFullYear(), paymentAnchorDate.getMonth(), 1);
     let payIdCounter = 0;
     let monthCounter = 0;
     
     while (loopDate.getFullYear() <= detailYear) {
       if (loopDate.getFullYear() === detailYear) {
-        if (loopDate <= today) {
-          const start = new Date(loopDate);
+        let maxDayInMonth = new Date(loopDate.getFullYear(), loopDate.getMonth() + 1, 0).getDate();
+        let actualPayDay = Math.min(targetDay, maxDayInMonth);
+        let currentIterDate = new Date(loopDate.getFullYear(), loopDate.getMonth(), actualPayDay);
+
+        if (currentIterDate <= today) {
+          const start = new Date(currentIterDate);
           const end = new Date(loopDate);
           end.setMonth(end.getMonth() + 1);
 
@@ -3050,8 +3060,9 @@ const handleSaveAppointment = async () => {
     const today = new Date();
     today.setHours(23, 59, 59, 999);
     
-    let totalUnpaid = 0;
-    let loopDate = new Date(paymentAnchorDate);
+let totalUnpaid = 0;
+    const targetDay = selectedRoomDetail.paymentDate && !selectedRoomDetail.paymentDate.includes('-') ? parseInt(selectedRoomDetail.paymentDate) : paymentAnchorDate.getDate();
+    let loopDate = new Date(paymentAnchorDate.getFullYear(), paymentAnchorDate.getMonth(), 1);
     let monthCounter = 0;
     
     const baseAmount = Number(selectedRoomDetail.monthlyFee || 0);
@@ -3061,7 +3072,11 @@ const handleSaveAppointment = async () => {
     const customer = customers.find(c => c.name === selectedRoomDetail.customerName);
     const overrides = customer?.ledgerOverrides || [];
 
-    while (loopDate <= today) {
+    while (loopDate.getFullYear() < today.getFullYear() || (loopDate.getFullYear() === today.getFullYear() && loopDate.getMonth() <= today.getMonth())) {
+      let maxDayInMonth = new Date(loopDate.getFullYear(), loopDate.getMonth() + 1, 0).getDate();
+      let currentIterDate = new Date(loopDate.getFullYear(), loopDate.getMonth(), Math.min(targetDay, maxDayInMonth));
+      if (currentIterDate > today) break;
+
       const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
       const txId = `debt-${selectedRoomDetail.id}-${key}`;
       
@@ -5986,13 +6001,18 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                const paymentAnchorD = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryD;
                                const baseAmt = Number(room.monthlyFee || 0);
                                const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
-                               const monthlyTotal = hasKdv ? baseAmt * 1.20 : baseAmt;
+const monthlyTotal = hasKdv ? baseAmt * 1.20 : baseAmt;
+                               const targetDay = room.paymentDate && !room.paymentDate.includes('-') ? parseInt(room.paymentDate) : paymentAnchorD.getDate();
 
-                               let loopDate = new Date(paymentAnchorD);
+                               let loopDate = new Date(paymentAnchorD.getFullYear(), paymentAnchorD.getMonth(), 1);
                                let monthCounter = 0;
                                
-                               while (loopDate <= today) {
-                                   if (loopDate >= branchStartD) {
+                               while (loopDate.getFullYear() < today.getFullYear() || (loopDate.getFullYear() === today.getFullYear() && loopDate.getMonth() <= today.getMonth())) {
+                                   let maxDayInMonth = new Date(loopDate.getFullYear(), loopDate.getMonth() + 1, 0).getDate();
+                                   let actualPayDay = Math.min(targetDay, maxDayInMonth);
+                                   let currentIterDate = new Date(loopDate.getFullYear(), loopDate.getMonth(), actualPayDay);
+
+                                   if (currentIterDate <= today && currentIterDate >= branchStartD) {
                                        const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
                                        const isGifted = room.giftMonths && monthCounter < room.giftMonths;
                                        const isFree = room.isFreeRoom;
