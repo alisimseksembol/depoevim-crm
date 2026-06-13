@@ -1798,8 +1798,8 @@ const handleAddInvoice = async () => {
   const [increasePercentage, setIncreasePercentage] = useState('');
   const [newRentAmount, setNewRentAmount] = useState('');
   
-  const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
-  const [pastIncreaseData, setPastIncreaseData] = useState({ date: new Date().toISOString().split('T')[0], amount: '' });
+const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
+  const [pastIncreaseData, setPastIncreaseData] = useState({ date: new Date().toISOString().split('T')[0], amount: '', isKdvIncluded: true });
 
   const [isEditSpecificMonthModalOpen, setIsEditSpecificMonthModalOpen] = useState(false);
   const [specificMonthEditData, setSpecificMonthEditData] = useState(null);
@@ -2615,10 +2615,18 @@ const handleChangeRoomConfirm = async () => {
 const handleSavePastIncrease = async () => {
       if (!pastIncreaseData.date || !pastIncreaseData.amount) return;
       
-      const startDate = new Date(pastIncreaseData.date);
-      const amount = Number(pastIncreaseData.amount);
+const startDate = new Date(pastIncreaseData.date);
+      const amountInput = Number(pastIncreaseData.amount);
       const hasKdv = selectedRoomDetail.hasKdv !== false;
-      const monthlyTotal = hasKdv ? amount * 1.20 : amount;
+      
+      let monthlyTotal, amount;
+      if (pastIncreaseData.isKdvIncluded && hasKdv) {
+          monthlyTotal = amountInput;
+          amount = amountInput / 1.20; // KDV hariç hali
+      } else {
+          amount = amountInput;
+          monthlyTotal = hasKdv ? amount * 1.20 : amount;
+      }
 
       const newOverrides = [];
       let loopDate = new Date(startDate);
@@ -3412,13 +3420,17 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <AlertCircle size={16} /> {loginError}
                           </div>
                       )}
-                      <div className="flex flex-col gap-1.5">
-                          <label className="text-xs font-bold text-gray-600 uppercase tracking-wider pl-1">Kullanıcı Adı</label>
-                          <div className="relative">
-                              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><UserCog size={18} className="text-gray-400" /></div>
-                              <input type="text" value={loginData.username} onChange={(e) => setLoginData({...loginData, username: e.target.value})} placeholder="admin" className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-50 transition-all font-semibold text-slate-700" required />
-                          </div>
-                      </div>
+<div className="flex flex-col gap-2">
+                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Uygulanacak Yeni Kira Bedeli (TL)</label>
+                     <div className="relative">
+                         <input type="number" placeholder="Örn: 2500" value={pastIncreaseData.amount} onChange={(e) => setPastIncreaseData({...pastIncreaseData, amount: e.target.value})} className="w-full border-2 border-orange-200 rounded-xl px-4 py-3 text-lg font-bold focus:outline-none focus:border-orange-500 bg-orange-50/50 text-orange-900" />
+                         <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-orange-400">TL</span>
+                     </div>
+                     <label className="flex items-center gap-2 cursor-pointer mt-1">
+                        <input type="checkbox" checked={pastIncreaseData.isKdvIncluded} onChange={(e) => setPastIncreaseData({...pastIncreaseData, isKdvIncluded: e.target.checked})} className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"/>
+                        <span className="text-sm font-bold text-gray-700">Yazdığım Tutar KDV DAHİL Tutardır</span>
+                     </label>
+                 </div>
                       <div className="flex flex-col gap-1.5">
                           <label className="text-xs font-bold text-gray-600 uppercase tracking-wider pl-1">Şifre</label>
                           <div className="relative">
@@ -4280,8 +4292,9 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                      <tr>
                                         <th className="px-6 py-4">Tarih</th>
                                         <th className="px-6 py-4">İşlem Açıklaması</th>
-                                        <th className="px-6 py-4 text-right">Borç (Tahakkuk)</th>
+<th className="px-6 py-4 text-right">Borç (Tahakkuk)</th>
                                         <th className="px-6 py-4 text-right">+ KDV %20 Tutarı</th>
+                                        <th className="px-6 py-4 text-right">KDV Dahil Tutar</th>
                                         <th className="px-6 py-4 text-right">Alacak (Ödenen)</th>
                                         <th className="px-6 py-4 text-right">Bakiye</th>
                                      </tr>
@@ -4291,10 +4304,10 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                         <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
                                            <td className="px-6 py-3 whitespace-nowrap font-medium">{tx.dateStr}</td>
                                            <td className="px-6 py-3">{tx.desc}</td>
-                                           <td className="px-6 py-3 text-right font-semibold text-red-500">{tx.debt > 0 ? `${(tx.baseDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL` : '-'}</td>
-                                           <td className="px-6 py-3 text-right font-semibold text-orange-500">{tx.debt > 0 ? `${(tx.kdvDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL` : '-'}</td>
-                                           <td className="px-6 py-3 text-right font-semibold text-green-600">{tx.credit > 0 ? `${tx.credit.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL` : '-'}</td>
-                                           <td className="px-6 py-3 text-right">
+<td className="px-6 py-3 text-right font-semibold text-red-500">{tx.debt > 0 ? `${(tx.baseDebt || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL` : '-'}</td>
+                                           <td className="px-6 py-3 text-right font-semibold text-orange-500">{tx.debt > 0 ? `${(tx.kdvDebt || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL` : '-'}</td>
+                                           <td className="px-6 py-3 text-right font-black text-indigo-600">{tx.debt > 0 ? `${tx.debt.toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL` : '-'}</td>
+                                           <td className="px-6 py-3 text-right font-semibold text-green-600">{tx.credit > 0 ? `${tx.credit.toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL` : '-'}</td>                                           <td className="px-6 py-3 text-right">
                                                <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-black border shadow-sm ${tx.balance > 0 ? 'bg-red-50 text-red-700 border-red-200' : tx.balance < 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                                                    {tx.balance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL
                                                </span>
@@ -4310,10 +4323,10 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                      <tfoot className="bg-gray-50 border-t border-gray-200 font-bold text-gray-800">
                                         <tr>
                                            <td colSpan="2" className="px-6 py-4 text-right">DÖNEM TOPLAMI / GÜNCEL BAKİYE:</td>
-                                           <td className="px-6 py-4 text-right text-red-600">{filteredLedger.reduce((sum, tx) => sum + (tx.baseDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
-                                           <td className="px-6 py-4 text-right text-orange-600">{filteredLedger.reduce((sum, tx) => sum + (tx.kdvDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
-                                           <td className="px-6 py-4 text-right text-green-600">{filteredLedger.reduce((sum, tx) => sum + tx.credit, 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
-                                           <td className="px-6 py-4 text-right">
+<td className="px-6 py-4 text-right text-red-600">{filteredLedger.reduce((sum, tx) => sum + (tx.baseDebt || 0), 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL</td>
+                                           <td className="px-6 py-4 text-right text-orange-600">{filteredLedger.reduce((sum, tx) => sum + (tx.kdvDebt || 0), 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL</td>
+                                           <td className="px-6 py-4 text-right font-black text-indigo-700">{filteredLedger.reduce((sum, tx) => sum + (tx.debt || 0), 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL</td>
+                                           <td className="px-6 py-4 text-right text-green-600">{filteredLedger.reduce((sum, tx) => sum + tx.credit, 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL</td>                                           <td className="px-6 py-4 text-right">
                                                <span className={`inline-block px-3 py-1.5 rounded-lg text-sm font-black text-white shadow-md ${runningBalance > 0 ? 'bg-red-500 shadow-red-500/30' : runningBalance < 0 ? 'bg-green-500 shadow-green-500/30' : 'bg-slate-600 shadow-slate-500/30'}`}>
                                                    {runningBalance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL
                                                </span>
@@ -4356,12 +4369,20 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                              const customer = customers.find(c => c.name === room.customerName);
                              const overrides = customer?.ledgerOverrides || [];
 
-                             const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
+const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              const paymentAnchorDate = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryDate;
                              const today = new Date(); today.setHours(23, 59, 59, 999);
                              const baseAmount = Number(room.monthlyFee || 0);
                              const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
-                             const monthlyTotal = hasKdv ? baseAmount * 1.20 : baseAmount;
+                             let monthlyTotal = hasKdv ? baseAmount * 1.20 : baseAmount;
+
+                             // Madde 16: Varsa mevcut ayın güncel override (zam) tutarını al
+                             const currentKey = `${today.getFullYear()}-${today.getMonth()}`;
+                             const txId = `debt-${room.id}-${currentKey}`;
+                             const currentOverride = overrides.find(o => o.txId === txId && !o.isDeleted);
+                             if (currentOverride && currentOverride.debt !== undefined) {
+                                 monthlyTotal = currentOverride.debt;
+                             }
 
                              return (
                                <div key={room.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow relative overflow-hidden flex flex-col">
@@ -5671,8 +5692,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                     </div>
                                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-8 w-full sm:w-auto">
                                        <div className="flex flex-col sm:items-end">
-                                         <div className="flex items-center gap-3">
-                                            <span className={`font-extrabold text-2xl ${payment.isGifted ? 'text-purple-600' : (payment.isFree ? 'text-cyan-600' : 'text-gray-800')}`}>{payment.amount} TL</span>
+<div className="flex items-center gap-3">
+                                            <span className={`font-extrabold text-2xl ${payment.isGifted ? 'text-purple-600' : (payment.isFree ? 'text-cyan-600' : 'text-gray-800')}`}>{(Number(payment.amount) || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL</span>
                                             {!payment.isGifted && !payment.isFree && (
                                                 <button onClick={() => {
                                                     setSpecificMonthEditData({
@@ -5687,8 +5708,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                 }} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-2 rounded-lg transition-colors shadow-sm" title="Bu ayın kirasını düzenle"><Edit size={16}/></button>
                                             )}
                                          </div>
-                                         <span className="text-[11px] text-gray-400 font-medium mt-1">Net: {payment.baseAmount.toFixed(0)} TL {payment.hasKdv && `+ KDV: ${payment.kdvAmount.toFixed(0)} TL`}</span>
-                                       </div>
+<span className="text-[11px] text-gray-400 font-medium mt-1">Net: {Number(payment.baseAmount).toFixed(0)} TL {payment.hasKdv && `+ KDV: ${Number(payment.kdvAmount).toFixed(0)} TL`}</span>                                       </div>
                                     </div>
                                  </div>
                               )) : (
