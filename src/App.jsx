@@ -2627,7 +2627,7 @@ const handleSavePastIncrease = async () => {
           const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
           const txId = `debt-${selectedRoomId}-${key}`;
           const monthName = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'][loopDate.getMonth()];
-          newOverrides.push({
+newOverrides.push({
               txId, 
               date: new Date(loopDate).getTime(), // Firebase timestamp uyumluluğu
               desc: `${selectedRoomDetail.name} Odası - Geçmiş Zamlı Kira (${monthName} ${loopDate.getFullYear()})`,
@@ -2636,7 +2636,13 @@ const handleSavePastIncrease = async () => {
               kdvDebt: hasKdv ? amount * 0.20 : 0, 
               credit: 0
           });
-          loopDate.setMonth(loopDate.getMonth() + 1);
+          
+          const targetDay = startDate.getDate();
+          let nMonth = loopDate.getMonth() + 1;
+          let nYear = loopDate.getFullYear();
+          if (nMonth > 11) { nMonth = 0; nYear++; }
+          let maxDayInNextMonth = new Date(nYear, nMonth + 1, 0).getDate();
+          loopDate = new Date(nYear, nMonth, Math.min(targetDay, maxDayInNextMonth));
       }
 
       const customerToUpdate = customers.find(c => c.name === selectedRoomDetail.customerName);
@@ -2934,13 +2940,19 @@ const handleSaveAppointment = async () => {
           const isGifted = r.giftMonths && monthCounter < r.giftMonths;
           const isFree = r.isFreeRoom;
           
-          if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
+if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
               hasOverdue = true;
               break;
           }
-monthCounter++;
-          loopDate = new Date(paymentAnchorD.getFullYear(), paymentAnchorD.getMonth() + monthCounter, paymentAnchorD.getDate());
-          if (loopDate.getDate() !== paymentAnchorD.getDate()) loopDate.setDate(0);      }
+          const targetDay = r.paymentDate && !r.paymentDate.includes('-') ? parseInt(r.paymentDate) : paymentAnchorD.getDate();
+          let nMonth = loopDate.getMonth() + 1;
+          let nYear = loopDate.getFullYear();
+          if (nMonth > 11) { nMonth = 0; nYear++; }
+          let maxDayInNextMonth = new Date(nYear, nMonth + 1, 0).getDate();
+          loopDate = new Date(nYear, nMonth, Math.min(targetDay, maxDayInNextMonth));
+          
+          monthCounter++;
+      }
       return hasOverdue;
   }).length;
   const overduePercentage = activeRentalsCount > 0 ? ((overdueCount / activeRentalsCount) * 100).toFixed(1) : 0;
@@ -2984,9 +2996,14 @@ monthCounter++;
     while (loopDate.getFullYear() <= detailYear) {
       if (loopDate.getFullYear() === detailYear) {
         if (loopDate <= today) {
-          const start = new Date(loopDate);
-          const end = new Date(loopDate);
-          end.setMonth(end.getMonth() + 1);
+const start = new Date(loopDate);
+          
+          const targetDay = selectedRoomDetail.paymentDate && !selectedRoomDetail.paymentDate.includes('-') ? parseInt(selectedRoomDetail.paymentDate) : paymentAnchorDate.getDate();
+          let nMonth = start.getMonth() + 1;
+          let nYear = start.getFullYear();
+          if (nMonth > 11) { nMonth = 0; nYear++; }
+          let maxDayInNextMonth = new Date(nYear, nMonth + 1, 0).getDate();
+          const end = new Date(nYear, nMonth, Math.min(targetDay, maxDayInNextMonth));
 
           const paymentKey = `${start.getFullYear()}-${start.getMonth()}`;
           const txId = `debt-${selectedRoomDetail.id}-${paymentKey}`;
@@ -3032,10 +3049,15 @@ monthCounter++;
           });
         }
       }
-monthCounter++;
+const targetDay = selectedRoomDetail.paymentDate && !selectedRoomDetail.paymentDate.includes('-') ? parseInt(selectedRoomDetail.paymentDate) : paymentAnchorDate.getDate();
+      let nMonth = loopDate.getMonth() + 1;
+      let nYear = loopDate.getFullYear();
+      if (nMonth > 11) { nMonth = 0; nYear++; }
+      let maxDayInNextMonth = new Date(nYear, nMonth + 1, 0).getDate();
+      loopDate = new Date(nYear, nMonth, Math.min(targetDay, maxDayInNextMonth));
+
       payIdCounter++;
-      loopDate = new Date(paymentAnchorDate.getFullYear(), paymentAnchorDate.getMonth() + monthCounter, paymentAnchorDate.getDate());
-      if (loopDate.getDate() !== paymentAnchorDate.getDate()) loopDate.setDate(0);
+      monthCounter++;
     }
     return periods;
   };
@@ -3075,12 +3097,17 @@ monthCounter++;
       const isGifted = selectedRoomDetail.giftMonths && monthCounter < selectedRoomDetail.giftMonths;
       const isFree = selectedRoomDetail.isFreeRoom;
       
-      if (!selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !isFree) {
+if (!selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !isFree) {
         totalUnpaid += currentMonthlyTotal;
       }
-monthCounter++;
-      loopDate = new Date(paymentAnchorDate.getFullYear(), paymentAnchorDate.getMonth() + monthCounter, paymentAnchorDate.getDate());
-      if (loopDate.getDate() !== paymentAnchorDate.getDate()) loopDate.setDate(0);
+      const targetDay = selectedRoomDetail.paymentDate && !selectedRoomDetail.paymentDate.includes('-') ? parseInt(selectedRoomDetail.paymentDate) : paymentAnchorDate.getDate();
+      let nMonth = loopDate.getMonth() + 1;
+      let nYear = loopDate.getFullYear();
+      if (nMonth > 11) { nMonth = 0; nYear++; }
+      let maxDayInNextMonth = new Date(nYear, nMonth + 1, 0).getDate();
+      loopDate = new Date(nYear, nMonth, Math.min(targetDay, maxDayInNextMonth));
+      
+      monthCounter++;
     }
     return totalUnpaid;
   };
@@ -6007,9 +6034,9 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                            }
                                        }
                                    }
-monthCounter++;
-                                   loopDate = new Date(paymentAnchorD.getFullYear(), paymentAnchorD.getMonth() + monthCounter, paymentAnchorD.getDate());
-                                   if (loopDate.getDate() !== paymentAnchorD.getDate()) loopDate.setDate(0);                               }
+                                   loopDate.setMonth(loopDate.getMonth() + 1);
+                                   monthCounter++;
+                               }
                            });
                            return { id: wh.id, name: wh.name, tahsil, bekleyen };
                        }).sort((a, b) => (b.tahsil + b.bekleyen) - (a.tahsil + a.bekleyen));
