@@ -817,12 +817,12 @@ iframe.contentWindow.document.write(`
                   /* Sayfa boşluklarını koruyan ve sayfaları sonuna kadar dolduran tablo yapısı */
                   table { width: 100%; border-collapse: collapse; border: none; }
                   td, th { border: none; padding: 0; vertical-align: top; }
-                  .footer-space { height: 130px; } /* Alt imza alanı için boşluk payı */
+.footer-space { height: 170px; } /* Alt imza alanı biraz yukarı çıktığı için ana metin çarpmasın diye boşluk artırıldı */
                   
                   /* Her sayfanın altına sabitlenen Mühür/Logo/İmza alanı */
                   .fixed-footer { 
                       position: fixed; 
-                      bottom: 0; 
+                      bottom: 15mm; /* Tüm imza alanı sayfanın en dibinden 1.5 cm yukarı çekildi */
                       left: 0; 
                       right: 0; 
                       height: 120px; 
@@ -836,7 +836,7 @@ iframe.contentWindow.document.write(`
                   .footer-box { width: 33%; position: relative; }
                   .footer-box.center { text-align: center; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 10px; }
                   .footer-box div { margin-bottom: 3px; }
-                  .stamp { position: absolute; top: 25px; left: -5px; width: 140px; mix-blend-mode: multiply; opacity: 0.95; }
+                  .stamp { position: absolute; top: 60px; left: -5px; width: 140px; mix-blend-mode: multiply; opacity: 0.95; } /* Mühür yazıların üstüne binmesin diye yazının altına itildi */
               </style>
           </head>
           <body>
