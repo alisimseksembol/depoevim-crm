@@ -69,6 +69,14 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'depoevim-crm';
 // ============================================================================
 
+// --- YARDIMCI FONKSİYONLAR ---
+const normalizeStr = (str) => {
+    if (!str) return '';
+    return str.toLocaleLowerCase('tr-TR')
+        .replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's')
+        .replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ç/g, 'c');
+};
+
 // Mini grafik bileşeni
 // ============================================================================
 
@@ -851,21 +859,24 @@ const handleSaveEditPending = async () => {
                   .footer-title { font-weight: bold; margin-bottom: 3px; color: #555; }
                   .footer-name { font-weight: bold; color: #000; }
                   
-                  /* Sadece son sayfada çıkacak İmza Alanları */
+/* Sadece son sayfada çıkacak İmza Alanları */
                   .signatures { 
                       margin-top: 40pt; 
                       display: flex; 
                       justify-content: space-between; 
                       page-break-inside: avoid; 
                   }
-                  .sig-box { width: 45%; text-align: center; }
+                  .sig-box { width: 45%; text-align: center; position: relative; }
                   .sig-label { font-weight: bold; margin-bottom: 10pt; }
                   .sig-line { margin-top: 40pt; border-bottom: 1px solid #000; width: 60%; margin-left: auto; margin-right: auto; }
                   .sig-text { text-align: center; margin-top: 10pt; font-size: 10pt; }
               </style>
           </head>
-          <body>
+<body>
               <div class="watermark">Depoevim</div>
+              <div style="text-align: center; margin-bottom: 20px;">
+                  <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Logo" style="height: 50px; object-fit: contain;" />
+              </div>
               <div class="footer">
                   <div class="footer-box">
                       <div class="footer-title">HİZMET VEREN</div>
@@ -881,11 +892,14 @@ const handleSaveEditPending = async () => {
                   <div style="text-align: center; font-size: 14pt; font-weight: bold; margin-bottom: 20pt; text-decoration: underline;">Eşya Depolama Sözleşmesi</div>
                   ${clausesHtml}
                   
-                  <div class="signatures">
+<div class="signatures">
                       <div class="sig-box">
                           <div class="sig-label">HİZMET VEREN</div>
                           <div class="sig-text">Ad Soyad / Ünvan:<br>${contractSettings.accountHolder}</div>
-                          <div class="sig-text" style="margin-top: 20pt;">İmza Yetkili Kişi Ad Soyad:</div>
+                          <div class="sig-text" style="position: relative; margin-top: 20pt; min-height: 80px;">
+                              İmza Yetkili Kişi Ad Soyad:
+                              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style="position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); width: 140px; mix-blend-mode: multiply; opacity: 0.95;" />
+                          </div>
                           <div class="sig-line"></div>
                       </div>
                       <div class="sig-box">
@@ -2994,7 +3008,7 @@ const handleSaveEditRent = async () => {
   };
 
 const handleEndRentConfirm = async () => {
-      const room = rooms.find(r => r.id === selectedRoomId);
+      const room = rooms.find(r => String(r.id) === String(selectedRoomId));
       if (!room) return;
       
       const entryD = new Date(room.entryDate || Date.now()); 
@@ -3004,8 +3018,19 @@ const handleEndRentConfirm = async () => {
       const months = Math.floor(diffDays / 30); 
       const durationStr = months > 0 ? `${months} Ay` : `${diffDays} Gün`;
       
-      const historyRecord = { id: Date.now(), customerName: room.customerName, entryDate: room.entryDate, exitDate: endRentData.exitDate, duration: durationStr, monthlyFee: room.monthlyFee, status: 'Çıkış Yaptı', photo: endRentData.photo, entryPhoto: room.entryPhoto, entryExitHistory: room.entryExitHistory };
-      
+      const historyRecord = { 
+          id: Date.now(), 
+          customerName: room.customerName || null, 
+          entryDate: room.entryDate || null, 
+          exitDate: endRentData.exitDate || null, 
+          duration: durationStr, 
+          monthlyFee: room.monthlyFee || null, 
+          status: 'Çıkış Yaptı', 
+          photo: endRentData.photo || null, 
+          entryPhoto: room.entryPhoto || null, 
+          entryExitHistory: room.entryExitHistory || null 
+      };
+
       const roomUpdates = {
           customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null, broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null, paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
           history: [historyRecord, ...(room.history || [])]
@@ -3023,8 +3048,8 @@ const handleEndRentConfirm = async () => {
 
 const handleChangeRoomConfirm = async () => {
     if(!changeRoomTargetRoomId) return;
-    const oldRoom = rooms.find(r => r.id === selectedRoomId);
-    const newRoom = rooms.find(r => r.id === parseInt(changeRoomTargetRoomId));
+    const oldRoom = rooms.find(r => String(r.id) === String(selectedRoomId));
+    const newRoom = rooms.find(r => String(r.id) === String(changeRoomTargetRoomId));
     if(!oldRoom || !newRoom) return;
 
     const entryD = new Date(oldRoom.entryDate || Date.now());
@@ -3035,9 +3060,16 @@ const handleChangeRoomConfirm = async () => {
     const durationStr = months > 0 ? `${months} Ay` : `${diffDays} Gün`;
 
     const historyRecord = {
-        id: Date.now(), customerName: oldRoom.customerName, entryDate: oldRoom.entryDate, exitDate: exitD.toLocaleDateString('tr-TR'),
-        duration: durationStr, monthlyFee: oldRoom.monthlyFee, status: `${newRoom.name} Odasına Taşındı`, photo: null,
-        entryPhoto: oldRoom.entryPhoto, entryExitHistory: oldRoom.entryExitHistory
+        id: Date.now(), 
+        customerName: oldRoom.customerName || null, 
+        entryDate: oldRoom.entryDate || null, 
+        exitDate: exitD.toLocaleDateString('tr-TR'),
+        duration: durationStr, 
+        monthlyFee: oldRoom.monthlyFee || null, 
+        status: `${newRoom.name} Odasına Taşındı`, 
+        photo: null,
+        entryPhoto: oldRoom.entryPhoto || null, 
+        entryExitHistory: oldRoom.entryExitHistory || null
     };
 
     if (db && firebaseUser) {
@@ -3052,15 +3084,27 @@ const handleChangeRoomConfirm = async () => {
 
             // 2. Yeni odaya müşterinin tüm verilerini taşı
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), {
-                customerName: oldRoom.customerName, entryDate: oldRoom.entryDate, paymentDate: oldRoom.paymentDate,
-                monthlyFee: oldRoom.monthlyFee, hasKdv: oldRoom.hasKdv, sealNo: oldRoom.sealNo,
-                broughtBy: oldRoom.broughtBy, teamList: oldRoom.teamList, hasDamage: oldRoom.hasDamage,
-                damageDescription: oldRoom.damageDescription, transportPrice: oldRoom.transportPrice,
-                transportHasKdv: oldRoom.transportHasKdv, entryPhoto: oldRoom.entryPhoto,
-                entryExitHistory: oldRoom.entryExitHistory, paidMonths: oldRoom.paidMonths || [],
+                customerName: oldRoom.customerName || null, 
+                entryDate: oldRoom.entryDate || null, 
+                paymentDate: oldRoom.paymentDate || null,
+                monthlyFee: oldRoom.monthlyFee || null, 
+                hasKdv: oldRoom.hasKdv !== undefined ? oldRoom.hasKdv : true, 
+                sealNo: oldRoom.sealNo || null,
+                broughtBy: oldRoom.broughtBy || 'kendisi', 
+                teamList: oldRoom.teamList || null, 
+                hasDamage: oldRoom.hasDamage || false,
+                damageDescription: oldRoom.damageDescription || null, 
+                transportPrice: oldRoom.transportPrice || null,
+                transportHasKdv: oldRoom.transportHasKdv || false, 
+                entryPhoto: oldRoom.entryPhoto || null,
+                entryExitHistory: oldRoom.entryExitHistory || null, 
+                paidMonths: oldRoom.paidMonths || [],
                 rentedBy: oldRoom.rentedBy || currentUserProfile.name,
-                movedFrom: oldRoom.name, isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null,
-                isFreeRoom: oldRoom.isFreeRoom, freeRoomReason: oldRoom.freeRoomReason, giftMonths: oldRoom.giftMonths
+                movedFrom: oldRoom.name || null, 
+                isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null,
+                isFreeRoom: oldRoom.isFreeRoom || false, 
+                freeRoomReason: oldRoom.freeRoomReason || null, 
+                giftMonths: oldRoom.giftMonths || 0
             }, { merge: true });
 
         } catch (e) { console.error("Firebase Oda Değiştirme Hatası:", e); }
@@ -4078,16 +4122,16 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                             <span className="text-xs font-bold text-gray-500 uppercase">Arama Sonuçları</span>
                             <button onClick={() => setShowGlobalSearchResults(false)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
                         </div>
-                        {(() => {
-                            const term = globalSearchTerm.toLowerCase();
+{(() => {
+                            const term = normalizeStr(globalSearchTerm);
                             const results = customers.map(c => {
                                 const cRooms = rooms.filter(r => r.customerName === c.name);
                                 return { customer: c, rooms: cRooms };
                             }).filter(item => {
-                                const matchName = item.customer.name?.toLowerCase().includes(term);
+                                const matchName = normalizeStr(item.customer.name).includes(term);
                                 const matchNo = item.customer.customerNo?.includes(term);
                                 const matchPhone = item.customer.phone?.includes(term);
-                                const matchRoom = item.rooms.some(r => r.name?.toLowerCase().includes(term));
+                                const matchRoom = item.rooms.some(r => normalizeStr(r.name).includes(term));
                                 return matchName || matchNo || matchPhone || matchRoom;
                             });
 
@@ -4491,8 +4535,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Telefon Numarası (Zorunlu)</label><input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({...newCustomer, phone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Alternatif Telefon (İsteğe Bağlı)</label><input type="text" value={newCustomer.altPhone} onChange={(e) => setNewCustomer({...newCustomer, altPhone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Müşteri Adresi</label><input type="text" value={newCustomer.address} onChange={(e) => setNewCustomer({...newCustomer, address: e.target.value})} placeholder="Tam Adres" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
-                  <div className="flex flex-col gap-1.5 md:col-span-2 mt-2">
-                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'Kimlik Fotoğrafı (Ön ve Arka Yüz)' : 'Kurumsal Belgeler (Vergi Levhası vb.)'}</label>
+<div className="flex flex-col gap-1.5 md:col-span-2 mt-2">
+                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'Kimlik Fotoğrafı (İsteğe Bağlı)' : 'Kurumsal Belgeler (İsteğe Bağlı)'}</label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {/* ÖN YÜZ */}
                           <label className="border-2 border-dashed border-gray-300 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-red-50 hover:border-red-300 transition-colors cursor-pointer bg-slate-50 group h-full">
@@ -4505,8 +4549,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                             ) : (
                                <>
                                  <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><Upload size={20} className="text-red-400" /></div>
-                                 <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-red-500">{customerType === 'bireysel' ? 'Kimlik Ön Yüzü' : 'Belge 1'} Seç</span></p>
-                                 <p className="text-xs text-gray-400">PNG, JPG, PDF</p>
+<p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-red-500">{customerType === 'bireysel' ? 'Ön Yüz Seç' : 'Belge 1 Seç'}</span></p>    
+           <p className="text-xs text-gray-400">PNG, JPG, PDF</p>
                                </>
                             )}
                             <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setNewCustomer({...newCustomer, documentPhotoFront: url}); } }} />
@@ -4523,7 +4567,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                             ) : (
                                <>
                                  <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><Upload size={20} className="text-red-400" /></div>
-                                 <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-red-500">{customerType === 'bireysel' ? 'Kimlik Arka Yüzü' : 'Belge 2 (Opsiyonel)'} Seç</span></p>
+                                 <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-red-500">{customerType === 'bireysel' ? 'Arka Yüz' : 'Belge 2 (Opsiyonel)'} Seç</span></p>
                                  <p className="text-xs text-gray-400">PNG, JPG, PDF</p>
                                </>
                             )}
@@ -4609,9 +4653,11 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
               </div>
               <div className="overflow-x-auto border border-gray-200 rounded-lg flex-1 bg-slate-50 w-full block">
                  {(() => {
+        {(() => {
                     const displayedCustomers = activeMenu === 'mevcut-musteriler' ? customers.filter(c => rooms.some(r => r.customerName === c.name)) : customers;
-                    const finalFiltered = displayedCustomers.filter(c => c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()));
-                    if (finalFiltered.length === 0) return (<div className="flex flex-col items-center justify-center text-center py-20 w-full min-h-[300px]"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><Users size={32} /></div><h3 className="text-lg font-bold text-gray-600 mb-1">Müşteri Kaydı Bulunmuyor</h3><p className="text-sm text-gray-400 max-w-sm mx-auto">Bu listede gösterilecek müşteri bulunamadı. Soldaki menüden "Yeni Müşteri Ekle" diyerek ekleme yapabilirsiniz.</p></div>);
+                    const term = normalizeStr(customerSearchTerm);
+                    const finalFiltered = displayedCustomers.filter(c => normalizeStr(c.name).includes(term));
+                      if (finalFiltered.length === 0) return (<div className="flex flex-col items-center justify-center text-center py-20 w-full min-h-[300px]"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><Users size={32} /></div><h3 className="text-lg font-bold text-gray-600 mb-1">Müşteri Kaydı Bulunmuyor</h3><p className="text-sm text-gray-400 max-w-sm mx-auto">Bu listede gösterilecek müşteri bulunamadı. Soldaki menüden "Yeni Müşteri Ekle" diyerek ekleme yapabilirsiniz.</p></div>);
 
                     return (
                       <table className="w-full text-sm text-left text-gray-600 min-w-[800px] h-full self-start">
@@ -4995,12 +5041,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             <select value={globalPaymentData.customerId} onChange={(e) => setGlobalPaymentData({...globalPaymentData, customerId: e.target.value})} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-50 font-medium text-slate-700">
                               <option value="">Lütfen ödeme yapan müşteriyi seçin...</option>
                               <option value="askida" className="font-bold text-orange-600 bg-orange-50">⚠️ ASKIDA KALAN TAHSİLAT (Kime ait olduğu bilinmeyen ödeme)</option>
-                              {customers.filter(c => {
+{customers.filter(c => {
                                   if (!paymentCustomerSearch) return true;
-                                  const searchLower = paymentCustomerSearch.toLowerCase();
-                                  const matchName = c.name?.toLowerCase().includes(searchLower) || false;
-                                  const matchNo = c.customerNo && String(c.customerNo).toLowerCase().includes(searchLower);
-                                  const matchRoom = rooms.some(r => r.customerName === c.name && r.name?.toLowerCase().includes(searchLower));
+                                  const searchLower = normalizeStr(paymentCustomerSearch);
+                                  const matchName = normalizeStr(c.name).includes(searchLower);
+                                  const matchNo = c.customerNo && String(c.customerNo).includes(searchLower);
+                                  const matchRoom = rooms.some(r => r.customerName === c.name && normalizeStr(r.name).includes(searchLower));
                                   return matchName || matchNo || matchRoom;
                               }).map(c => {
                                   const cRooms = rooms.filter(r => r.customerName === c.name).map(r => r.name).join(', ');
@@ -7472,7 +7518,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                    <select value={rentData.customerName} onChange={(e) => setRentData({...rentData, customerName: e.target.value})} className="w-full border-2 border-white shadow-sm rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[#1bc5bd] focus:ring-4 focus:ring-teal-50 font-medium text-slate-700 bg-white">
                      <option value="">Lütfen listeden bir müşteri seçin...</option>
                      {customers
-                       .filter(c => c.name.toLowerCase().includes(rentCustomerSearch.toLowerCase()) || c.customerNo.includes(rentCustomerSearch))
+{customers
+                       .filter(c => normalizeStr(c.name).includes(normalizeStr(rentCustomerSearch)) || c.customerNo.includes(rentCustomerSearch))
                        .sort((a, b) => b.id - a.id)
                        .map((c) => (<option key={c.id} value={c.name}>{c.name} (No: {c.customerNo} - {c.phone})</option>))}
                    </select>
@@ -8545,12 +8592,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     <input type="text" placeholder="Ad Soyad, Müşteri No veya Oda Ara..." value={pendingSearchTerm} onChange={(e) => setPendingSearchTerm(e.target.value)} className="w-full mb-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700 bg-white" />
                     <select value={assignData.customerId} onChange={(e) => setAssignData({...assignData, customerId: e.target.value})} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700">
                         <option value="">Lütfen eşleştirilecek müşteriyi seçin...</option>
-                        {customers.filter(c => {
+{customers.filter(c => {
                             if (!pendingSearchTerm) return true;
-                            const searchLower = pendingSearchTerm.toLowerCase();
-                            const matchName = c.name?.toLowerCase().includes(searchLower) || false;
-                            const matchNo = c.customerNo && String(c.customerNo).toLowerCase().includes(searchLower);
-                            const matchRoom = rooms.some(r => r.customerName === c.name && r.name?.toLowerCase().includes(searchLower));
+                            const searchLower = normalizeStr(pendingSearchTerm);
+                            const matchName = normalizeStr(c.name).includes(searchLower);
+                            const matchNo = c.customerNo && String(c.customerNo).includes(searchLower);
+                            const matchRoom = rooms.some(r => r.customerName === c.name && normalizeStr(r.name).includes(searchLower));
                             return matchName || matchNo || matchRoom;
                         }).map(c => {
                             const cRooms = rooms.filter(r => r.customerName === c.name).map(r => r.name).join(', ');
