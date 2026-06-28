@@ -803,27 +803,38 @@ iframe.contentWindow.document.write(`
           <head>
               <title>${contractCustomer?.name} - Sözleşme</title>
               <style>
-                  @page { size: A4 portrait; margin: 30mm 20mm 45mm 20mm; } 
-                  body { font-family: 'Arial', sans-serif; line-height: 1.6; font-size: 11pt; color: #000; padding: 0; margin: 0; }
-                  h3 { font-size: 12pt; font-weight: bold; margin-top: 15pt; margin-bottom: 5pt; color: #000; }
-                  p { margin-bottom: 10pt; text-align: justify; page-break-inside: avoid; }
+                  /* Üstte logo ve altta imza alanı için sayfa payı */
+                  @page { size: A4 portrait; margin: 30mm 15mm 45mm 15mm; } 
+                  
+                  body { font-family: 'Arial', sans-serif; line-height: 1.4; font-size: 11pt; color: #000; padding: 0; margin: 0; }
+                  
+                  /* Maddelerin stili (Sola dayalı, PDF ile aynı) */
+                  h3 { font-size: 11pt; font-weight: bold; margin-top: 15pt; margin-bottom: 5pt; color: #000; text-align: left; }
+                  p { margin-bottom: 5pt; text-align: left; page-break-inside: avoid; }
                   .clause { page-break-inside: avoid; }
+                  
+                  /* Filigran */
                   .watermark { position: fixed; top: 45%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.05); z-index: -1; white-space: nowrap; }
                   
-                  .page-header { position: fixed; top: -20mm; left: 0; right: 0; text-align: center; }
-                  .page-footer { position: fixed; bottom: -30mm; left: 0; right: 0; display: flex; justify-content: space-between; font-size: 10pt; }
-                  .footer-box { width: 48%; position: relative; text-align: left; }
+                  /* Her sayfanın üst ortasındaki Logo alanı */
+                  .page-header { position: fixed; top: -25mm; left: 0; right: 0; text-align: center; }
+                  
+                  /* Her sayfanın altında çıkacak İmza / Mühür alanı */
+                  .page-footer { position: fixed; bottom: -35mm; left: 0; right: 0; display: flex; justify-content: space-between; font-size: 10pt; text-align: left; }
+                  .footer-box { width: 48%; position: relative; }
                   .footer-box div { margin-bottom: 3px; }
-                  .stamp { position: absolute; top: 35px; left: 5px; width: 150px; mix-blend-mode: multiply; opacity: 0.95; }
+                  .stamp { position: absolute; top: 35px; left: -5px; width: 140px; mix-blend-mode: multiply; opacity: 0.95; }
               </style>
           </head>
           <body>
               <div class="watermark">Depoevim</div>
               
+              <!-- ÜST LOGO (HER SAYFADA) -->
               <div class="page-header">
                   <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Logo" style="height: 50px; object-fit: contain;" />
               </div>
 
+              <!-- ALT İMZA ALANI (HER SAYFADA SABİT) -->
               <div class="page-footer">
                   <div class="footer-box">
                       <div><strong>HİZMET VEREN</strong></div>
@@ -840,8 +851,9 @@ iframe.contentWindow.document.write(`
                   </div>
               </div>
               
+              <!-- SÖZLEŞME İÇERİĞİ -->
               <div class="content">
-                  <div style="text-align: center; font-size: 14pt; font-weight: bold; margin-bottom: 20pt; text-decoration: underline;">Eşya Depolama Sözleşmesi</div>
+                  <div style="text-align: center; font-size: 12pt; font-weight: bold; margin-bottom: 15pt; text-decoration: underline;">Eşya Depolama Sözleşmesi</div>
                   ${clausesHtml}
               </div>
           </body>
