@@ -4651,9 +4651,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                 <div className="flex items-center gap-2"><span>Show</span><select className="border border-gray-300 rounded p-1 outline-none focus:border-cyan-400"><option>10</option><option>25</option><option>50</option></select><span>entries</span></div>
                 <div className="flex items-center gap-2"><span>Search:</span><input type="text" value={customerSearchTerm} onChange={(e) => setCustomerSearchTerm(e.target.value)} className="border border-gray-300 rounded p-1.5 outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 w-48 lg:w-64" /></div>
               </div>
-              <div className="overflow-x-auto border border-gray-200 rounded-lg flex-1 bg-slate-50 w-full block">
+<div className="overflow-x-auto border border-gray-200 rounded-lg flex-1 bg-slate-50 w-full block">
                  {(() => {
-        {(() => {
                     const displayedCustomers = activeMenu === 'mevcut-musteriler' ? customers.filter(c => rooms.some(r => r.customerName === c.name)) : customers;
                     const term = normalizeStr(customerSearchTerm);
                     const finalFiltered = displayedCustomers.filter(c => normalizeStr(c.name).includes(term));
