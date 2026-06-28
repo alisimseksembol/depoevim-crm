@@ -797,118 +797,52 @@ const handleSaveEditPending = async () => {
       `).join('');
 
       iframe.contentWindow.document.open();
-      iframe.contentWindow.document.write(`
+iframe.contentWindow.document.write(`
           <!DOCTYPE html>
           <html>
           <head>
               <title>${contractCustomer?.name} - Sözleşme</title>
               <style>
-                  @page { size: A4 portrait; margin: 20mm 20mm 35mm 20mm; } /* Sabit alt footer için 35mm margin */
-                  body { 
-                      font-family: 'Arial', sans-serif; 
-                      line-height: 1.6; 
-                      font-size: 11pt; 
-                      color: #000; 
-                      padding: 0; 
-                      margin: 0; 
-                  }
-                  h3 { 
-                      font-size: 12pt; 
-                      font-weight: bold; 
-                      margin-top: 15pt; 
-                      margin-bottom: 5pt; 
-                      color: #000;
-                  }
-                  p { 
-                      margin-bottom: 10pt; 
-                      text-align: justify; 
-                      page-break-inside: avoid;
-                  }
-                  .clause {
-                      page-break-inside: avoid;
-                  }
+                  @page { size: A4 portrait; margin: 30mm 20mm 45mm 20mm; } 
+                  body { font-family: 'Arial', sans-serif; line-height: 1.6; font-size: 11pt; color: #000; padding: 0; margin: 0; }
+                  h3 { font-size: 12pt; font-weight: bold; margin-top: 15pt; margin-bottom: 5pt; color: #000; }
+                  p { margin-bottom: 10pt; text-align: justify; page-break-inside: avoid; }
+                  .clause { page-break-inside: avoid; }
+                  .watermark { position: fixed; top: 45%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.05); z-index: -1; white-space: nowrap; }
                   
-                  /* Filigran (Watermark) */
-                  .watermark { 
-                      position: fixed; 
-                      top: 45%; 
-                      left: 50%; 
-                      transform: translate(-50%, -50%) rotate(-45deg); 
-                      font-size: 80pt; 
-                      font-weight: bold; 
-                      color: rgba(0, 0, 0, 0.05); 
-                      z-index: -1; 
-                      white-space: nowrap; 
-                  }
-                  
-                  /* Her sayfanın altına sabitlenen Footer */
-                  .footer { 
-                      position: fixed; 
-                      bottom: 0; 
-                      left: 0; 
-                      right: 0; 
-                      height: 25mm; 
-                      display: flex; 
-                      justify-content: space-between; 
-                      align-items: flex-end; 
-                      font-size: 9pt; 
-                      padding-top: 5mm;
-                  }
-                  .footer-box { width: 45%; }
-                  .footer-box.right { text-align: right; }
-                  .footer-title { font-weight: bold; margin-bottom: 3px; color: #555; }
-                  .footer-name { font-weight: bold; color: #000; }
-                  
-/* Sadece son sayfada çıkacak İmza Alanları */
-                  .signatures { 
-                      margin-top: 40pt; 
-                      display: flex; 
-                      justify-content: space-between; 
-                      page-break-inside: avoid; 
-                  }
-                  .sig-box { width: 45%; text-align: center; position: relative; }
-                  .sig-label { font-weight: bold; margin-bottom: 10pt; }
-                  .sig-line { margin-top: 40pt; border-bottom: 1px solid #000; width: 60%; margin-left: auto; margin-right: auto; }
-                  .sig-text { text-align: center; margin-top: 10pt; font-size: 10pt; }
+                  .page-header { position: fixed; top: -20mm; left: 0; right: 0; text-align: center; }
+                  .page-footer { position: fixed; bottom: -30mm; left: 0; right: 0; display: flex; justify-content: space-between; font-size: 10pt; }
+                  .footer-box { width: 48%; position: relative; text-align: left; }
+                  .footer-box div { margin-bottom: 3px; }
+                  .stamp { position: absolute; top: 35px; left: 5px; width: 150px; mix-blend-mode: multiply; opacity: 0.95; }
               </style>
           </head>
-<body>
+          <body>
               <div class="watermark">Depoevim</div>
-              <div style="text-align: center; margin-bottom: 20px;">
+              
+              <div class="page-header">
                   <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Logo" style="height: 50px; object-fit: contain;" />
               </div>
-              <div class="footer">
+
+              <div class="page-footer">
                   <div class="footer-box">
-                      <div class="footer-title">HİZMET VEREN</div>
-                      <div class="footer-name">${contractSettings.accountHolder}</div>
+                      <div><strong>HİZMET VEREN</strong></div>
+                      <div><strong>Ad Soyad / Ünvan:</strong> ${contractSettings.accountHolder}</div>
+                      <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
+                      <div><strong>İmza:</strong></div>
+                      <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" class="stamp" />
                   </div>
-                  <div class="footer-box right">
-                      <div class="footer-title">DEPOLATAN KİŞİ</div>
-                      <div class="footer-name">${contractCustomer?.name}</div>
+                  <div class="footer-box">
+                      <div><strong>DEPOLATAN KİŞİ</strong></div>
+                      <div><strong>Ad Soyad / Ünvan:</strong> ${contractCustomer?.name}</div>
+                      <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
+                      <div><strong>İmza:</strong></div>
                   </div>
               </div>
               
               <div class="content">
                   <div style="text-align: center; font-size: 14pt; font-weight: bold; margin-bottom: 20pt; text-decoration: underline;">Eşya Depolama Sözleşmesi</div>
                   ${clausesHtml}
-                  
-<div class="signatures">
-                      <div class="sig-box">
-                          <div class="sig-label">HİZMET VEREN</div>
-                          <div class="sig-text">Ad Soyad / Ünvan:<br>${contractSettings.accountHolder}</div>
-                          <div class="sig-text" style="position: relative; margin-top: 20pt; min-height: 80px;">
-                              İmza Yetkili Kişi Ad Soyad:
-                              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style="position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); width: 140px; mix-blend-mode: multiply; opacity: 0.95;" />
-                          </div>
-                          <div class="sig-line"></div>
-                      </div>
-                      <div class="sig-box">
-                          <div class="sig-label">DEPOLATAN KİŞİ</div>
-                          <div class="sig-text">Ad Soyad / Ünvan:<br>${contractCustomer?.name}</div>
-                          <div class="sig-text" style="margin-top: 20pt;">İmza:</div>
-                          <div class="sig-line"></div>
-                      </div>
-                  </div>
               </div>
           </body>
           </html>
