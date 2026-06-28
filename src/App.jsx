@@ -1807,7 +1807,7 @@ const cust = {
               documentPhotoBack: newCustomer.documentPhotoBack || null,
               payments: [], extraDebts: [], ledgerOverrides: []
           };
-          
+
       if (db && firebaseUser) {
           try {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', custId), cust);
@@ -3011,6 +3011,55 @@ const handleEndRentConfirm = async () => {
       const room = rooms.find(r => String(r.id) === String(selectedRoomId));
       if (!room) return;
       
+      const customerToUpdate = customers.find(c => c.name === room.customerName);
+      let pendingDebtsToTransfer = [];
+
+      // 1. Odaya ait ödenmemiş borçları hesapla ve kalıcı borca çevir
+      if (customerToUpdate) {
+          const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
+          const paymentAnchorDate = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryDate;
+          const today = new Date(); today.setHours(23, 59, 59, 999);
+          
+          const baseAmt = Number(room.monthlyFee || 0);
+          const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
+          const monthlyTotal = hasKdv ? baseAmt * 1.20 : baseAmt;
+          const overrides = customerToUpdate.ledgerOverrides || [];
+          
+          let loopDate = new Date(paymentAnchorDate);
+          let monthCounter = 0;
+
+          while (loopDate <= today) {
+              const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
+              const txId = `debt-${room.id}-${key}`;
+              
+              let currentMonthlyTotal = monthlyTotal;
+              const override = overrides.find(o => o.txId === txId);
+              if (override && !override.isDeleted && override.debt !== undefined) currentMonthlyTotal = override.debt;
+
+              const isGifted = room.giftMonths && monthCounter < room.giftMonths;
+              const isFree = room.isFreeRoom;
+              
+              if (!room.paidMonths?.includes(key) && !isGifted && !isFree) {
+                  pendingDebtsToTransfer.push({
+                      id: Date.now() + Math.random(),
+                      type: 'manual_debt',
+                      date: new Date(loopDate).toISOString().split('T')[0],
+                      amount: currentMonthlyTotal,
+                      hasKdv: false, // Tutar zaten hesaplanmış
+                      desc: `${room.name} Odası Eski Kira Borcu (Çıkış Yapılan)`
+                  });
+              }
+              const targetDay = room.paymentDate && !room.paymentDate.includes('-') ? parseInt(room.paymentDate) : paymentAnchorDate.getDate();
+              let nMonth = loopDate.getMonth() + 1;
+              let nYear = loopDate.getFullYear();
+              if (nMonth > 11) { nMonth = 0; nYear++; }
+              let maxDayInNextMonth = new Date(nYear, nMonth + 1, 0).getDate();
+              loopDate = new Date(nYear, nMonth, Math.min(targetDay, maxDayInNextMonth));
+              monthCounter++;
+          }
+      }
+
+      // 2. Çıkış İşlemlerini Hazırla
       const entryD = new Date(room.entryDate || Date.now()); 
       const exitD = new Date(endRentData.exitDate);
       const diffTime = Math.abs(exitD - entryD); 
@@ -3038,6 +3087,14 @@ const handleEndRentConfirm = async () => {
 
       if (db && firebaseUser) {
           try {
+              // Borçları Cariye İşle
+              if (customerToUpdate && pendingDebtsToTransfer.length > 0) {
+                  const existingDebts = customerToUpdate.extraDebts || [];
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                      extraDebts: [...existingDebts, ...pendingDebtsToTransfer]
+                  }, { merge: true });
+              }
+              // Odayı Boşalt
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), roomUpdates, { merge: true });
           } catch(e) { console.error("Firebase Çıkış Yapma Hatası:", e); }
       }
