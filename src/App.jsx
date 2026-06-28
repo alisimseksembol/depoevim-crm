@@ -73,13 +73,6 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'depoevim-crm';
 // ============================================================================
 
 // --- RESİM/DOSYA YÜKLEME YARDIMCI FONKSİYONU ---
-const normalizeStr = (str) => {
-    if (!str) return '';
-    return str.toLocaleLowerCase('tr-TR')
-        .replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's')
-        .replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ç/g, 'c');
-};
-
 const uploadImageToServer = async (file) => {
     if (!file) return null;
     const formData = new FormData();
@@ -274,24 +267,2717 @@ const [firebaseUser, setFirebaseUser] = useState(null);
               if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                   await signInWithCustomToken(auth, __initial_auth_token);
               } else {
-                const customerId = globalPaymentData.customerId;
-                const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
-                if (customerToUpdate && db && firebaseUser) {
-                    try {
-                        const existingPayments = customerToUpdate.payments || [];
-                        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
-                            payments: [...existingPayments, newPayment]
-                        }, { merge: true });
-                    } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
-                }
-            }
+                  await signInAnonymously(auth);
+              }
+          } catch (error) {
+              console.error("Firebase Auth Hatası:", error);
+          }
+      };
+      initAuth();
+      const unsubscribe = onAuthStateChanged(auth, setFirebaseUser);
+      return () => unsubscribe();
+  }, []);
 
-            setIsGlobalPaymentSuccess(true);
-            setGlobalPaymentData({ customerId: '', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
-            setTimeout(() => setIsGlobalPaymentSuccess(false), 3000);
+// 2. Firebase Canlı Veri Dinleme (Tüm Modüller Dahil)
+  useEffect(() => {
+      if (!firebaseUser || !db) return;
+      
+      const unsubCustomers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setCustomers(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubWarehouses = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'warehouses'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setWarehouses(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubBlocks = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setBlocks(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubRooms = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setRooms(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubPendingCollections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pendingCollections'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setPendingCollections(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
+      const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
+      
+      // 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
+      const unsubSettings = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'settings'), (snapshot) => {
+          snapshot.docs.forEach(doc => {
+              if (doc.id === 'contract') setContractSettings(doc.data());
+              if (doc.id === 'rates') setCollectionRates(doc.data());
+          });
+      }, (error) => console.error("Ayar Çekme Hatası:", error));
+
+      return () => { 
+          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); 
+          unsubSettings(); // 👈 Ayar telsizini kapat
+      };
+  }, [firebaseUser]);
+  // ============================================================================
+
+  // --- YENİ: AUTH VE KULLANICI STATE'LERİ ---
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginData, setLoginData] = useState({ username: '', password: '' });
+  const [loginError, setLoginError] = useState('');
+  
+  const [systemUsers, setSystemUsers] = useState([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]);
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [newUserData, setNewUserData] = useState({ username: '', password: '', name: '', role: 'Personel', email: '', phone: '' });
+
+  const [isEditUserModalOpen, setIsEditUserModalOpen] = useState(false);
+  const [editUserData, setEditUserData] = useState(null);
+
+  // --- KULLANICI ROLLERİ STATE'LERİ ---
+  const availablePermissions = {
+      mainMenus: [
+          { id: 'menu-dashboard', label: 'Anasayfa' },
+          { id: 'menu-takvim', label: 'Takvim' },
+          { id: 'menu-musteri-listesi', label: 'Müşteri Listesi' },
+          { id: 'menu-odeme-islemleri', label: 'Ödeme İşlemleri' },
+          { id: 'menu-depo', label: 'Depo Listesi' },
+          { id: 'menu-finans-yonetimi', label: 'Finans Yönetimi' },
+          { id: 'menu-sistem-hesaplari', label: 'Sistem Hesapları' },
+          { id: 'menu-sistem-ayarlari', label: 'Sistem Ayarları' }
+      ],
+      pages: [
+          { id: 'page-musteri-ekle', label: 'Yeni Müşteri Ekle' },
+          { id: 'page-mevcut-musteriler', label: 'Mevcut Müşteriler' },
+          { id: 'page-tum-musteriler', label: 'Tüm Müşteriler' },
+          { id: 'page-odeme-girisi', label: 'Tahsilat Girişi Yap' },
+          { id: 'page-askida-kalan-odemeler', label: 'Askıda Kalan Tahsilatlar' },
+          { id: 'page-tahsilat-hareketleri', label: 'Tahsilat Hareketleri' },
+          { id: 'page-gunu-gelen-odalar', label: 'Günü Gelen Odalar' },
+          { id: 'page-senesi-dolan-odalar', label: 'Senesi Dolan Odalar' },
+          { id: 'page-aylik-odeme', label: 'Aylık Borç Takip' },
+          { id: 'page-finans-rapor', label: 'Finans Rapor' },
+          { id: 'page-depo-rapor', label: 'Depo Rapor' },
+          { id: 'page-panel-kullanicilari', label: 'Panel Kullanıcıları' },
+          { id: 'page-kullanici-rolleri', label: 'Kullanıcı Rolleri' },
+          { id: 'page-pdf-sozlesme', label: 'PDF & Sözleşme Ayarları' },
+          { id: 'page-tahsilat-oranlari', label: 'Tahsilat Oranları' }
+      ],
+      actions: [
+          { id: 'action-yeni-musteri', label: 'Yeni Müşteri Ekleme' },
+          { id: 'action-yeni-oda', label: 'Yeni Oda' },
+          { id: 'action-oda-duzenle', label: 'Oda Düzenleme' },
+          { id: 'action-musteri-duzenle', label: 'Müşteri Düzenleme' },
+          { id: 'action-hediye-ay', label: 'Hediye Ay Etme' },
+          { id: 'action-ucretsiz-oda', label: 'Ücretsiz Oda Etme' },
+          { id: 'action-cari-duzenle', label: 'Cari İşlemleri Düzenleme' },
+          { id: 'action-cari-sil', label: 'Cari Silme' },
+          { id: 'action-musteri-sil', label: 'Müşteri Silme' },
+          { id: 'action-yeni-randevu', label: 'Yeni Randevu Ekleme' },
+          { id: 'action-sube-sil', label: 'Depo Listesinden Şube Silme' },
+          { id: 'action-blok-sil', label: 'Depo Listesinden Blok Silme' },
+          { id: 'action-oda-sil', label: 'Depo Listesinden Oda Silme' },
+          { id: 'action-oda-degistir', label: 'Oda Değiştirme' },
+          { id: 'action-giris-cikis', label: 'Giriş Çıkış İşlemleri' },
+          { id: 'action-depodan-cikis', label: 'Depodan Çıkış Yapma' },
+          { id: 'action-tahsilat-girisi', label: 'Tahsilat Girişi Yapma' }
+      ]
   };
 
-  const handleSaveEditRent = async () => {
+  const [userRoles, setUserRoles] = useState([
+      { id: 'yonetici', name: 'Yönetici', code: 'yonetici', isSuper: true, permissions: { mainMenus: [], pages: [], actions: [] } },
+      { id: 'personel', name: 'Personel', code: 'personel', isSuper: false, permissions: { mainMenus: ['menu-dashboard', 'menu-depo', 'menu-musteri-listesi'], pages: ['page-aylik-odeme', 'page-mevcut-musteriler'], actions: [] } },
+      { id: 'muhasebe', name: 'Muhasebe', code: 'muhasebe', isSuper: false, permissions: { mainMenus: ['menu-odeme-islemleri', 'menu-finans-yonetimi'], pages: ['page-aylik-odeme', 'page-tahsilat-hareketleri'], actions: [] } }
+  ]);
+
+  const [newRoleInput, setNewRoleInput] = useState({ name: '', code: '', copyFrom: '' });
+
+  const handleAddRole = () => {
+      if (!newRoleInput.name) return;
+      // Kodları otomatik temizle (Türkçe karakterleri ve boşlukları at)
+      const code = newRoleInput.name.toLowerCase().replace(/[^a-z0-9]/gi, '').replace(/\s+/g, '_');
+      
+      const newRole = {
+          id: 'role_' + Date.now(),
+          name: newRoleInput.name,
+          code: code,
+          isSuper: false,
+          permissions: { mainMenus: [], pages: [], actions: [] }
+      };
+      setUserRoles([...userRoles, newRole]);
+      setNewRoleInput({ name: '', code: '', copyFrom: '' });
+  };
+
+  const handleDeleteRole = (roleId) => {
+      const role = userRoles.find(r => r.id === roleId);
+      if(role?.isSuper) return alert("Süper yönetici rolü silinemez.");
+      
+      // Eğer bu rolde kullanıcı varsa silmeyi engelle
+      if(systemUsers.some(u => u.role === role.name)) {
+          return alert("Bu role atanmış aktif kullanıcılar var. Rolü silmeden önce kullanıcı listesinden bu kişilerin rolünü değiştirmelisiniz.");
+      }
+      setUserRoles(userRoles.filter(r => r.id !== roleId));
+  };
+
+  const handleTogglePermission = (roleId, type, permId) => {
+      setUserRoles(userRoles.map(role => {
+          if (role.id === roleId) {
+              const currentPerms = role.permissions[type] || [];
+              const hasPerm = currentPerms.includes(permId);
+              const newPermsList = hasPerm 
+                  ? currentPerms.filter(p => p !== permId)
+                  : [...currentPerms, permId];
+              
+              return {
+                  ...role,
+                  permissions: { ...role.permissions, [type]: newPermsList }
+              };
+          }
+          return role;
+      }));
+  };
+
+  // --- MÜŞTERİ YÖNETİMİ STATE'LERİ ---
+  const [openSubMenus, setOpenSubMenus] = useState({'musteri-listesi': true});
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+  const [customerType, setCustomerType] = useState('bireysel'); 
+  
+  const [newCustomer, setNewCustomer] = useState({
+      name: '', tc: '', phone: '', altPhone: '', address: '', notes: '',
+      hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null,
+      documentPhotoFront: null, documentPhotoBack: null
+  });
+  const [customerSaveError, setCustomerSaveError] = useState('');
+
+  // --- YENİ EKLENEN STATE'LER (Fatura ve Silme Modalları İçin) ---
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [newInvoice, setNewInvoice] = useState({ invoiceNo: '', amount: '', date: new Date().toISOString().split('T')[0], file: null });
+  const [isDeleteCustomerModalOpen, setIsDeleteCustomerModalOpen] = useState(false);
+  const [customerToDeleteId, setCustomerToDeleteId] = useState(null);
+  const [isEditCustomerModalOpen, setIsEditCustomerModalOpen] = useState(false);
+  const [editCustomerData, setEditCustomerData] = useState(null);
+
+  // --- YENİ: CARİ DÜZENLEME STATE'LERİ ---
+  const [isEditLedgerListModalOpen, setIsEditLedgerListModalOpen] = useState(false);
+  const [editingLedgerItem, setEditingLedgerItem] = useState(null);
+
+  // --- MANUEL CARİ İŞLEM STATE'LERİ ---
+  const [isAddDebtModalOpen, setIsAddDebtModalOpen] = useState(false);
+  const [newDebtData, setNewDebtData] = useState({ desc: '', amount: '', date: new Date().toISOString().split('T')[0], hasKdv: true });
+  
+  const [isAddPaymentModalOpen, setIsAddPaymentModalOpen] = useState(false);
+  const [newPaymentData, setNewPaymentData] = useState({ amount: '', date: new Date().toISOString().split('T')[0], note: '' });
+
+  const [debtMonthFilter, setDebtMonthFilter] = useState('all');
+  const [debtSearchTerm, setDebtSearchTerm] = useState('');
+  const [ledgerFilterYear, setLedgerFilterYear] = useState(new Date().getFullYear().toString());
+
+  // --- TAHSİLAT HAREKETLERİ STATE'LERİ ---
+  const [collectionFilter, setCollectionFilter] = useState('all');
+  const [collectionSearchTerm, setCollectionSearchTerm] = useState('');
+
+  // --- SENESİ DOLAN ODALAR STATE'LERİ ---
+  const [anniversaryMonth, setAnniversaryMonth] = useState((new Date().getMonth() + 1).toString());
+  const [anniversaryYear, setAnniversaryYear] = useState(new Date().getFullYear().toString());
+  const [anniversarySearchTerm, setAnniversarySearchTerm] = useState('');
+
+  // --- GÜNÜ GELEN ODALAR STATE'LERİ ---
+  const [dueRoomsDate, setDueRoomsDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // --- TAHSİLAT NOTU STATE'LERİ ---
+  const [isCollectionNoteModalOpen, setIsCollectionNoteModalOpen] = useState(false);
+  const [collectionNoteData, setCollectionNoteData] = useState({ customerId: null, text: '', promiseDate: '' });
+
+  // --- MESAJ GÖNDERİM STATE'İ ---
+  const [messageModalData, setMessageModalData] = useState(null);
+
+  // --- RANDEVU VE TAKVİM STATE'LERİ ---
+  const [appointments, setAppointments] = useState([]);
+  const [appointmentData, setAppointmentData] = useState({
+    customerType: 'registered',
+    customerId: '',
+    unregisteredName: '',
+    unregisteredPhone: '',
+    warehouseId: '',
+    date: new Date().toISOString().split('T')[0],
+    time: '10:00 - 11:00',
+    purpose: 'giris-cikis'
+  });
+  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
+  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // --- ASKIDA KALAN TAHSİLATLAR STATE'LERİ ---
+  const [pendingCollections, setPendingCollections] = useState([]);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [assignData, setAssignData] = useState({ paymentId: null, customerId: '' });
+  const [pendingSearchTerm, setPendingSearchTerm] = useState('');
+
+  // --- ASKIDA KALAN TAHSİLATLARI DÜZENLEME STATE'LERİ ---
+  const [isEditPendingModalOpen, setIsEditPendingModalOpen] = useState(false);
+  const [editPendingData, setEditPendingData] = useState(null);
+
+  // --- MBT E-FATURA ENTEGRASYONU STATE'LERİ ---
+  const [eInvoiceModalData, setEInvoiceModalData] = useState(null);
+  const [isSendingEInvoice, setIsSendingEInvoice] = useState(false);
+  const [eInvoiceSuccess, setEInvoiceSuccess] = useState(false);
+
+  // --- YENİ EKLENEN: DEPO ÖDEMELERİ GÜNCELLEME STATE'LERİ ---
+  const [isUpdateAllModalOpen, setIsUpdateAllModalOpen] = useState(false);
+  const [isUpdatingAll, setIsUpdatingAll] = useState(false);
+  const [updateAllStats, setUpdateAllStats] = useState(null);
+
+  // --- FİNANS RAPOR STATE'LERİ ---
+  const [finansReportFilter, setFinansReportFilter] = useState('year'); // today, week, month, year
+  const [branchPaymentFilter, setBranchPaymentFilter] = useState('1'); // 1, 3, 6, 12, all
+  const [avgRevenueBranchFilter, setAvgRevenueBranchFilter] = useState('all');
+  const [avgRevenueYearFilter, setAvgRevenueYearFilter] = useState(new Date().getFullYear().toString());
+  
+  // --- YENİ: DEPO HAREKET RAPORU STATE'LERİ ---
+  const [depoReportTimeFilter, setDepoReportTimeFilter] = useState('aylik');
+  const [depoReportWhFilter, setDepoReportWhFilter] = useState('all');
+
+  // --- GENEL ARAMA STATE'LERİ ---
+  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
+  const [showGlobalSearchResults, setShowGlobalSearchResults] = useState(false);
+
+  // --- PROFİL VE KULLANICI STATE'LERİ ---
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [currentUserProfile, setCurrentUserProfile] = useState({
+      id: 1,
+      name: 'Mustafa Beşinci',
+      role: 'Yönetici',
+      email: 'mustafa@depoevim.com',
+      phone: '0533 201 06 10',
+      avatar: null,
+      oldPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+  });
+
+  // --- YENİ EKLENEN: GİRİŞ VE KULLANICI FONKSİYONLARI ---
+  const handleLogin = (e) => {
+      e.preventDefault();
+      const user = systemUsers.find(u => u.username === loginData.username && u.password === loginData.password);
+      if (user) {
+          setCurrentUserProfile({...user, oldPassword: '', newPassword: '', confirmPassword: ''});
+          setIsAuthenticated(true);
+          setLoginError('');
+      } else {
+          setLoginError('Kullanıcı adı veya şifre hatalı!');
+      }
+  };
+
+  const handleLogout = () => {
+      setIsAuthenticated(false);
+      setLoginData({ username: '', password: '' });
+      setIsProfileDropdownOpen(false);
+  };
+
+const handleAddSystemUser = async () => {
+      if(!newUserData.username || !newUserData.password || !newUserData.name) return;
+      if(systemUsers.some(u => u.username === newUserData.username)) {
+          alert("Bu kullanıcı adı zaten mevcut.");
+          return;
+      }
+      
+      const newId = String(Date.now());
+      const newUser = { id: newId, ...newUserData, avatar: null };
+
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'systemUsers', newId), newUser);
+          } catch(e) { console.error("Kullanıcı Kayıt Hatası:", e); }
+      }
+      
+      setIsAddUserModalOpen(false);
+      setNewUserData({ username: '', password: '', name: '', role: 'Personel', email: '', phone: '' });
+  };
+
+const handleDeleteSystemUser = async (id) => {
+      if(systemUsers.length === 1) return alert("Sistemde en az 1 kullanıcı kalmalıdır.");
+      if(currentUserProfile.id === id) return alert("Kendi hesabınızı silemezsiniz.");
+
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'systemUsers', String(id)));
+          } catch(e) { console.error("Kullanıcı Silme Hatası:", e); }
+      }
+  };
+
+const handleUpdateSystemUser = async () => {
+      if(!editUserData.username || !editUserData.password || !editUserData.name) return;
+      // Aynı kullanıcı adı başkasında var mı kontrolü
+      if(systemUsers.some(u => u.username === editUserData.username && String(u.id) !== String(editUserData.id))) {
+          alert("Bu kullanıcı adı başka bir hesap tarafından kullanılıyor.");
+          return;
+      }
+
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'systemUsers', String(editUserData.id)), editUserData, { merge: true });
+          } catch(e) { console.error("Kullanıcı Güncelleme Hatası:", e); }
+      }
+
+      // Düzenlenen kullanıcı 'kendi' oturumumuz ise profili de anında güncelle
+      if(currentUserProfile.id === editUserData.id) {
+          setCurrentUserProfile({...currentUserProfile, name: editUserData.name, role: editUserData.role, email: editUserData.email, phone: editUserData.phone});
+      }
+      
+      setIsEditUserModalOpen(false);
+      setEditUserData(null);
+  };
+
+const handleSendEInvoice = () => {
+      setIsSendingEInvoice(true);
+      setTimeout(async () => {
+          setIsSendingEInvoice(false);
+          setEInvoiceSuccess(true);
+          
+          const customerToUpdate = customers.find(c => c.id === eInvoiceModalData.customerId);
+          if (customerToUpdate && db && firebaseUser) {
+              const updatedPayments = (customerToUpdate.payments || []).map(p => 
+                  p.id === eInvoiceModalData.id 
+                  ? { ...p, hasEInvoice: true, eInvoiceNo: 'MBT' + Math.floor(100000000 + Math.random() * 900000000) } 
+                  : p
+              );
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), { payments: updatedPayments }, { merge: true });
+          }
+          setTimeout(() => { setEInvoiceSuccess(false); setEInvoiceModalData(null); }, 3000);
+      }, 2000);
+  };
+
+const handleAssignPendingPayment = async () => {
+      if (!assignData.paymentId || !assignData.customerId) return;
+      const paymentToAssign = pendingCollections.find(p => p.id === assignData.paymentId);
+      if (!paymentToAssign) return;
+
+      const customerId = assignData.customerId;
+      const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
+
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              // 1. Cariye tahsilat olarak ekle
+              const existingPayments = customerToUpdate.payments || [];
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
+                  payments: [...existingPayments, { ...paymentToAssign, id: Date.now() }]
+              }, { merge: true });
+
+              // 2. Askıdan (pendingCollections) sil
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(assignData.paymentId)));
+          } catch(e) { console.error("Askıdan Cariye Aktarma Hatası:", e); }
+      }
+
+      setIsAssignModalOpen(false);
+      setAssignData({ paymentId: null, customerId: '' });
+  };
+
+const handleSaveEditPending = async () => {
+      if (!editPendingData || !editPendingData.amount) return;
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(editPendingData.id)), {
+                  amount: Number(editPendingData.amount),
+                  date: editPendingData.date,
+                  note: editPendingData.note
+              }, { merge: true });
+          } catch (e) { console.error("Askıdaki Ödeme Güncelleme Hatası:", e); }
+      }
+      setIsEditPendingModalOpen(false);
+      setEditPendingData(null);
+  };
+
+  // --- SÖZLEŞME VE PDF STATE'LERİ ---
+  const [activeSettingsTab, setActiveSettingsTab] = useState('iban');
+  const [isContractModalOpen, setIsContractModalOpen] = useState(false);
+  const [contractCustomer, setContractCustomer] = useState(null);
+  const [contractRooms, setContractRooms] = useState([]);
+  
+  // --- SİSTEM AYARLARI: TAHSİLAT ORANLARI ---
+  const [collectionRates, setCollectionRates] = useState({
+      roomIncreaseRate: '50',
+      sealFee: '200',
+      interestRate: '4',
+      isInterestActive: true
+  });
+
+  const [contractSettings, setContractSettings] = useState({
+      iban: 'TR90 0020 3000 0871 2889 0000 34',
+      accountHolder: 'Sembol Nakliyat Depoculuk Tic. Ltd. Şti',
+      bankShortName: 'Albaraka',
+      bankFullName: 'Albaraka Türk Katılım Bankası',
+      ibanWarning: 'Ödeme yaparken açıklama kısmına oda numaranızı yazmayı unutmayınız.',
+      clauses: [
+          { id: 'm1', title: 'Madde 1 - TARAFLAR', content: 'Eşya Depolama Sözleşmesi\n\nİşbu eşya depolama sözleşmesi (bundan böyle "Sözleşme" olarak anılacaktır) aşağıda belirtilen taraflar arasında imzalanmıştır:\n\nHizmet Veren Adres: BAHÇELİEVLER MAH. YENİ SK. RAVZA APT. NO: 5 C PENDİK/İSTANBUL adresinde mukim.\n\nHizmet Veren Ad Soyad / Ünvan: Sembol Nakliyat Depoculuk Tic. Ltd. Şti.\n\nKartal Vergi Dairesi - Vergi No: 7600944287\n\nDepolatan Kişinin Ad Soyad / Ünvan: {{MUSTERI_AD}}\n\nT.C. Kimlik No / Vergi No: {{MUSTERI_TC}}\n\nDepolatan Kişinin İletişim Numarası: {{MUSTERI_TELEFON}}\n\nDepolatan Kişinin Yedek İletişim Numarası: {{MUSTERI_ALT_TELEFON}}\n\nDepolatan Kişinin Müşteri Numarası: {{MUSTERI_NUMARASI}}\n\nDepolatan Kişinin Adres: {{MUSTERI_ADRES}}\n\nBundan sonra "Depolatan kişi" olarak bahsedilecektir.' },
+          { id: 'm2', title: 'Madde 2 - TANIMLAR', content: 'Depo: Hizmet Veren ile Depolatan Kişi arasında imzalanan bu sözleşmede Depolatan kişinin eşyalarının Hizmet Veren tarafından depolandığı yeri ifade eder.\n\nDepolama Hizmetinin Başlangıç Tarihi: {{GIRIS_TARIHI}}\n\nDepolanan alanın aylık ücreti KDV dahil {{AYLIK_UCRET}} TLdir.' },
+          { id: 'm3', title: 'Madde 3 - SÖZLEŞMENİN KONUSU', content: 'Bu Sözleşme, Türk Borçlar Kanunu ve ilgili mevzuat hükümlerine tabi olarak, sözleşmedeki şartlar çerçevesinde Hizmet Veren ile Depolatan Kişi arasında kabul ve imza edilen, tarafların hak ve yükümlülüklerini gösteren aşağıda adresi belirtilen mülkte Hizmet Veren tarafından Depolatan Kişi\'ye ait eşyaların depolanma hizmetine İlişkin sözleşmedir.\n\nDepo Adresi:\nSapanbağları Mahallesi Düzova Sokak No:9\n\nEşyaların bulunduğu adresten olası bir zorunlu tahliye işleminde eşyaların başka bir depo adresine taşınması durumunda depolayan kişiye sözlü ve ya yazılı olarak bildirilecektir.' },
+          { id: 'm4', title: 'Madde 4 - SÖZLEŞMENİN SÜRESİ', content: 'İşbu sözleşme belirtilen tarihten itibaren geçerli sayılacaktır.\n\nDepolama sözleşmesi depolayan kişinin giriş tarihinden çıkış tarihine kadar geçerlidir. Herhangi bir taahhüt zorunluluğu yoktur. Depolayan kişi istediği zaman tüm borçlarını ödeyip tüm eşyasını teslim alıp sözleşmeyi fesih edebilir.' },
+          { id: 'm5', title: 'Madde 5 - DEPO ÜCRETİ', content: 'Sözleşmeye göre depolayan kişinin aylık depolama bedeli her ay giriş tarihinden itibaren düzenli olarak hizmet veren kişinin IBAN\'ına ödeme yapacaktır. Depo ücretine KDV dahildir.\n\nDepolayan kişi depo ücretini en geç giriş tarihinden 5 gün sonra yatırabilir. Depo ücretinin ödenmemesi durumunda olabilecek gecikme faizi yansıtılacaktır. Aylık ödeme kredi kartı ile yapılamaz. Hizmet veren firmanın kampanya durumu olmadığı müddetçe ödemenin IBAN yoluyla sağlanması gerekmektedir.\n\nC- Eşya Sahibi, Depo ücretini aşağıda belirtilen banka hesaba yatıracaktır.\n\nBanka Adı: {{BANKA_TAM_ADI}}\nIban: {{IBAN}}\nHesap Sahibi: {{HESAP_SAHIBI}}\n\n{{IBAN_UYARI}}' },
+          { id: 'm6', title: 'Madde 6 - DEPO SORUMLULUK', content: 'Depolanacak eşyalar depoya indirilirken kısmen fotoğraf veya video kayıt altına alınacaktır. Depolanacak eşyaların içine konan eşyaların ne olduğu kaç adet olduğu ya da ne kadar değerli olduğu firmanın hizmet konusu değildir. Hizmet veren sadece depolanacak alanın güvenliğini ve depolayan kişi haricinden başka birinin girmemesini korumaktadır.\n\nHizmet Veren eşyaları Depo içinde zarar görmeyecek uygun şartlar altında saklamakla sorumludur. Ayrıca olası risklere karşı sigorta ile teminat altına almakla yükümlüdür.\n\nOlası yangın, hırsızlık, deprem gibi eşyanın uğrayacağı hasar ve kayıp rizikolarına karşı sigorta poliçesi hazırlanmamışsa Hizmet Veren zararları karşılamakla sorumludur.\n\nHizmet Veren eşyalarda meydana gelebilecek doğal eskime ve yıpranmalardan sorumlu tutulamaz.\n\nDepolatan kişi hizmet verene en az 3 gün önceden bilgi vermek koşulu ile herhangi bir depo borcu olmaksızın mesai saatleri içinde depo ziyareti yapabilir ve dilerse eşyalarının bir kısmını teslim alabilir. Depolayan kişi depoya giriş yapmadan önce Giriş - Çıkış tutanağı imzalaması gerekmektedir.\n\nHizmet veren tarafından verilen nakliyat hizmetleri ayrıca fiyatlandırılacaktır. Depolatan kişi depo ücretini veya birikmiş ödemelerini yapmadan eşyaları teslim alamaz.\n\nDepolanacak eşyalar depoya koyulduktan sonra kapılara mühür koyulup kayıt altına alınacaktır.\n\nDepolatan kişi aylık kira süresi dolduktan sonra 1 gün bile geçse bir sonraki ayın ödemesinin tamamını yapmayı taahhüt eder.\n\nHizmet veren firma depolatan kişinin kendine ait kiraladığı odaya koyduğu eşyaların içeriğini bilmediğinden dolayı gayri resmi yasal olmayan depolama içeriklerinden sorumlu değildir. Depolatan kişi tüm sorumluluğu kendi üzerine almıştır.\n\nDepo içerisinden eşya alımı için depolatan kişi kendi imkanlarıyla alır ve eski haline getirmesi gerekir. Aksi halde eski haline getirildikten sonra işçilik maaliyeti yansıtılacaktır.\n\nKapılara atılan mühürler tek kullanımlıktır. Mühür yenileme ücreti 200 TL+KDVdir.\n\nDepolanacak eşyaların içinde herhangi bir gıda malzemesi bulunmaması gerekmektedir. Bu sebepten dolayı oluşabilecek hasardan depolatan kişi sorumludur.\n\nDepolanacak eşyaların içinde bulunan döviz, hisse senedi, para, silah, ziynet eşyası ve değerli eşyalardan firmamız mesul değildir.' },
+          { id: 'm7', title: 'Madde 7 - SÖZLEŞME FESHİ', content: 'Depolatan kişi depolanan eşyanın teslimi için hizmet veren firmaya en az 7 gün öncesinden bilgi vermesi halinde istediği tarihte eşyalarının nakliyesini isteyebilir.\n\nDepolatan kişi depo ücretini birbirini takip eden üç aylık ödeme döneminde ödemez ise Hizmet veren eşyaları tahliye etme hakkına sahip olacaktır. Tahliye sırasında oluşabilecek eksik ve hasarlı eşyalar hizmet veren firmanın sorumluluğunda değildir. Tahliye işleminde oluşan nakliye masrafları depolatan kişiye yansıtılacaktır.\n\nDepolatan kişi tahliyeden sonraki 3 ay boyunca güncel depo bedeli ve eklenmiş tahliye masraflarını ödemekle yükümlüdür. Ödenmemiş 3 aylık ödeme dönemi ve 3 aylık tahliye süreci tamamlanınca eşyaların duyuru yapılmaksızın ihale ile satışa sunulacaktır.\n\nSüre bitiminden önce taraflardan biri sözleşmeyi yenilemeyeceğini karşı tarafa yazılı olarak bildirmezse sözleşme aynı şartlarla hizmet bedeli bir önceki yılın fiyatının TEFE-TÜFE artış oranı dikkate alınmak suretiyle yeni kira bedeli belirlenerek otomatik yenilenecektir.\n\nToplu ödemelerde yapılan indirim kampanyası belirlenen süre için geçerlidir. Bu süreden önce eşyaların teslim alınması halinde hediye tutarı geri iade edilmeyecektir. Hediye ayları çıkarıldığında kalan ayların iadesi yapılacaktır. Kredi kartı ile yapılan toplu ödemelerde kesintiler hesaplanıp iadesi alınacaktır.\n\nNakliye hizmeti hizmet veren firmadan alınmamış ise hizmet veren firmanın kalıcı ambalajının (pat pat) eşyalar depodan çıkarken iadesinin alınması mecburidir.' },
+          { id: 'm8', title: 'Madde 8 - TEBLİGAT ADRESLERİ', content: 'Hizmet verenin ve depolatan kişinin yukarda yazılı olan adresleri geçerli tebligat adresleridir. Tarafların tebligat adresinde olabilecek değişiklikler, değişimi takip eden 3 (üç) gün içerisinde diğer tarafa internet üzerinden veya yazılı olarak bildirilecektir. Bildirmediği takdirde sözleşmedeki adreslere yapılacak tebligatlar taraflara yapılmış olarak kabul edilecektir.' },
+          { id: 'm9', title: 'Madde 9 - YETKİLİ MAHKEME VE İCRA DAİRESİ', content: 'İşbu Sözleşmenin, eklerinin, tadillerinin uygulanmasından veya yorumundan doğabilecek ihtilaflarda Türk Kanunları uygulanır ve taraflarca aksine bir hüküm kararlaştırılmadıkça HMK kuralları doğrultusunda yetkili mahkeme ve icra daireleri belirlenir.' },
+          { id: 'm10', title: 'Madde 10 - YÜRÜRLÜK', content: 'İşbu Sözleşme taraflarca imzalandığı tarihte yürürlüğe girer ve daha erken feshedilmedikçe Sözleşmede belirtilen şekilde sona erer.\n\nİşbu Sözleşme 4 (dört) sayfadan oluşmaktadır. Sözleşmede yer almayan hususlar hakkında 6098 sayılı Borçlar Kanunu hükümleri geçerlidir.\n\nİşbu sözleşme, taraflarca tüm hususlarda mutabık kalınarak 2 nüsha olmak üzere belirtilen tarihte birlikte imza altına alınmıştır. Depolatan kişinin depolama günü depo adresine gelmediği takdirde sözleşme tarafına internet yoluyla iletilecektir ve kabul ettiği varsayılacaktır.' }
+      ]
+  });
+
+  const handleClauseContentChange = (id, newContent) => {
+      setContractSettings(prev => ({
+          ...prev,
+          clauses: prev.clauses.map(c => c.id === id ? { ...c, content: newContent } : c)
+      }));
+  };
+
+  const handleOpenContract = (customer) => {
+      const custRooms = rooms.filter(r => r.customerName === customer.name);
+      setContractCustomer(customer);
+      setContractRooms(custRooms);
+      setIsContractModalOpen(true);
+  };
+
+  const renderClauseWithData = (content) => {
+      let text = content;
+      const roomNames = contractRooms.map(r => r.name).join(', ') || 'Belirtilmemiş';
+      const entryDates = contractRooms.map(r => r.entryDate).join(', ') || 'Belirtilmemiş';
+      
+      let totalFee = 0;
+      contractRooms.forEach(r => {
+          const base = Number(r.monthlyFee || 0);
+          const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
+          totalFee += hasKdv ? base * 1.20 : base;
+      });
+
+      text = text.replace(/{{MUSTERI_AD}}/g, contractCustomer?.name || '');
+      text = text.replace(/{{MUSTERI_TC}}/g, contractCustomer?.tc || 'Belirtilmemiş');
+      text = text.replace(/{{MUSTERI_TELEFON}}/g, contractCustomer?.phone || 'Belirtilmemiş');
+      text = text.replace(/{{MUSTERI_ALT_TELEFON}}/g, contractCustomer?.altPhone || '-');
+      text = text.replace(/{{MUSTERI_ADRES}}/g, contractCustomer?.address || 'Adres Girilmemiş');
+      text = text.replace(/{{ODA_NUMARASI}}/g, roomNames);
+      text = text.replace(/{{MUSTERI_NUMARASI}}/g, contractCustomer?.customerNo || 'Belirtilmemiş');
+      text = text.replace(/{{GIRIS_TARIHI}}/g, entryDates);
+      text = text.replace(/{{AYLIK_UCRET}}/g, totalFee > 0 ? totalFee : 'Belirtilmemiş');
+      text = text.replace(/{{BANKA_TAM_ADI}}/g, contractSettings.bankFullName);
+      text = text.replace(/{{IBAN}}/g, contractSettings.iban);
+      text = text.replace(/{{HESAP_SAHIBI}}/g, contractSettings.accountHolder);
+      text = text.replace(/{{IBAN_UYARI}}/g, contractSettings.ibanWarning);
+
+      return text;
+  };
+
+  const handlePrintContract = () => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+      
+      const roomNames = contractRooms.map(r => r.name).join(', ') || 'Belirtilmemiş';
+      const entryDates = contractRooms.map(r => r.entryDate).join(', ') || 'Belirtilmemiş';
+      
+      let totalFee = 0;
+      contractRooms.forEach(r => {
+          const base = Number(r.monthlyFee || 0);
+          const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
+          totalFee += hasKdv ? base * 1.20 : base;
+      });
+
+      const processedClauses = contractSettings.clauses.map(clause => {
+          let text = clause.content;
+          text = text.replace(/{{MUSTERI_AD}}/g, contractCustomer?.name || '');
+          text = text.replace(/{{MUSTERI_TC}}/g, contractCustomer?.tc || 'Belirtilmemiş');
+          text = text.replace(/{{MUSTERI_TELEFON}}/g, contractCustomer?.phone || 'Belirtilmemiş');
+          text = text.replace(/{{MUSTERI_ALT_TELEFON}}/g, contractCustomer?.altPhone || '-');
+          text = text.replace(/{{MUSTERI_ADRES}}/g, contractCustomer?.address || 'Adres Girilmemiş');
+          text = text.replace(/{{ODA_NUMARASI}}/g, roomNames);
+          text = text.replace(/{{MUSTERI_NUMARASI}}/g, contractCustomer?.customerNo || 'Belirtilmemiş');
+          text = text.replace(/{{GIRIS_TARIHI}}/g, entryDates);
+          text = text.replace(/{{AYLIK_UCRET}}/g, totalFee > 0 ? totalFee : 'Belirtilmemiş');
+          text = text.replace(/{{BANKA_TAM_ADI}}/g, contractSettings.bankFullName);
+          text = text.replace(/{{IBAN}}/g, contractSettings.iban);
+          text = text.replace(/{{HESAP_SAHIBI}}/g, contractSettings.accountHolder);
+          text = text.replace(/{{IBAN_UYARI}}/g, contractSettings.ibanWarning);
+          return { ...clause, content: text };
+      });
+
+      const clausesHtml = processedClauses.map(clause => `
+          <div class="clause">
+              <h3>${clause.title}</h3>
+              <p>${clause.content.replace(/\n/g, '<br/>')}</p>
+          </div>
+      `).join('');
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>${contractCustomer?.name} - Sözleşme</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm 20mm 35mm 20mm; } /* Sabit alt footer için 35mm margin */
+                  body { 
+                      font-family: 'Arial', sans-serif; 
+                      line-height: 1.6; 
+                      font-size: 11pt; 
+                      color: #000; 
+                      padding: 0; 
+                      margin: 0; 
+                  }
+                  h3 { 
+                      font-size: 12pt; 
+                      font-weight: bold; 
+                      margin-top: 15pt; 
+                      margin-bottom: 5pt; 
+                      color: #000;
+                  }
+                  p { 
+                      margin-bottom: 10pt; 
+                      text-align: justify; 
+                      page-break-inside: avoid;
+                  }
+                  .clause {
+                      page-break-inside: avoid;
+                  }
+                  
+                  /* Filigran (Watermark) */
+                  .watermark { 
+                      position: fixed; 
+                      top: 45%; 
+                      left: 50%; 
+                      transform: translate(-50%, -50%) rotate(-45deg); 
+                      font-size: 80pt; 
+                      font-weight: bold; 
+                      color: rgba(0, 0, 0, 0.05); 
+                      z-index: -1; 
+                      white-space: nowrap; 
+                  }
+                  
+                  /* Her sayfanın altına sabitlenen Footer */
+                  .footer { 
+                      position: fixed; 
+                      bottom: 0; 
+                      left: 0; 
+                      right: 0; 
+                      height: 25mm; 
+                      display: flex; 
+                      justify-content: space-between; 
+                      align-items: flex-end; 
+                      font-size: 9pt; 
+                      padding-top: 5mm;
+                  }
+                  .footer-box { width: 45%; }
+                  .footer-box.right { text-align: right; }
+                  .footer-title { font-weight: bold; margin-bottom: 3px; color: #555; }
+                  .footer-name { font-weight: bold; color: #000; }
+                  
+                  /* Sadece son sayfada çıkacak İmza Alanları */
+                  .signatures { 
+                      margin-top: 40pt; 
+                      display: flex; 
+                      justify-content: space-between; 
+                      page-break-inside: avoid; 
+                  }
+                  .sig-box { width: 45%; text-align: center; }
+                  .sig-label { font-weight: bold; margin-bottom: 10pt; }
+                  .sig-line { margin-top: 40pt; border-bottom: 1px solid #000; width: 60%; margin-left: auto; margin-right: auto; }
+                  .sig-text { text-align: center; margin-top: 10pt; font-size: 10pt; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Depoevim</div>
+              <div class="footer">
+                  <div class="footer-box">
+                      <div class="footer-title">HİZMET VEREN</div>
+                      <div class="footer-name">${contractSettings.accountHolder}</div>
+                  </div>
+                  <div class="footer-box right">
+                      <div class="footer-title">DEPOLATAN KİŞİ</div>
+                      <div class="footer-name">${contractCustomer?.name}</div>
+                  </div>
+              </div>
+              
+              <div class="content">
+                  <div style="text-align: center; font-size: 14pt; font-weight: bold; margin-bottom: 20pt; text-decoration: underline;">Eşya Depolama Sözleşmesi</div>
+                  ${clausesHtml}
+                  
+                  <div class="signatures">
+                      <div class="sig-box">
+                          <div class="sig-label">HİZMET VEREN</div>
+                          <div class="sig-text">Ad Soyad / Ünvan:<br>${contractSettings.accountHolder}</div>
+                          <div class="sig-text" style="margin-top: 20pt;">İmza Yetkili Kişi Ad Soyad:</div>
+                          <div class="sig-line"></div>
+                      </div>
+                      <div class="sig-box">
+                          <div class="sig-label">DEPOLATAN KİŞİ</div>
+                          <div class="sig-text">Ad Soyad / Ünvan:<br>${contractCustomer?.name}</div>
+                          <div class="sig-text" style="margin-top: 20pt;">İmza:</div>
+                          <div class="sig-line"></div>
+                      </div>
+                  </div>
+              </div>
+          </body>
+          </html>
+      `);
+      iframe.contentWindow.document.close();
+      
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print(); // PDF olarak kaydetme ekranını doğrudan tetikler
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+      }, 500);
+  };
+
+  const handlePrintLedger = (customer, ledgerTransactions, finalBalance, periodStr = 'all') => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const tableRows = ledgerTransactions.map(tx => `
+          <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${tx.dateStr}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${tx.desc}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #dc2626; font-weight: bold;">${tx.debt > 0 ? (tx.baseDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' TL' : '-'}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #f97316; font-weight: bold;">${tx.debt > 0 ? (tx.kdvDebt || 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' TL' : '-'}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #16a34a; font-weight: bold;">${tx.credit > 0 ? tx.credit.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' TL' : '-'}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold; color: #1f2937;">${tx.balance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+          </tr>
+      `).join('');
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>${customer.name} - Cari Hesap Dökümü</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; padding: 0; color: #333; margin: 0; }
+                  .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1bc5bd; padding-bottom: 15px; }
+                  .header h2 { margin: 0 0 10px 0; color: #1f2937; font-size: 24px; }
+                  .info-box { display: flex; justify-content: space-between; background-color: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #e2e8f0; }
+                  .info-box div { font-size: 14px; }
+                  .info-box strong { color: #475569; display: inline-block; width: 120px; }
+                  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+                  th { background-color: #f1f5f9; padding: 12px 10px; text-align: left; color: #475569; font-weight: bold; border-bottom: 2px solid #cbd5e1; }
+                  .total-row td { background-color: #f8fafc; padding: 15px 10px; border-top: 2px solid #cbd5e1; font-weight: bold; font-size: 14px; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 100pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Depoevim</div>
+              <div class="header">
+                  <h2>MÜŞTERİ CARİ HESAP DÖKÜMÜ (EKSTRE) ${periodStr !== 'all' ? `- ${periodStr} YILI` : ''}</h2>
+              </div>
+              <div class="info-box">
+                  <div>
+                      <div style="margin-bottom: 8px;"><strong>Müşteri Adı:</strong> ${customer.name}</div>
+                      <div style="margin-bottom: 8px;"><strong>Müşteri No:</strong> ${customer.customerNo}</div>
+                      <div><strong>Telefon:</strong> ${customer.phone}</div>
+                  </div>
+                  <div style="text-align: right;">
+                      <div style="margin-bottom: 8px;"><strong>Belge Tarihi:</strong> ${new Date().toLocaleDateString('tr-TR')}</div>
+                      <div><strong>Güncel Bakiye:</strong> <span style="color: ${finalBalance > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold; font-size: 16px;">${finalBalance.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</span></div>
+                  </div>
+              </div>
+              <table>
+                  <thead>
+                      <tr>
+                          <th>Tarih</th>
+                          <th>İşlem Açıklaması</th>
+                          <th style="text-align: right;">Borç (Tahakkuk)</th>
+                          <th style="text-align: right;">+ KDV %20 Tutarı</th>
+                          <th style="text-align: right;">Alacak (Ödenen)</th>
+                          <th style="text-align: right;">Bakiye</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      ${tableRows}
+                      <tr class="total-row">
+                          <td colspan="2" style="text-align: right; color: #475569;">DÖNEM TOPLAMI / GÜNCEL BAKİYE:</td>
+                          <td style="text-align: right; color: #dc2626;">${ledgerTransactions.reduce((sum, tx) => sum + (tx.baseDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+                          <td style="text-align: right; color: #f97316;">${ledgerTransactions.reduce((sum, tx) => sum + (tx.kdvDebt || 0), 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+                          <td style="text-align: right; color: #16a34a;">${ledgerTransactions.reduce((sum, tx) => sum + tx.credit, 0).toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+                          <td style="text-align: right; color: ${finalBalance > 0 ? '#dc2626' : '#16a34a'}; font-size: 16px;">${finalBalance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL</td>
+                      </tr>
+                  </tbody>
+              </table>
+          </body>
+          </html>
+      `);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+      }, 500);
+  };
+
+  const handlePrintInvoice = (tx) => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date(tx.date);
+      const dateStr = !isNaN(d.getTime()) ? `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}` : tx.date;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Tahsilat Makbuzu - ${tx.customerName}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; padding: 0; color: #333; margin: 0; }
+                  .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1bc5bd; padding-bottom: 15px; }
+                  .header h2 { margin: 0 0 10px 0; color: #1f2937; font-size: 24px; }
+                  .info-box { display: flex; justify-content: space-between; background-color: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #e2e8f0; }
+                  .info-box div { font-size: 14px; margin-bottom: 8px; }
+                  .info-box strong { color: #475569; display: inline-block; width: 120px; }
+                  .amount-box { text-align: center; font-size: 24px; padding: 20px; background-color: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; border-radius: 8px; font-weight: bold; margin-bottom: 30px;}
+                  .details { font-size: 14px; line-height: 1.6; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 100pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Depoevim</div>
+              <div class="header">
+                  <h2>TAHSİLAT MAKBUZU / FATURA</h2>
+              </div>
+              <div class="info-box">
+                  <div>
+                      <div><strong>Müşteri Adı:</strong> ${tx.customerName}</div>
+                      <div><strong>Müşteri No:</strong> ${tx.customerNo}</div>
+                  </div>
+                  <div style="text-align: right;">
+                      <div><strong>İşlem Tarihi:</strong> ${dateStr}</div>
+                      <div><strong>İşlem No:</strong> ${tx.id}</div>
+                  </div>
+              </div>
+              <div class="amount-box">
+                  Tahsil Edilen Tutar: ${tx.amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL
+              </div>
+              <div class="details">
+                  <p><strong>Açıklama / Dekont Notu:</strong> ${tx.note}</p>
+                  <p style="margin-top: 40px; font-size: 12px; color: #64748b;">Bu belge bilgilendirme amaçlıdır. Tahsilatın ilgili müşteri carisine işlendiğini teyit eder.</p>
+              </div>
+          </body>
+          </html>
+      `);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+      }, 500);
+  };
+
+  const handleCustomerSelfPickupNotification = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date();
+      const todayStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+      
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Müşteri Kendi Alma Bilgilendirme - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.6; font-size: 11pt; color: #000; margin: 0; padding: 0; }
+                  .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #1bc5bd; padding-bottom: 10px; }
+                  .logo { font-size: 36px; font-weight: 900; margin-bottom: 5px; }
+                  .logo .black { color: #1f2937; }
+                  .logo .blue { color: #0ea5e9; }
+                  .subtitle { font-size: 11pt; color: #64748b; font-weight: bold; letter-spacing: 2px; margin-bottom: 10px; }
+                  .title { font-size: 14pt; font-weight: bold; text-align: center; margin-bottom: 20px; text-decoration: underline; }
+                  .info-box { border: 1px solid #e2e8f0; padding: 15px; margin-bottom: 25px; border-radius: 8px; background-color: #f8fafc; }
+                  .content-list { margin-bottom: 30px; padding-left: 20px; }
+                  .content-list li { margin-bottom: 10px; text-align: justify; }
+                  .price-list { margin-top: 5px; font-weight: bold; }
+                  .footer { display: flex; justify-content: flex-end; margin-top: 30px; }
+                  .signature-box { text-align: center; width: 250px; }
+                  .sig-title { font-weight: bold; margin-bottom: 10px; }
+                  .sig-name { margin-top: 10px; font-size: 11pt; }
+                  .sig-line { border-bottom: 1px solid #000; margin-top: 40px; width: 80%; margin-left: auto; margin-right: auto; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Depoevim</div>
+              <div class="header">
+                  <div class="logo"><span class="black">Depo</span><span class="blue">evim</span></div>
+                  <div class="subtitle">EŞYA DEPOLAMA</div>
+              </div>
+              
+              <div class="title">FARKLI FİRMA VEYA MÜŞTERİ TARAFINDAN DEPO ÇIKIŞLARI<br/>Talimatlar & Kurallar</div>
+              
+              <div class="info-box">
+                  <strong>Müşteri Adı Soyadı:</strong> ${customer.name}<br/>
+                  <strong>Müşteri No / Telefon:</strong> ${customer.customerNo} / ${customer.phone}<br/>
+                  <strong>Oda Numarası:</strong> ${room.name} <br/>
+                  <strong>Tarih:</strong> ${todayStr}
+              </div>
+
+              <ol class="content-list">
+                  <li>Depolayan kişinin depo borcunun tamamı ödenmiş olması gerekmektedir.</li>
+                  <li>Depolayan kişinin eşya teslim sırasında bulunması gerekmektedir.</li>
+                  <li>Eşyalar depodan çıkış yapmadan depolayan kişi teslim tutanağını ıslak imza ile imzalaması gerekmektedir.</li>
+                  <li>Depo sorumluluğumuz yalnızca depoyu açma ve kapama işlemi yapmaktır.</li>
+                  <li>Depolayan kişi başka nakliye hizmeti için minimum 48 saat öncesinden haber verip randevu alması gerekmektedir.</li>
+                  <li>Depolayan kişi, Sembol Nakliyat dışında başka bir firmadan hizmet alır ise, deposu açıldığı andan itibaren oluşabilecek hasar, eksik eşya veya fazla eşya alınması vb. durumlarda depolayan kişi sorumludur.</li>
+                  <li>Ümraniye, Kartal ve Çekmeköy depolar fabrikada bulunduğundan dolayı dışarıdan gelen nakliye personelinin sigortalı olması zorunludur.</li>
+                  <li>Ümraniye, Kartal ve Çekmeköy deposundan çıkarılacak eşyalar için dışarıdan gelen nakliyeci 1 gün öncesinden gelecek personellerin sigorta giriş belgelerini firmamıza iletmesi gerekmektedir.</li>
+                  <li>Depo çalışma saatleri: 10.00-17.00. Pazar günleri kapalıdır.</li>
+                  <li>Depodan eşyaların alınma süresi maksimum 2 saattir. Bu sürenin uzaması durumunda mesai ücreti alınması gerekmektedir.</li>
+                  <li>Eşyanın tamamı alınmadığı süre zarfında çıkış işlemi yapılmayacaktır.</li>
+                  <li>Taşıma sırasında oluşabilecek iş güvenliği ve depoya hasar durumlarından depolayan kişi sorumludur.</li>
+                  <li>Depolayan kişi daha önce nakliye hizmetini depo firmasından almış ise kalıcı ambalaj iadesi ya da ücretini ödemek mecburidir.</li>
+                  <li>Kalıcı Ambalaj Ücretleri:
+                      <ul class="price-list">
+                          <li>15 m³ - 2.000 TL + KDV</li>
+                          <li>22 m³ - 3.000 TL + KDV</li>
+                          <li>30 m³ - 4.000 TL + KDV</li>
+                      </ul>
+                  </li>
+              </ol>
+
+              <div class="footer">
+                  <div class="signature-box">
+                      <div class="sig-title">Depolayan Kişinin Ad Soyad ve İmzası</div>
+                      <div class="sig-name">${customer.name}</div>
+                      <div class="sig-line"></div>
+                  </div>
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Farklı Firma veya Müşteri Tarafından Depo Çıkışları - Talimatlar ve Kurallar" belgesi oluşturulmuştur.\n\nİlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip onaylayınız.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
+  const handleExternalTransportEntry = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date();
+      const todayStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+      
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Farklı Firma İle Giriş Tutanağı - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.6; font-size: 11pt; color: #000; margin: 0; padding: 0; }
+                  .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1bc5bd; padding-bottom: 15px; }
+                  .logo { font-size: 36px; font-weight: 900; margin-bottom: 5px; }
+                  .logo .black { color: #1f2937; }
+                  .logo .blue { color: #0ea5e9; }
+                  .subtitle { font-size: 11pt; color: #64748b; font-weight: bold; letter-spacing: 2px; margin-bottom: 15px; }
+                  .title { font-size: 14pt; font-weight: bold; text-align: center; margin-bottom: 25px; text-decoration: underline; }
+                  .info-box { border: 1px solid #e2e8f0; padding: 15px; margin-bottom: 25px; border-radius: 8px; background-color: #f8fafc; }
+                  .content-list { margin-bottom: 40px; padding-left: 20px; }
+                  .content-list li { margin-bottom: 12px; text-align: justify; }
+                  .footer { display: flex; justify-content: flex-end; margin-top: 40px; }
+                  .signature-box { text-align: center; width: 250px; }
+                  .sig-title { font-weight: bold; margin-bottom: 10px; }
+                  .sig-name { margin-top: 10px; font-size: 11pt; }
+                  .sig-line { border-bottom: 1px solid #000; margin-top: 40px; width: 80%; margin-left: auto; margin-right: auto; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Depoevim</div>
+              <div class="header">
+                  <div class="logo"><span class="black">Depo</span><span class="blue">evim</span></div>
+                  <div class="subtitle">EŞYA DEPOLAMA</div>
+              </div>
+              
+              <div class="title">DEPOEVİM FARKLI FİRMA İLE DEPOYA EŞYA GİRİŞ TUTANAĞI</div>
+              
+              <div class="info-box">
+                  <strong>Müşteri Adı Soyadı:</strong> ${customer.name}<br/>
+                  <strong>Müşteri No / Telefon:</strong> ${customer.customerNo} / ${customer.phone}<br/>
+                  <strong>Oda Numarası:</strong> ${room.name} <br/>
+                  <strong>Tarih:</strong> ${todayStr}
+              </div>
+
+              <ol class="content-list">
+                  <li>Depolayan kişi deponun ilk ayını ödemesini eşya depoya yerleşmeden yapmalıdır.</li>
+                  <li>Depolayan kişinin eşya yerleştirme sırasında bulunması gerekmektedir.</li>
+                  <li>Eşyalar depodan giriş yapmadan depolayan kişi sözleşmeyi imzalaması gerekmektedir.</li>
+                  <li>Depo sorumlumuz yalnızca depoyu açma ve kapama işlemi yapmaktadır.</li>
+                  <li>Depolayan kişi başka nakliye hizmeti için minimum 48 saat öncesinden haber ve randevu alması gerekmektedir.</li>
+                  <li>Depolayan kişi, Sembol Nakliyat dışında başka bir firmadan hizmet alır ise, deposu açıldığı andan itibaren oluşabilecek hasar, eksik eşya veya fazla eşya alınması vb. durumlarında depolayan kişi sorumludur.</li>
+                  <li>Ümraniye ve Kartal ve Çekmeköy’deki depolar fabrika olduğundan dolayı dışardan gelen nakliye personelinin sigortalı olması zorunludur.</li>
+                  <li>Ümraniye ve Kartal ve Çekmeköy deposuna getirilecek eşyalar için dışardan gelen nakliyeci 1 gün öncesinden gelecek personellerin sigorta giriş belgelerini firmamıza iletmesi gerekmektedir.</li>
+                  <li>Depo çalışma saatleri: 10:00 – 17:00 saatleri arasındadır. Pazar günleri kapalıdır.</li>
+                  <li>Depoya eşyaların yerleştirme süresi maksimum 2 saattir. Bu sürenin uzaması durumunda mesai ücreti alınması gerekmektedir.</li>
+                  <li>Taşıma sırasında oluşabilecek iş güvenliği, asansör hasarı ve depoya hasar durumlarından depoyu kiralayan kişi sorumludur.</li>
+              </ol>
+
+              <div class="footer">
+                  <div class="signature-box">
+                      <div class="sig-title">Depolayan Kişinin Ad Soyad ve İmzası</div>
+                      <div class="sig-name">${customer.name}</div>
+                      <div class="sig-line"></div>
+                  </div>
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Farklı Firma İle Depoya Eşya Giriş Tutanağı" oluşturulmuştur. \n\nİlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip onaylayınız.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
+  const handleDamageReportDocument = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Nakliye Hasar Tutanağı - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.8; font-size: 13pt; color: #000; margin: 0; padding: 0; position: relative; min-height: 250mm; }
+                  .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #e30a17; padding-bottom: 15px; }
+                  .logo-text { color: #e30a17; font-size: 36px; font-weight: 900; margin: 0 0 5px 0; letter-spacing: 1px; }
+                  .subtitle { font-size: 14pt; color: #000; font-weight: bold; margin: 0; }
+                  .title { font-size: 16pt; font-weight: bold; text-align: center; margin: 40px 0; text-decoration: underline; }
+                  .content { text-align: justify; margin-bottom: 50px; font-size: 14pt; line-height: 2; }
+                  .form-group { margin-bottom: 20px; font-weight: bold; }
+                  .flex-line { display: flex; align-items: flex-end; }
+                  .footer { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; font-size: 11pt; border-top: 1px solid #ccc; padding-top: 15px; color: #333; line-height: 1.5; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Sembol Nakliyat</div>
+              <div class="header">
+                  <h1 class="logo-text">SEMBOL NAKLİYAT</h1>
+                  <h3 class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</h3>
+              </div>
+              
+              <div class="title">DEPOEVİM NAKLİYE HASAR TUTANAĞI</div>
+              
+              <div class="content">
+                  <p>
+                      Depoevim firmasının deposunda bulunan <strong>${room.name}</strong> oda numaralı <strong>${customer.name}</strong> adlı müşteriye ait olan eşyaları teslim alırken taşıma sırasında deponun içinde ve çevresinde oluşabilecek tüm hasarlardan sorumlu olduğumu taahhüt ederim.
+                  </p>
+                  
+                  <div style="margin-top: 60px;">
+                      <div class="form-group flex-line">
+                          <span style="white-space: nowrap;">Nakliye Firması Ünvanı:</span> <span style="flex: 1; border-bottom: 1px dotted #000; margin-left: 10px;">&nbsp;</span>
+                      </div>
+                      <div class="form-group flex-line">
+                          <span style="white-space: nowrap;">Nakliye Firması VKN:</span> <span style="flex: 1; border-bottom: 1px dotted #000; margin-left: 10px;">&nbsp;</span>
+                      </div>
+                      <div class="form-group flex-line" style="margin-top: 40px;">
+                          <span style="white-space: nowrap;">Nakliye Firması Yetkili Kişi İsim Soyisim İmza:</span> <span style="flex: 1; border-bottom: 1px dotted #000; margin-left: 10px;">&nbsp;</span>
+                      </div>
+                  </div>
+              </div>
+
+              <div class="footer">
+                  <strong>SEMBOL NAKLİYAT DEPOCULUK TİC.LTD.ŞTİ.</strong><br/>
+                  Bahçelievler mah. Yeni sokak No 5 C Pendik / İstanbul<br/>
+                  0(216) 390 89 99 / 0(554) 726 16 61<br/>
+                  www.sembolevdeneve.com
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Nakliye Hasar Tutanağı" oluşturulmuştur.\n\nİlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip nakliye firmasına imzalattığınızdan emin olunuz.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
+  const handleProxyDocument = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date();
+      const todayStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+      
+      // Müşterinin vekili varsa ismini yaz, yoksa noktalı boşluk bırak
+      const proxyName = customer.proxyName || '......................................................';
+      const proxyTc = customer.proxyTc || '...........................';
+
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Vekalet Tutanağı - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.8; font-size: 13pt; color: #000; margin: 0; padding: 0; position: relative; min-height: 250mm; }
+                  .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #e30a17; padding-bottom: 15px; }
+                  .logo-text { color: #e30a17; font-size: 36px; font-weight: 900; margin: 0 0 5px 0; letter-spacing: 1px; }
+                  .subtitle { font-size: 14pt; color: #000; font-weight: bold; margin: 0; }
+                  .title { font-size: 16pt; font-weight: bold; text-align: center; margin: 40px 0; text-decoration: underline; }
+                  .content { text-align: justify; margin-bottom: 50px; font-size: 14pt; line-height: 2; }
+                  .signatures { display: flex; justify-content: space-between; margin-top: 60px; }
+                  .sig-box { text-align: center; width: 40%; }
+                  .sig-title { font-weight: bold; margin-bottom: 10px; font-size: 12pt; }
+                  .sig-name { margin-bottom: 40px; font-size: 12pt; }
+                  .sig-line { border-bottom: 1px solid #000; width: 80%; margin: 0 auto; }
+                  .footer { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; font-size: 11pt; border-top: 1px solid #ccc; padding-top: 15px; color: #333; line-height: 1.5; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Sembol Nakliyat</div>
+              <div class="header">
+                  <h1 class="logo-text">SEMBOL NAKLİYAT</h1>
+                  <h3 class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</h3>
+              </div>
+              
+              <div class="title">DEPOEVİM DEPO GİRİŞ TUTANAĞI</div>
+              
+              <div class="content">
+                  <p>
+                      SEMBOL NAKLİYAT firmasının deposunda bulunan <strong>${customer.name}</strong> isimli, <strong>${room.name}</strong> oda numaralı depoya benim adıma <strong>${proxyName}</strong> (TC: ${proxyTc}) isimli kişi benim nezaretim olmadan giriş yapabilir.
+                  </p>
+                  <p style="margin-top: 30px;">
+                      Tarih: ${todayStr}
+                  </p>
+              </div>
+
+              <div class="signatures">
+                  <div class="sig-box">
+                      <div class="sig-title">Müşteri İsim Soyisim</div>
+                      <div class="sig-name">${customer.name}</div>
+                      <div class="sig-title">İmza</div>
+                      <div class="sig-line"></div>
+                  </div>
+                  <div class="sig-box">
+                      <div class="sig-title">Vekil İsim Soyisim</div>
+                      <div class="sig-name">${proxyName}</div>
+                      <div class="sig-title">İmza</div>
+                      <div class="sig-line"></div>
+                  </div>
+              </div>
+
+              <div class="footer">
+                  <strong>SEMBOL NAKLİYAT DEPOCULUK TİC.LTD.ŞTİ.</strong><br/>
+                  Bahçelievler mah. Yeni sokak No 5 C Pendik / İstanbul<br/>
+                  0(216) 390 89 99 / 0(554) 726 16 61<br/>
+                  www.sembolevdeneve.com
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          let proxyText = customer.proxyName ? customer.proxyName : 'belirttiğiniz kişi';
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Vekalet ve Depo Giriş Tutanağı" oluşturulmuştur.\n\nSistemimize vekiliniz olarak ${proxyText} tanımlanmıştır. İlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip imzalayınız.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
+  const handleRoomEntryExitDocument = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date();
+      const todayStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+      const currentTime = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Depo Giriş Çıkış Tutanağı - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.8; font-size: 13pt; color: #000; margin: 0; padding: 0; position: relative; min-height: 250mm; }
+                  .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #e30a17; padding-bottom: 15px; }
+                  .logo-text { color: #e30a17; font-size: 36px; font-weight: 900; margin: 0 0 5px 0; letter-spacing: 1px; }
+                  .subtitle { font-size: 14pt; color: #000; font-weight: bold; margin: 0; }
+                  .title { font-size: 16pt; font-weight: bold; text-align: center; margin: 40px 0; text-decoration: underline; }
+                  .content { text-align: justify; margin-bottom: 30px; font-size: 14pt; line-height: 2; }
+                  .input-line { display: inline-block; border-bottom: 1px dotted #000; width: 100px; }
+                  .warning-box { border: 2px solid #e30a17; padding: 15px; text-align: center; font-weight: bold; margin-top: 30px; margin-bottom: 40px; font-size: 12pt; color: #e30a17; }
+                  .signatures { display: flex; justify-content: flex-end; margin-top: 60px; }
+                  .sig-box { text-align: center; width: 40%; }
+                  .sig-title { font-weight: bold; margin-bottom: 10px; font-size: 12pt; }
+                  .sig-name { margin-bottom: 40px; font-size: 12pt; }
+                  .sig-line { border-bottom: 1px solid #000; width: 80%; margin: 0 auto; }
+                  .footer { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; font-size: 11pt; border-top: 1px solid #ccc; padding-top: 15px; color: #333; line-height: 1.5; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Sembol Nakliyat</div>
+              <div class="header">
+                  <h1 class="logo-text">SEMBOL NAKLİYAT</h1>
+                  <h3 class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</h3>
+              </div>
+              
+              <div class="title">DEPOEVİM DEPO GİRİŞ ÇIKIŞ TUTANAĞI</div>
+              
+              <div class="content">
+                  <p>
+                      SEMBOL NAKLİYAT firmasının deposunda bulunan <strong>${customer.name}</strong> isimli, <strong>${room.name}</strong> oda numaralı depoya giriş yapmış olup olabilecek tüm hasarların ve eksik eşyaların sorumluluğu şahsıma aittir.
+                  </p>
+                  
+                  <div style="margin-top: 40px; display: flex; flex-direction: column; gap: 15px; font-weight: bold;">
+                      <div>GİRİŞ TARİHİ : ${todayStr}</div>
+                      <div>SAAT : ${currentTime}</div>
+                      <div style="margin-top: 20px;">GİRİŞ <span class="input-line"></span> / ÇIKIŞ <span class="input-line"></span></div>
+                  </div>
+              </div>
+
+              <div class="warning-box">
+                  MÜHÜR DEĞİŞTİRME ÜCRETİ ${collectionRates.sealFee} TL + KDV FATURANIZA EKLENECEKTİR. (1 SAATLİK ÜCRETTİR.)
+              </div>
+
+              <div class="signatures">
+                  <div class="sig-box">
+                      <div class="sig-title">Müşteri İsim Soyisim</div>
+                      <div class="sig-name">${customer.name}</div>
+                      <div class="sig-title">İmza</div>
+                      <div class="sig-line"></div>
+                  </div>
+              </div>
+
+              <div class="footer">
+                  <strong>SEMBOL NAKLİYAT DEPOCULUK TİC.LTD.ŞTİ.</strong><br/>
+                  Bahçelievler mah. Yeni sokak No 5 C Pendik / İstanbul<br/>
+                  0(216) 390 89 99 / 0(554) 726 16 61<br/>
+                  www.sembolevdeneve.com
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Depo Giriş Çıkış Tutanağı" oluşturulmuştur.\n\nİlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip imzalayınız.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
+  const handleViewEInvoice = (tx) => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date(tx.date);
+      const dateStr = !isNaN(d.getTime()) ? `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}` : tx.date;
+      const netAmount = (tx.amount / 1.20).toFixed(2);
+      const kdvAmount = (tx.amount - netAmount).toFixed(2);
+      const invoiceNo = tx.eInvoiceNo || 'MBT' + Math.floor(100000000 + Math.random() * 900000000);
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>E-Fatura - ${tx.customerName}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 15mm; }
+                  body { font-family: 'Arial', sans-serif; padding: 0; color: #000; margin: 0; font-size: 11px; }
+                  .invoice-box { border: 1px solid #ccc; padding: 20px; min-height: 250mm; position: relative;}
+                  .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; }
+                  .title { font-size: 20px; font-weight: bold; text-align: center; margin-top: 10px; letter-spacing: 2px; }
+                  .info-section { display: flex; justify-content: space-between; margin-bottom: 20px; }
+                  .box { width: 48%; border: 1px solid #000; padding: 10px; border-radius: 4px; line-height: 1.5; }
+                  table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                  th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+                  th { background-color: #f0f0f0; }
+                  .totals { width: 40%; margin-left: auto; border: 1px solid #000; border-collapse: collapse; }
+                  .totals td { padding: 6px 10px; }
+                  .footer { position: absolute; bottom: 20px; left: 20px; right: 20px; text-align: center; font-size: 10px; color: #555; border-top: 1px solid #ccc; padding-top: 10px;}
+              </style>
+          </head>
+          <body>
+              <div class="invoice-box">
+                  <div class="header">
+                      <div style="width: 50%;">
+                          <strong style="font-size: 14px;">SEMBOL NAKLİYAT DEPOCULUK TİC. LTD. ŞTİ.</strong><br/>
+                          Bahçelievler Mah. Yeni Sk. Ravza Apt. No:5 C Pendik/İSTANBUL<br/>
+                          Kartal V.D. - 7600944287
+                      </div>
+                      <div style="width: 40%; text-align: right; line-height: 1.5;">
+                          <strong>Fatura No:</strong> ${invoiceNo}<br/>
+                          <strong>Tarih:</strong> ${dateStr}<br/>
+                          <strong>Senaryo:</strong> E-Arşiv Fatura
+                      </div>
+                  </div>
+                  <div class="title">e-ARŞİV FATURA</div>
+                  <div class="info-section">
+                      <div class="box">
+                          <strong>SAYIN:</strong><br/>
+                          ${tx.customerName}<br/>
+                          ${tx.customerNo ? 'Müşteri No: ' + tx.customerNo + '<br/>' : ''}
+                          VKN/TCKN: 11111111111<br/>
+                          Adres: Muhtelif
+                      </div>
+                  </div>
+                  <table>
+                      <thead>
+                          <tr>
+                              <th>Sıra</th>
+                              <th>Mal / Hizmet Cinsi</th>
+                              <th>Miktar</th>
+                              <th>Birim Fiyat</th>
+                              <th>KDV %</th>
+                              <th>Tutar</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          <tr>
+                              <td>1</td>
+                              <td>${tx.note || 'Depolama Hizmet Bedeli'}</td>
+                              <td>1 Ay</td>
+                              <td>${netAmount}</td>
+                              <td>20</td>
+                              <td>${netAmount}</td>
+                          </tr>
+                      </tbody>
+                  </table>
+                  <table class="totals">
+                      <tr>
+                          <td><strong>Mal Hizmet Toplam Tutarı</strong></td>
+                          <td style="text-align: right;">${netAmount} TL</td>
+                      </tr>
+                      <tr>
+                          <td><strong>Hesaplanan KDV (%20)</strong></td>
+                          <td style="text-align: right;">${kdvAmount} TL</td>
+                      </tr>
+                      <tr>
+                          <td><strong>Vergiler Dahil Toplam Tutar</strong></td>
+                          <td style="text-align: right; font-weight: bold; font-size: 14px;">${tx.amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</td>
+                      </tr>
+                  </table>
+                  <div class="footer">
+                      Bu fatura MBT E-Dönüşüm Portalı entegrasyonu simülasyonu ile oluşturulmuştur.<br/>
+                      Maliye Bakanlığı E-Arşiv Fatura Uygulaması kapsamında elektronik ortamda düzenlenmiştir.
+                  </div>
+              </div>
+          </body>
+          </html>
+      `);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+      }, 500);
+  };
+
+  const handleOpenMessageModal = (customer, balance, type) => {
+      setMessageModalData({ customer, balance, type });
+  };
+
+  const generateMessageText = (customer, balance, type) => {
+      const iban = contractSettings.iban;
+      const bank = contractSettings.bankFullName;
+      const owner = contractSettings.accountHolder;
+      const formattedBalance = balance.toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+      
+      let text = "";
+      if (type === 'reminder') {
+          text = `Merhaba ${customer.name},\n\nSistemimizde güncel cari hesabınıza ait toplam *${formattedBalance} TL* ödemeniz bulunmaktadır. Herhangi bir gecikme faizi işlememesi adına en kısa sürede ödemenizi gerçekleştirmenizi rica ederiz. İşlemlerinizin kesintisiz devam etmesi bizim için önemlidir.\n\n🏦 *Ödeme Bilgileri*\nBanka: ${bank}\nAlıcı: ${owner}\nIBAN: ${iban}\n\n⚠️ *ÖNEMLİ:* Ödemenizi gerçekleştirirken açıklama kısmına mutlaka *${customer.customerNo}* numaralı Müşteri Numaranızı yazmayı unutmayınız.\n\nİyi günler dileriz.`;
+      } else if (type === 'warning') {
+          text = `Sayın ${customer.name},\n\nSistem kayıtlarımıza göre ödenmemiş *${formattedBalance} TL* tutarında cari borcunuz bulunmaktadır. \n\nGecikme faizlerinin daha fazla artmaması ve hakkınızda yasal sürecin başlamaması adına en kısa sürede ödemenizi tamamlamanız gerekmektedir. Ödeme yapılmadığı takdirde sözleşmeden doğan haklarımız kullanılacaktır.\n\n🏦 *Hesap Bilgileri*\nBanka: ${bank}\nAlıcı: ${owner}\nIBAN: ${iban}\n\n⚠️ Lütfen ödeme açıklamasına *${customer.customerNo}* Müşteri Numaranızı ekleyiniz.\n\nBilgilerinize önemle sunarız.`;
+      } else if (type === 'eviction') {
+          text = `Sayın ${customer.name},\n\nBirikmiş olan *${formattedBalance} TL* borcunuz nedeniyle deponuzun *TAHLİYE* süreci başlatılma aşamasına gelmiştir.\n\nTahliye işlemi gerçekleştiği takdirde, oluşabilecek nakliye masrafları, eşya taşınırken doğabilecek hasar riskleri ve sürecin avukata intikaliyle eklenecek yasal takip masraflarından / faizlerden tamamen tarafınız sorumlu olacaktır. \n\nSüreci acilen durdurmak ve eşyalarınızın güvenliğini sağlamak için lütfen ödemenizi derhal gerçekleştiriniz.\n\n🏦 *Acil Ödeme Bilgileri*\nBanka: ${bank}\nAlıcı: ${owner}\nIBAN: ${iban}\n\n⚠️ Açıklama kısmına Müşteri Numaranızı (*${customer.customerNo}*) yazmanız zorunludur.`;
+      }
+      return text;
+  };
+
+  const handleSendMessage = (platform) => {
+      if (!messageModalData) return;
+      const { customer, balance, type } = messageModalData;
+      const text = generateMessageText(customer, balance, type);
+      const encodedText = encodeURIComponent(text);
+      
+      if (platform === 'whatsapp') {
+          window.open(`https://wa.me/90${customer.phone}?text=${encodedText}`, '_blank');
+      } else if (platform === 'sms') {
+          // iOS ve Android cihazlar için SMS ayırıcı farklılıkları
+          const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+          const separator = isIOS ? '&' : '?';
+          window.open(`sms:+90${customer.phone}${separator}body=${encodedText}`, '_self');
+      }
+      setMessageModalData(null);
+  };
+
+const handleAddExtraDocument = async (e, customerId) => {
+      const files = Array.from(e.target.files);
+      if (!files.length) return;
+      const customerToUpdate = customers.find(c => c.id === customerId);
+      if (!customerToUpdate || !db || !firebaseUser) return;
+
+      const promises = files.map(file => {
+          return new Promise(async (resolve) => {
+              const url = await uploadImageToServer(file);
+              resolve({ id: Date.now() + Math.random(), url: url, name: file.name });
+          });
+      });
+
+      const newFiles = await Promise.all(promises);
+      const updatedDocs = [...(customerToUpdate.extraDocuments || []), ...newFiles];
+
+      try {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { extraDocuments: updatedDocs }, { merge: true });
+      } catch (err) { console.error(err); }
+      e.target.value = '';
+  };
+
+  const handleDeleteExtraDocument = async (customerId, docId) => {
+      const customerToUpdate = customers.find(c => c.id === customerId);
+      if (!customerToUpdate || !db || !firebaseUser) return;
+      const updatedDocs = (customerToUpdate.extraDocuments || []).filter(d => d.id !== docId);
+      try {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { extraDocuments: updatedDocs }, { merge: true });
+      } catch (err) { console.error(err); }
+  };
+
+  const [customers, setCustomers] = useState([]);
+
+const handleSaveCustomer = async () => {
+      if (!newCustomer.name || !newCustomer.tc || !newCustomer.phone) return;
+
+      // YENİ EKLENEN KONTROL: Aynı TC/VKN sistemde kayıtlı mı kontrolü
+      const existingCust = customers.find(c => c.tc && c.tc.trim() === newCustomer.tc.trim());
+      if (existingCust) {
+          setCustomerSaveError(`Girdiğiniz TC/Vergi Numarası sistemde halihazırda "${existingCust.name}" adına kayıtlıdır. Lütfen bilgileri kontrol ediniz.`);
+          setTimeout(() => setCustomerSaveError(''), 6000); // 6 saniye sonra uyarı gizlenir
+          return; // Kaydetme işlemini iptal et
+      }
+
+      let newNo = '';
+      let isUnique = false;
+      while (!isUnique) {
+          newNo = Math.floor(10000 + Math.random() * 90000).toString();
+          if (!customers.some(c => c.customerNo === newNo)) isUnique = true;
+      }
+
+      const custId = 'cust_' + Date.now();
+      const cust = {
+          id: custId,
+          customerNo: newNo,
+          name: newCustomer.name.toUpperCase(),
+          tc: newCustomer.tc,
+          phone: newCustomer.phone,
+          altPhone: newCustomer.altPhone,
+          address: newCustomer.address,
+          notes: newCustomer.notes,
+          hasProxy: newCustomer.hasProxy,
+          proxyName: newCustomer.hasProxy ? newCustomer.proxyName.toUpperCase() : '',
+          proxyTc: newCustomer.hasProxy ? newCustomer.proxyTc : '',
+          proxyPhone: newCustomer.hasProxy ? newCustomer.proxyPhone : '',
+          proxyAltPhone: newCustomer.hasProxy ? newCustomer.proxyAltPhone : '',
+          proxyAddress: newCustomer.hasProxy ? newCustomer.proxyAddress : '',
+          proxyDocumentPhoto: newCustomer.hasProxy ? newCustomer.proxyDocumentPhoto : null,
+          type: customerType,
+          createdAt: new Date().toLocaleDateString('tr-TR'),
+          invoices: [],
+          documentPhoto: newCustomer.documentPhotoFront || newCustomer.documentPhoto,
+          documentPhotoFront: newCustomer.documentPhotoFront,
+          documentPhotoBack: newCustomer.documentPhotoBack,
+          payments: [], extraDebts: [], ledgerOverrides: []
+      };
+
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', custId), cust);
+          } catch (e) { console.error("Firebase Kayıt Hatası:", e); }
+      }
+      
+      setCustomerSaveError('');
+      setNewCustomer({ name: '', tc: '', phone: '', altPhone: '', address: '', notes: '', documentPhotoFront: null, documentPhotoBack: null, hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null });
+      setActiveMenu('tum-musteriler');
+  };
+
+const handleDeleteCustomer = async (customerId) => {
+      const customerToDelete = customers.find(c => c.id === customerId);
+      
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)));
+              
+              // Müşterinin odalarını da eşzamanlı olarak boşalt
+              if (customerToDelete) {
+                  const custRooms = rooms.filter(r => r.customerName === customerToDelete.name);
+                  for (const r of custRooms) {
+                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(r.id)), {
+                          customerName: null, phone: null, tc: null, paidMonths: []
+                      }, { merge: true });
+                  }
+              }
+          } catch (e) { console.error("Firebase Silme Hatası:", e); }
+      }
+      setIsDeleteCustomerModalOpen(false);
+      if (selectedCustomerId === customerId) {
+          setSelectedCustomerId(null);
+      }
+      setCustomerToDeleteId(null);
+  };
+
+const handleUpdateCustomer = async () => {
+      if (!editCustomerData.name) return;
+      const newName = editCustomerData.name.toUpperCase();
+      const oldCustomer = customers.find(c => c.id === editCustomerData.id);
+      
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(editCustomerData.id)), {
+                  ...editCustomerData,
+                  name: newName
+              }, { merge: true });
+
+              // İsim değiştiyse odalardaki ismi de otomatik güncelle
+              if (oldCustomer && oldCustomer.name !== newName) {
+                  const custRooms = rooms.filter(r => r.customerName === oldCustomer.name);
+                  for (const r of custRooms) {
+                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(r.id)), {
+                          customerName: newName
+                      }, { merge: true });
+                  }
+              }
+          } catch (e) { console.error("Firebase Güncelleme Hatası:", e); }
+      }
+      
+      setIsEditCustomerModalOpen(false);
+      setEditCustomerData(null);
+  };
+
+const handleDeleteLedgerItem = async (txId) => {
+    const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+    
+    if (customerToUpdate && db && firebaseUser) {
+        try {
+            let updatePayload = {};
+
+            if (txId.startsWith('debt-extra-')) {
+                const debtId = parseInt(txId.replace('debt-extra-', ''));
+                updatePayload = { extraDebts: (customerToUpdate.extraDebts || []).filter(d => d.id !== debtId) };
+            } else if (txId.startsWith('credit-global-')) {
+                const payId = parseInt(txId.replace('credit-global-', ''));
+                updatePayload = { payments: (customerToUpdate.payments || []).filter(p => p.id !== payId) };
+            } else {
+                updatePayload = { 
+                    ledgerOverrides: [
+                        ...(customerToUpdate.ledgerOverrides || []).filter(o => o.txId !== txId),
+                        { txId, isDeleted: true }
+                    ]
+                };
+            }
+
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), updatePayload, { merge: true });
+        } catch(e) { console.error("Cari Silme Hatası:", e); }
+    }
+  };
+
+const handleSaveLedgerEdit = async () => {
+    if (!editingLedgerItem) return;
+    const { id: txId, editDate, editDesc, editAmount, isDebt } = editingLedgerItem;
+    const newAmount = Number(editAmount);
+    const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+
+    if (customerToUpdate && db && firebaseUser) {
+        try {
+            let updatePayload = {};
+
+            if (txId.startsWith('debt-extra-')) {
+                const debtId = parseInt(txId.replace('debt-extra-', ''));
+                const updatedDebts = (customerToUpdate.extraDebts || []).map(d => d.id === debtId ? { ...d, date: editDate, desc: editDesc, amount: newAmount } : d);
+                updatePayload = { extraDebts: updatedDebts };
+            } else if (txId.startsWith('credit-global-')) {
+                const payId = parseInt(txId.replace('credit-global-', ''));
+                const updatedPayments = (customerToUpdate.payments || []).map(p => p.id === payId ? { ...p, date: editDate, note: editDesc, amount: newAmount } : p);
+                updatePayload = { payments: updatedPayments };
+            } else {
+                // Otomatik hesaplanan oda kiralarına müdahale (Override)
+                const updatedOverrides = [
+                    ...(customerToUpdate.ledgerOverrides || []).filter(o => o.txId !== txId),
+                    { txId, desc: editDesc, date: editDate, debt: isDebt ? newAmount : 0, credit: !isDebt ? newAmount : 0 }
+                ];
+                updatePayload = { ledgerOverrides: updatedOverrides };
+            }
+
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), updatePayload, { merge: true });
+        } catch(e) { console.error("Cari Düzenleme Kayıt Hatası:", e); }
+    }
+    setEditingLedgerItem(null);
+  };
+
+const handleManualAddDebt = async () => {
+    if (!newDebtData.desc || !newDebtData.amount) return;
+    const baseAmount = Number(newDebtData.amount);
+    const finalAmount = newDebtData.hasKdv ? baseAmount * 1.20 : baseAmount;
+    
+    const newDebt = {
+        id: Date.now(),
+        type: 'manual_debt',
+        date: newDebtData.date,
+        amount: finalAmount,
+        hasKdv: newDebtData.hasKdv,
+        desc: newDebtData.desc
+    };
+
+    const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+    if (customerToUpdate && db && firebaseUser) {
+        try {
+            const existingDebts = customerToUpdate.extraDebts || [];
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                extraDebts: [...existingDebts, newDebt]
+            }, { merge: true });
+        } catch(e) { console.error("Manuel Borç Ekleme Hatası:", e); }
+    }
+
+    setIsAddDebtModalOpen(false);
+    setNewDebtData({ desc: '', amount: '', date: new Date().toISOString().split('T')[0], hasKdv: true });
+  };
+
+const handleManualAddPayment = async () => {
+    if (!newPaymentData.amount) return;
+    const newPayment = {
+        id: Date.now(),
+        amount: Number(newPaymentData.amount),
+        date: newPaymentData.date,
+        note: newPaymentData.note
+    };
+
+    const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+    if (customerToUpdate && db && firebaseUser) {
+        try {
+            const existingPayments = customerToUpdate.payments || [];
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                payments: [...existingPayments, newPayment]
+            }, { merge: true });
+        } catch(e) { console.error("Manuel Ödeme Ekleme Hatası:", e); }
+    }
+
+    setIsAddPaymentModalOpen(false);
+    setNewPaymentData({ amount: '', date: new Date().toISOString().split('T')[0], note: '' });
+  };
+
+const handleSaveCollectionNote = async () => {
+      if (!collectionNoteData.customerId || !collectionNoteData.text) return;
+      
+      const newNote = {
+          id: Date.now(),
+          date: new Date().toLocaleDateString('tr-TR'),
+          text: collectionNoteData.text,
+          promiseDate: collectionNoteData.promiseDate
+      };
+
+      const customerToUpdate = customers.find(c => c.id === collectionNoteData.customerId);
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              const existingNotes = customerToUpdate.collectionNotes || [];
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(collectionNoteData.customerId)), {
+                  collectionNotes: [newNote, ...existingNotes]
+              }, { merge: true });
+          } catch(e) { console.error("Firebase Not Ekleme Hatası:", e); }
+      }
+
+      setIsCollectionNoteModalOpen(false);
+      setCollectionNoteData({ customerId: null, text: '', promiseDate: '' });
+  };
+
+const handleSaveContractSettings = async () => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'contract'), contractSettings);
+              alert("Ayarlar başarıyla Firebase'e kaydedildi!");
+          } catch(e) { console.error("Ayar Kayıt Hatası:", e); }
+      }
+  };
+
+const handleSaveCollectionRates = async () => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'rates'), collectionRates);
+              alert("Tahsilat oranları başarıyla Firebase'e kaydedildi!");
+          } catch(e) { console.error("Oran Kayıt Hatası:", e); }
+      }
+  };
+
+const handleAddInvoice = async () => {
+      if (!newInvoice.date || !newInvoice.file || !selectedCustomerId) return;
+      const inv = { id: Date.now(), ...newInvoice };
+      const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                  invoices: [...(customerToUpdate.invoices || []), inv]
+              }, { merge: true });
+          } catch (e) { console.error("Fatura Ekleme Hatası:", e); }
+      }
+      setNewInvoice({ invoiceNo: '', amount: '', date: new Date().toISOString().split('T')[0], file: null });
+  };
+
+  const handleDeleteInvoice = async (invId) => {
+      const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              const updatedInvoices = (customerToUpdate.invoices || []).filter(i => i.id !== invId);
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                  invoices: updatedInvoices
+              }, { merge: true });
+          } catch (e) { console.error("Fatura Silme Hatası:", e); }
+      }
+  };
+
+  // --- DEPO LİSTESİ STATE'LERİ ---
+  const [isAddWarehouseModalOpen, setIsAddWarehouseModalOpen] = useState(false);
+  const [newDepoName, setNewDepoName] = useState('');
+  const [newDepoM3, setNewDepoM3] = useState('');
+  const [newDepoAddress, setNewDepoAddress] = useState('');
+  
+  const [isEditWarehouseModalOpen, setIsEditWarehouseModalOpen] = useState(false);
+  const [editWarehouseData, setEditWarehouseData] = useState(null);
+
+  const [isDeleteWarehouseModalOpen, setIsDeleteWarehouseModalOpen] = useState(false);
+  const [warehouseToDelete, setWarehouseToDelete] = useState(null);
+
+  const [warehouses, setWarehouses] = useState([]);
+
+  const handleAddWarehouse = async () => {
+      if (!newDepoName) return;
+      const newWarehouse = { id: Date.now(), name: newDepoName, m3: newDepoM3 || 0, address: newDepoAddress, orderIndex: warehouses.length };
+      if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouse.id)), newWarehouse);
+      setIsAddWarehouseModalOpen(false); setNewDepoName(''); setNewDepoM3(''); setNewDepoAddress('');
+  };
+
+  const handleEditWarehouse = async () => {
+      if (!editWarehouseData?.name) return;
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(editWarehouseData.id)), { name: editWarehouseData.name, m3: editWarehouseData.m3, address: editWarehouseData.address || '' }, { merge: true });
+          } catch (e) { console.error("Firebase Depo Güncelleme Hatası:", e); }
+      }
+      setIsEditWarehouseModalOpen(false); setEditWarehouseData(null);
+  };
+
+  const handleDeleteWarehouseClick = (e, id) => {
+      e.stopPropagation();
+      setWarehouseToDelete(id);
+      setIsDeleteWarehouseModalOpen(true);
+  };
+
+  const confirmDeleteWarehouse = async () => {
+      if (!warehouseToDelete) return;
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(warehouseToDelete)));
+          } catch (e) { console.error("Firebase Depo Silme Hatası:", e); }
+      } else {
+          setWarehouses(warehouses.filter(w => w.id !== warehouseToDelete));
+      }
+      setIsDeleteWarehouseModalOpen(false);
+      setWarehouseToDelete(null);
+  };
+
+  const moveWarehouseUp = async (index, e) => {
+    e.stopPropagation(); if (index === 0) return;
+    const newWarehouses = [...warehouses];
+    const temp = newWarehouses[index - 1];
+    newWarehouses[index - 1] = newWarehouses[index];
+    newWarehouses[index] = temp; 
+    setWarehouses(newWarehouses);
+    if (db && firebaseUser) {
+        for (let i = 0; i < newWarehouses.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouses[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
+  };
+
+  const moveWarehouseDown = async (index, e) => {
+    e.stopPropagation(); if (index === warehouses.length - 1) return;
+    const newWarehouses = [...warehouses];
+    const temp = newWarehouses[index + 1];
+    newWarehouses[index + 1] = newWarehouses[index];
+    newWarehouses[index] = temp; 
+    setWarehouses(newWarehouses);
+    if (db && firebaseUser) {
+        for (let i = 0; i < newWarehouses.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouses[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
+  };
+
+  // --- BLOK LİSTESİ STATE'LERİ ---
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState(null);
+  const [isAddBlockModalOpen, setIsAddBlockModalOpen] = useState(false);
+  const [newBlockName, setNewBlockName] = useState('');
+  const [newBlockM3, setNewBlockM3] = useState('');
+  
+  const [isDeleteBlockModalOpen, setIsDeleteBlockModalOpen] = useState(false);
+  const [blockToDelete, setBlockToDelete] = useState(null);
+
+  const [blocks, setBlocks] = useState([]);
+
+  const handleAddBlock = async () => {
+      if (!newBlockName || !selectedWarehouseId) return;
+      const currentBlocks = blocks.filter(b => b.warehouseId === selectedWarehouseId);
+      const newBlock = { id: Date.now(), warehouseId: selectedWarehouseId, name: newBlockName, m3: newBlockM3 || 0, orderIndex: currentBlocks.length };
+      if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(newBlock.id)), newBlock);
+      setIsAddBlockModalOpen(false); setNewBlockName(''); setNewBlockM3('');
+  };
+
+  const [isEditBlockModalOpen, setIsEditBlockModalOpen] = useState(false);
+  const [editBlockData, setEditBlockData] = useState(null);
+
+  const handleEditBlock = async () => {
+      if (!editBlockData?.name) return;
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(editBlockData.id)), { name: editBlockData.name, m3: editBlockData.m3 }, { merge: true });
+          } catch (e) { console.error("Firebase Blok Güncelleme Hatası:", e); }
+      }
+      setIsEditBlockModalOpen(false); setEditBlockData(null);
+  };
+
+  const handleDeleteBlockClick = (e, id) => {
+      e.stopPropagation();
+      setBlockToDelete(id);
+      setIsDeleteBlockModalOpen(true);
+  };
+
+  const confirmDeleteBlock = async () => {
+      if (!blockToDelete) return;
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(blockToDelete)));
+          } catch (e) { console.error("Firebase Blok Silme Hatası:", e); }
+      } else {
+          setBlocks(blocks.filter(b => b.id !== blockToDelete));
+      }
+      setIsDeleteBlockModalOpen(false);
+      setBlockToDelete(null);
+  };
+
+  const moveBlockUp = async (index, filteredList, e) => {
+    e.stopPropagation(); if (index === 0) return;
+    const newBlocks = [...blocks];
+    const id1 = filteredList[index - 1].id; const id2 = filteredList[index].id;
+    const idx1 = newBlocks.findIndex(b => b.id === id1); const idx2 = newBlocks.findIndex(b => b.id === id2);
+    const temp = newBlocks[idx1]; newBlocks[idx1] = newBlocks[idx2]; newBlocks[idx2] = temp;
+    setBlocks(newBlocks);
+    
+    const newFilteredList = [...filteredList];
+    const tempF = newFilteredList[index - 1];
+    newFilteredList[index - 1] = newFilteredList[index];
+    newFilteredList[index] = tempF;
+    
+    if (db && firebaseUser) {
+        for (let i = 0; i < newFilteredList.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(newFilteredList[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
+  };
+
+  const moveBlockDown = async (index, filteredList, e) => {
+    e.stopPropagation(); if (index === filteredList.length - 1) return;
+    const newBlocks = [...blocks];
+    const id1 = filteredList[index].id; const id2 = filteredList[index + 1].id;
+    const idx1 = newBlocks.findIndex(b => b.id === id1); const idx2 = newBlocks.findIndex(b => b.id === id2);
+    const temp = newBlocks[idx1]; newBlocks[idx1] = newBlocks[idx2]; newBlocks[idx2] = temp;
+    setBlocks(newBlocks);
+    
+    const newFilteredList = [...filteredList];
+    const tempF = newFilteredList[index + 1];
+    newFilteredList[index + 1] = newFilteredList[index];
+    newFilteredList[index] = tempF;
+
+    if (db && firebaseUser) {
+        for (let i = 0; i < newFilteredList.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(newFilteredList[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
+  };
+
+  // --- ODA LİSTESİ STATE'LERİ ---
+  const [selectedBlockId, setSelectedBlockId] = useState(null);
+  const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
+  const [newRoomM3, setNewRoomM3] = useState('');
+  
+  const [isDeleteRoomModalOpen, setIsDeleteRoomModalOpen] = useState(false);
+  const [roomToDelete, setRoomToDelete] = useState(null);
+
+  const [rooms, setRooms] = useState([]);
+
+  const handleAddRoom = async () => {
+      if (!newRoomName || !selectedBlockId) return;
+      const currentRooms = rooms.filter(r => r.blockId === selectedBlockId);
+      const newRoom = { id: Date.now(), blockId: selectedBlockId, name: newRoomName, customerName: null, m3: newRoomM3 || 0, isReserved: false, paidMonths: [], orderIndex: currentRooms.length };
+      if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), newRoom);
+      setIsAddRoomModalOpen(false); setNewRoomName(''); setNewRoomM3('');
+  };
+
+  const [isEditRoomModalOpen, setIsEditRoomModalOpen] = useState(false);
+  const [editRoomData, setEditRoomData] = useState(null);
+
+  const handleEditRoom = async () => {
+      if (!editRoomData?.name) return;
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(editRoomData.id)), { name: editRoomData.name, m3: editRoomData.m3 }, { merge: true });
+          } catch (e) { console.error("Firebase Oda Güncelleme Hatası:", e); }
+      }
+      setIsEditRoomModalOpen(false); setEditRoomData(null);
+  };
+
+  const handleDeleteRoomClick = (e, id) => {
+      e.stopPropagation();
+      setRoomToDelete(id);
+      setIsDeleteRoomModalOpen(true);
+  };
+
+  const confirmDeleteRoom = async () => {
+      if (!roomToDelete) return;
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomToDelete)));
+          } catch (e) { console.error("Firebase Oda Silme Hatası:", e); }
+      } else {
+          setRooms(rooms.filter(r => r.id !== roomToDelete));
+      }
+      setIsDeleteRoomModalOpen(false);
+      setRoomToDelete(null);
+  };
+
+  const moveRoomUp = async (index, filteredList, e) => {
+    e.stopPropagation(); if (index === 0) return;
+    const newRooms = [...rooms];
+    const id1 = filteredList[index - 1].id; const id2 = filteredList[index].id;
+    const idx1 = newRooms.findIndex(r => r.id === id1); const idx2 = newRooms.findIndex(r => r.id === id2);
+    const temp = newRooms[idx1]; newRooms[idx1] = newRooms[idx2]; newRooms[idx2] = temp; setRooms(newRooms);
+    
+    const newFilteredList = [...filteredList];
+    const tempF = newFilteredList[index - 1];
+    newFilteredList[index - 1] = newFilteredList[index];
+    newFilteredList[index] = tempF;
+    
+    if (db && firebaseUser) {
+        for (let i = 0; i < newFilteredList.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newFilteredList[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
+  };
+
+  const moveRoomDown = async (index, filteredList, e) => {
+    e.stopPropagation(); if (index === filteredList.length - 1) return;
+    const newRooms = [...rooms];
+    const id1 = filteredList[index].id; const id2 = filteredList[index + 1].id;
+    const idx1 = newRooms.findIndex(r => r.id === id1); const idx2 = newRooms.findIndex(r => r.id === id2);
+    const temp = newRooms[idx1]; newRooms[idx1] = newRooms[idx2]; newRooms[idx2] = temp; setRooms(newRooms);
+
+    const newFilteredList = [...filteredList];
+    const tempF = newFilteredList[index + 1];
+    newFilteredList[index + 1] = newFilteredList[index];
+    newFilteredList[index] = tempF;
+    
+    if (db && firebaseUser) {
+        for (let i = 0; i < newFilteredList.length; i++) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newFilteredList[i].id)), { orderIndex: i }, { merge: true });
+        }
+    }
+  };
+
+  // --- ODA DETAY MODALLARI ---
+  const [selectedRoomId, setSelectedRoomId] = useState(null);
+  const [detailYear, setDetailYear] = useState(2026);
+
+  const [activeSizeFilter, setActiveSizeFilter] = useState(null);
+  const [isSizeFilterDropdownOpen, setIsSizeFilterDropdownOpen] = useState(false);
+  const sizeFilters = [
+      { id: '1+0', label: '1+0 (0 - 12 m³)', min: 0, max: 12 },
+      { id: '1+1', label: '1+1 (13 - 18 m³)', min: 13, max: 18 },
+      { id: '2+1', label: '2+1 (19 - 27 m³)', min: 19, max: 27 },
+      { id: '3+1', label: '3+1 (28 - 37 m³)', min: 28, max: 37 },
+      { id: '4+1', label: '4+1 ( 38+ m3 )', min: 38, max: Infinity }
+  ];
+
+  const [isEndRentModalOpen, setIsEndRentModalOpen] = useState(false);
+  const [endRentData, setEndRentData] = useState({ exitDate: new Date().toISOString().split('T')[0], photo: null });
+  
+  const [isApplyIncreaseModalOpen, setIsApplyIncreaseModalOpen] = useState(false);
+  const [increaseModalData, setIncreaseModalData] = useState(null);
+  const [increaseMode, setIncreaseMode] = useState('percentage');
+  const [increasePercentage, setIncreasePercentage] = useState('');
+  const [newRentAmount, setNewRentAmount] = useState('');
+  
+const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
+  const [pastIncreaseData, setPastIncreaseData] = useState({ date: new Date().toISOString().split('T')[0], amount: '', isKdvIncluded: true });
+
+  const [isEditSpecificMonthModalOpen, setIsEditSpecificMonthModalOpen] = useState(false);
+  const [specificMonthEditData, setSpecificMonthEditData] = useState(null);
+
+  const [isChangeRoomModalOpen, setIsChangeRoomModalOpen] = useState(false);
+  const [changeRoomWarehouseId, setChangeRoomWarehouseId] = useState('');
+  const [changeRoomBlockId, setChangeRoomBlockId] = useState('');
+  const [changeRoomTargetRoomId, setChangeRoomTargetRoomId] = useState('');
+  const [isPriceHistoryModalOpen, setIsPriceHistoryModalOpen] = useState(false);
+  const [isRoomHistoryModalOpen, setIsRoomHistoryModalOpen] = useState(false);
+  const [isEditRentModalOpen, setIsEditRentModalOpen] = useState(false);
+  const [editRentData, setEditRentData] = useState({ customerName: '', entryDate: '', paymentDate: '', monthlyFee: '', hasKdv: true, sealNo: '', broughtBy: 'kendisi', teamList: '' });
+
+  const [isTutanakDropdownOpen, setIsTutanakDropdownOpen] = useState(false);
+
+  // --- HEDİYE AY STATE'LERİ ---
+  const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
+  const [giftMonthValue, setGiftMonthValue] = useState(1);
+
+  // --- ÜCRETSİZ ODA STATE'LERİ ---
+  const [isFreeRoomModalOpen, setIsFreeRoomModalOpen] = useState(false);
+  const [freeRoomReasonInput, setFreeRoomReasonInput] = useState('');
+
+  // --- GİRİŞ-ÇIKIŞ STATE'LERİ ---
+  const [isEntryExitModalOpen, setIsEntryExitModalOpen] = useState(false);
+  const [entryExitData, setEntryExitData] = useState({ newSealNo: '', protocolPhoto: null, finalPhoto: null });
+
+const handleEntryExitSave = async () => {
+      if (!entryExitData.newSealNo) return;
+      
+      const sealFeeTotal = Number(collectionRates.sealFee) * 1.20; // Mühür ücreti + %20 KDV
+      const customerToUpdate = customers.find(c => c.name === selectedRoomDetail.customerName);
+      const roomToUpdate = rooms.find(r => r.id === selectedRoomId);
+
+      if (db && firebaseUser) {
+          try {
+              // 1. Müşteri Carisine Mühür Ücreti Ekle
+              if (customerToUpdate) {
+                  const newDebt = {
+                      id: Date.now(),
+                      type: 'seal_fee',
+                      date: new Date().toISOString().split('T')[0],
+                      amount: sealFeeTotal,
+                      hasKdv: true,
+                      desc: `Giriş-Çıkış Yeni Mühür Ücreti`
+                  };
+                  const existingDebts = customerToUpdate.extraDebts || [];
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                      extraDebts: [...existingDebts, newDebt]
+                  }, { merge: true });
+              }
+
+              // 2. Oda Bilgilerini Güncelle (Mühür ve Arşiv)
+              if (roomToUpdate) {
+                  const newHistoryItem = {
+                      id: Date.now(),
+                      date: new Date().toLocaleDateString('tr-TR'),
+                      sealNo: entryExitData.newSealNo,
+                      protocolPhoto: entryExitData.protocolPhoto,
+                      finalPhoto: entryExitData.finalPhoto
+                  };
+                  const existingHistory = roomToUpdate.entryExitHistory || [];
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                      sealNo: entryExitData.newSealNo,
+                      protocolPhoto: entryExitData.protocolPhoto,
+                      finalPhoto: entryExitData.finalPhoto,
+                      entryExitHistory: [newHistoryItem, ...existingHistory]
+                  }, { merge: true });
+              }
+          } catch(e) { console.error("Firebase Giriş Çıkış Hatası:", e); }
+      }
+
+      setIsEntryExitModalOpen(false);
+      setEntryExitData({ newSealNo: '', protocolPhoto: null, finalPhoto: null });
+  };
+
+ const handleSetGiftMonths = async (months) => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { giftMonths: months }, { merge: true });
+          } catch(e) { console.error("Firebase Hediye Ay Hatası:", e); }
+      }
+      setIsGiftModalOpen(false);
+  };
+
+  const handleSetFreeRoom = async () => {
+      if (!freeRoomReasonInput) return;
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { isFreeRoom: true, freeRoomReason: freeRoomReasonInput }, { merge: true });
+          } catch(e) { console.error("Firebase Ücretsiz Oda Hatası:", e); }
+      }
+      setIsFreeRoomModalOpen(false);
+      setFreeRoomReasonInput('');
+  };
+
+  const handleRemoveFreeRoom = async () => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { isFreeRoom: false, freeRoomReason: null }, { merge: true });
+          } catch(e) { console.error("Firebase Ücretsiz Oda Kaldırma Hatası:", e); }
+      }
+  };
+
+  // --- YENİ REZERVE STATE'LERİ ---
+  const [isReserveRoomModalOpen, setIsReserveRoomModalOpen] = useState(false);
+  const [reserveData, setReserveData] = useState({ name: '', phone: '', days: 10 });
+
+const handleReserveRoom = async () => {
+    if (!reserveData.name || !reserveData.phone) return;
+    const today = new Date();
+    const expiryDate = new Date(today); 
+    expiryDate.setDate(expiryDate.getDate() + parseInt(reserveData.days));
+    
+    if (db && firebaseUser) {
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                isReserved: true, 
+                reservedName: reserveData.name, 
+                reservedPhone: reserveData.phone, 
+                reserveExpiry: expiryDate.toLocaleDateString('tr-TR'), 
+                reserveExpiryTimestamp: expiryDate.getTime()
+            }, { merge: true });
+        } catch(e) { console.error("Firebase Rezerve Hatası:", e); }
+    }
+    
+    setIsReserveRoomModalOpen(false); 
+    setReserveData({ name: '', phone: '', days: 10 });
+  };
+
+const handleCancelReservation = async () => {
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                  isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null
+              }, { merge: true });
+          } catch(e) { console.error("Rezerve İptal Hatası:", e); }
+      }
+  };
+
+  // --- YENİ KİRALAMA VE ÖDEME STATE'LERİ ---
+  const [isRentRoomModalOpen, setIsRentRoomModalOpen] = useState(false);
+  const [isRentSuccessModalOpen, setIsRentSuccessModalOpen] = useState(false);
+  const [rentCustomerSearch, setRentCustomerSearch] = useState('');
+  const [rentData, setRentData] = useState({ customerName: '', entryDate: new Date().toISOString().split('T')[0], paymentDate: new Date().toISOString().split('T')[0], monthlyFee: '', hasKdv: true, sealNo: '', broughtBy: 'kendisi', teamList: '', hasDamage: false, damageDescription: '', transportPrice: '', transportHasKdv: false, entryPhoto: null });
+
+  const [globalPaymentData, setGlobalPaymentData] = useState({ customerId: '', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
+  const [isGlobalPaymentSuccess, setIsGlobalPaymentSuccess] = useState(false);
+  const [paymentCustomerSearch, setPaymentCustomerSearch] = useState('');
+
+  // --- YENİ EKLENEN: TOPLU ÖDEME STATE'LERİ ---
+  const [paymentEntryMode, setPaymentEntryMode] = useState('single'); // 'single' | 'bulk'
+  const [bulkProcessResult, setBulkProcessResult] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // --- YENİ EKLENEN: TOPLU MÜŞTERİ İÇE AKTARMA STATE'LERİ ---
+  const [isCustomerUploading, setIsCustomerUploading] = useState(false);
+  const [customerImportResult, setCustomerImportResult] = useState(null);
+
+  const handleBulkFileUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setIsUploading(true);
+
+      try {
+          await loadXLSXLibrary();
+          const reader = new FileReader();
+          reader.onload = (event) => {
+              try {
+                  const data = new Uint8Array(event.target.result);
+                  const workbook = window.XLSX.read(data, { type: 'array' });
+                  const firstSheetName = workbook.SheetNames[0];
+                  const worksheet = workbook.Sheets[firstSheetName];
+                  const rows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                  processBulkData(rows);
+              } catch (err) {
+                  console.error(err);
+                  alert("Dosya okunurken bir hata oluştu. Lütfen formatı kontrol edin.");
+              } finally {
+                  setIsUploading(false);
+              }
+          };
+          reader.readAsArrayBuffer(file);
+      } catch (error) {
+          alert("Excel kütüphanesi yüklenirken bir hata oluştu.");
+          setIsUploading(false);
+      }
+      
+      e.target.value = ''; // Input'u temizle
+  };
+
+  const processBulkData = async (rows) => {
+      if (!rows || rows.length <= 1) {
+          alert("Dosya boş veya geçersiz format.");
+          return;
+      }
+
+      let matchedCount = 0;
+      let unmatchedCount = 0;
+      let totalMatchedAmount = 0;
+      let totalUnmatchedAmount = 0;
+
+      const newPendingCollections = [...pendingCollections];
+      const customersUpdates = {}; 
+
+      const addedPaymentIds = [];
+      const addedPendingIds = [];
+
+      for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          // Boş satırları atla
+          if (!row || row.length === 0 || (!row[0] && !row[1] && !row[2])) continue;
+
+          const dateRaw = row[0];
+          const amountRaw = row[1];
+          const descRaw = row[2];
+
+          if (!amountRaw) continue;
+
+          // Tutar (Amount) çözümleme
+          let amount = 0;
+          if (typeof amountRaw === 'number') {
+              amount = amountRaw;
+          } else {
+              let amountStr = String(amountRaw).trim();
+              if (amountStr.includes(',') && amountStr.includes('.')) {
+                  if (amountStr.lastIndexOf(',') > amountStr.lastIndexOf('.')) {
+                      amountStr = amountStr.replace(/\./g, '').replace(',', '.');
+                  } else {
+                      amountStr = amountStr.replace(/,/g, '');
+                  }
+              } else if (amountStr.includes(',')) {
+                  amountStr = amountStr.replace(',', '.');
+              }
+              amount = parseFloat(amountStr);
+          }
+
+          if (isNaN(amount) || amount <= 0) continue;
+
+          // Açıklama çözümleme
+          const descStr = String(descRaw || '').trim();
+          const descUpper = descStr.toUpperCase();
+          
+          // Tarih çözümleme
+          let validDate = new Date().toISOString().split('T')[0];
+          if (typeof dateRaw === 'number') {
+              const excelEpoch = new Date(1899, 11, 30);
+              const jsDate = new Date(excelEpoch.getTime() + dateRaw * 86400000);
+              if (!isNaN(jsDate)) validDate = jsDate.toISOString().split('T')[0];
+          } else if (dateRaw) {
+              // GG.AA.YYYY formatı kontrolü
+              const dateStrRaw = String(dateRaw).trim();
+              const trDateMatch = dateStrRaw.match(/^(\d{2})[./-](\d{2})[./-](\d{4})/);
+              if (trDateMatch) {
+                  validDate = `${trDateMatch[3]}-${trDateMatch[2]}-${trDateMatch[1]}`;
+              } else {
+                  const parsedDate = new Date(dateStrRaw);
+                  if (!isNaN(parsedDate.getTime())) {
+                      validDate = parsedDate.toISOString().split('T')[0];
+                  }
+              }
+          }
+
+          let matchedCustomer = null;
+
+          // 1. Eşleştirme: Müşteri Numarası
+          matchedCustomer = customers.find(c => c.customerNo && descUpper.includes(c.customerNo));
+          
+          // 2. Eşleştirme: Ad Soyad
+          if (!matchedCustomer) {
+              matchedCustomer = customers.find(c => c.name && descUpper.includes(c.name));
+          }
+
+          // 3. Eşleştirme: Oda Numarası
+          if (!matchedCustomer) {
+              const matchedRoom = rooms.find(r => r.customerName && r.name && descUpper.includes(r.name));
+              if (matchedRoom) {
+                  matchedCustomer = customers.find(c => c.name === matchedRoom.customerName);
+              }
+          }
+
+          if (matchedCustomer) {
+              matchedCount++;
+              totalMatchedAmount += amount;
+              
+              if (!customersUpdates[matchedCustomer.id]) {
+                  customersUpdates[matchedCustomer.id] = [];
+              }
+              const pId = Date.now() + Math.random();
+              customersUpdates[matchedCustomer.id].push({
+                  id: pId,
+                  amount: amount,
+                  date: validDate,
+                  note: 'Toplu Banka Yüklemesi: ' + descStr
+              });
+              addedPaymentIds.push(pId);
+          } else {
+              unmatchedCount++;
+              totalUnmatchedAmount += amount;
+              
+              const pId = Date.now() + Math.random();
+              newPendingCollections.push({
+                  id: pId,
+                  amount: amount,
+                  date: validDate,
+                  note: 'Toplu Banka Yüklemesi: ' + descStr
+              });
+              addedPendingIds.push(pId);
+          }
+      }
+
+  if (Object.keys(customersUpdates).length > 0 && db && firebaseUser) {
+          for (const cId of Object.keys(customersUpdates)) {
+              const customerToUpdate = customers.find(c => String(c.id) === String(cId));
+              if (customerToUpdate) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cId)), {
+                      payments: [...(customerToUpdate.payments || []), ...customersUpdates[cId]]
+                  }, { merge: true });
+              }
+          }
+      }
+
+if (unmatchedCount > 0 && db && firebaseUser) {
+          for (const pending of newPendingCollections) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)), pending, { merge: true });
+          }
+      }
+
+      setBulkProcessResult({
+          matchedCount,
+          unmatchedCount,
+          totalMatchedAmount,
+          totalUnmatchedAmount,
+          addedPaymentIds,
+          addedPendingIds
+      });
+  };
+
+  const handleUndoBulkProcess = async () => {
+      if (!bulkProcessResult) return;
+      const { addedPaymentIds, addedPendingIds } = bulkProcessResult;
+      
+      if (addedPaymentIds && addedPaymentIds.length > 0 && db && firebaseUser) {
+          for (const c of customers) {
+              const hasAddedPayment = c.payments?.some(p => addedPaymentIds.includes(p.id));
+              if (hasAddedPayment) {
+                  const cleanedPayments = c.payments.filter(p => !addedPaymentIds.includes(p.id));
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(c.id)), { payments: cleanedPayments }, { merge: true });
+              }
+          }
+      }
+      
+      if (addedPendingIds && addedPendingIds.length > 0 && db && firebaseUser) {
+          for (const pId of addedPendingIds) {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pId)));
+          }
+      }
+      setBulkProcessResult(null);
+  };
+
+  const handleBulkCustomerUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setIsCustomerUploading(true);
+
+      try {
+          await loadXLSXLibrary();
+const reader = new FileReader();
+          reader.onload = async (event) => {
+              try {
+                  const data = new Uint8Array(event.target.result);
+                  // Excel'deki tarihleri düzgün alabilmek için cellDates: true
+                  const workbook = window.XLSX.read(data, { type: 'array', cellDates: true });
+                  const firstSheetName = workbook.SheetNames[0];
+                  const worksheet = workbook.Sheets[firstSheetName];
+                  const rows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                  
+                  let importedCustomerCount = 0;
+                  let updatedRoomCount = 0;
+
+                  const newCustomers = [];
+                  const roomUpdates = {};
+
+                  // Satırları tarama (1. satırın başlık olduğu varsayılır, bu yüzden i=1)
+                  for (let i = 1; i < rows.length; i++) {
+                      const row = rows[i];
+                      if (!row || row.length === 0) continue;
+
+                      let nameRaw = '';
+                      let phoneRaw = '';
+                      let roomsRaw = [];
+                      let validDate = new Date().toISOString().split('T')[0];
+                      let maxRent = 0;
+
+                      for (let j = 0; j < row.length; j++) {
+                          const cell = row[j];
+                          if (cell === undefined || cell === null || cell === '') continue;
+
+                          // 1. Tarih Kontrolü (Date Objesi)
+                          if (cell instanceof Date) {
+                              validDate = cell.toISOString().split('T')[0];
+                              continue;
+                          }
+
+                          const cellStr = String(cell).trim();
+                          const cellUpper = cellStr.toUpperCase();
+
+                          // 2. Oda Kontrolü (Olası boşluk ve tireleri temizleyerek eşleştirme)
+                          const possibleRooms = cellUpper.split(/[,/]/).map(s => s.trim());
+                          let foundRoomInCell = false;
+                          possibleRooms.forEach(pr => {
+                              const matchedRoom = rooms.find(r => r.name.toUpperCase().replace(/[\s-]/g, '') === pr.replace(/[\s-]/g, ''));
+                              if (matchedRoom) {
+                                  if (!roomsRaw.includes(matchedRoom.name)) roomsRaw.push(matchedRoom.name);
+                                  foundRoomInCell = true;
+                              }
+                          });
+                          if (foundRoomInCell) continue;
+
+                          // Tarih Kontrolü (String formatında - DD.MM.YYYY)
+                          const trDateMatch = cellStr.match(/^(\d{2})[./-](\d{2})[./-](\d{4})/);
+                          if (trDateMatch) {
+                              validDate = `${trDateMatch[3]}-${trDateMatch[2]}-${trDateMatch[1]}`;
+                              continue;
+                          }
+
+                          // 3. Telefon / Müşteri No Kontrolü (10-13 Haneli)
+                          const numericOnly = cellStr.replace(/\D/g, '');
+                          if (numericOnly.length >= 10 && numericOnly.length <= 13 && (numericOnly.startsWith('5') || numericOnly.startsWith('05') || numericOnly.startsWith('905'))) {
+                              if (!phoneRaw) phoneRaw = numericOnly;
+                              continue;
+                          }
+
+                          // 4. Kira Tutarı (Dört Haneli ve Üzeri Rakamların En Büyüğü)
+                          if (typeof cell === 'number') {
+                              if (cell >= 1000 && cell <= 999999) {
+                                  if (cell > maxRent) maxRent = cell;
+                              }
+                              continue;
+                          } else {
+                              const numVal = parseFloat(cellStr.replace(/,/g, '.').replace(/[^\d.-]/g, ''));
+                              if (!isNaN(numVal) && numVal >= 1000 && numVal <= 999999) {
+                                  if (numVal > maxRent) maxRent = numVal;
+                                  continue;
+                              }
+                          }
+
+                          // 5. Ad Soyad Kontrolü (Harf barındıran en olası string)
+                          if (cellStr.match(/[A-Za-zÇĞİÖŞÜçğıöşü]/) && cellStr.length > 3 && !nameRaw) {
+                              // Rastgele oda kodlarına benzemiyorsa isimdir
+                              if (!cellUpper.match(/^[A-Z]\s*[-_]?\s*\d{1,4}$/)) {
+                                  nameRaw = cellUpper;
+                              }
+                          }
+                      }
+
+                      if (!nameRaw && roomsRaw.length === 0) continue; // Geçersiz veya boş satır
+
+                      // Exceldeki Telefon Numarası = Sistemdeki Müşteri Numarası Yapılır
+                      let customerNo = phoneRaw || Math.floor(10000 + Math.random() * 90000).toString();
+                      
+                      let existingCust = customers.find(c => (phoneRaw && c.phone === phoneRaw) || c.name === nameRaw) || newCustomers.find(c => (phoneRaw && c.phone === phoneRaw) || c.name === nameRaw);
+
+                      if (!existingCust && nameRaw) {
+                          existingCust = {
+                              id: Date.now() + Math.random(),
+                              customerNo: customerNo,
+                              name: nameRaw,
+                              tc: '',
+                              phone: phoneRaw,
+                              altPhone: '', address: '', notes: 'Excel ile otomatik aktarıldı.',
+                              hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null,
+                              type: 'bireysel',
+                              createdAt: new Date().toLocaleDateString('tr-TR'),
+                              createdBy: currentUserProfile.name,
+                              invoices: [], documentPhoto: null, payments: [], extraDebts: [], ledgerOverrides: []
+                          };
+                          newCustomers.push(existingCust);
+                          importedCustomerCount++;
+                      }
+
+                      // Müşterinin odalarını eşleştirip kiralamayı başlat
+                      if (roomsRaw.length > 0 && existingCust) {
+                          roomsRaw.forEach(rName => {
+                              roomUpdates[rName] = {
+                                  customerName: existingCust.name,
+                                  entryDate: validDate,
+                                  paymentDate: validDate,
+                                  monthlyFee: maxRent > 0 ? maxRent : 0, // En büyük sayıyı kiraya aktar
+                                  hasKdv: true, // Varsayılan KDV ile
+                                  paidMonths: [],
+                                  rentedBy: currentUserProfile.name
+                              };
+                              updatedRoomCount++;
+                          });
+                      }
+                  }
+
+      if (newCustomers.length > 0 && db && firebaseUser) {
+                      for (const cust of newCustomers) {
+                          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), cust);
+                      }
+                  }
+
+                  if (Object.keys(roomUpdates).length > 0 && db && firebaseUser) {
+                      for (const rName of Object.keys(roomUpdates)) {
+                          const roomToUpdate = rooms.find(r => r.name === rName);
+                          if (roomToUpdate) {
+                              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomToUpdate.id)), roomUpdates[rName], { merge: true });
+                          }
+                      }
+                  }
+
+                  setCustomerImportResult({ importedCustomerCount, updatedRoomCount });
+
+              } catch (err) {
+                  console.error(err);
+                  alert("Dosya okunurken bir hata oluştu. Lütfen formatı kontrol edin.");
+              } finally {
+                  setIsCustomerUploading(false);
+              }
+          };
+          reader.readAsArrayBuffer(file);
+      } catch (error) {
+          alert("Excel kütüphanesi yüklenirken bir hata oluştu.");
+          setIsCustomerUploading(false);
+      }
+      e.target.value = '';
+  };
+
+const handleRentRoom = async () => {
+      if (!rentData.customerName || !rentData.monthlyFee) return;
+
+      // 1. Gün Farkı (Kıstelyevm) Bedeli Hesaplaması
+      let proratedDebtAmount = 0;
+      const eDate = new Date(rentData.entryDate);
+      const pDate = new Date(rentData.paymentDate);
+      const timeDiff = pDate.getTime() - eDate.getTime();
+      const dayDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+      
+      if (dayDiff > 0) {
+          let dailyRate = Number(rentData.monthlyFee) / 30;
+          proratedDebtAmount = dailyRate * dayDiff;
+          if (rentData.hasKdv) proratedDebtAmount = proratedDebtAmount * 1.20;
+      }
+
+      // 2. Nakliye Bedeli Cari Hesaplaması
+      let transportDebtAmount = 0;
+      if (rentData.broughtBy === 'sembol' && rentData.transportPrice) {
+          transportDebtAmount = Number(rentData.transportPrice);
+          if (rentData.transportHasKdv) {
+              transportDebtAmount = transportDebtAmount * 1.20;
+          }
+      }
+
+      // 3. FİREBASE CARİ HESAP GÜNCELLEMESİ (Müşteri)
+      const customerToUpdate = customers.find(c => c.name === rentData.customerName);
+      if (customerToUpdate && (transportDebtAmount > 0 || proratedDebtAmount > 0)) {
+          let existingDebts = customerToUpdate.extraDebts || [];
+          let existingPayments = customerToUpdate.payments || []; 
+          
+          if (transportDebtAmount > 0) {
+              const hasSameDayTransport = existingDebts.some(d => d.type === 'transport' && d.date === rentData.entryDate);
+              if (!hasSameDayTransport) {
+                  existingDebts = [...existingDebts, { id: Date.now() + 1, type: 'transport', date: rentData.entryDate, amount: transportDebtAmount, desc: 'Sembol Nakliyat Taşıma Bedeli' }];
+                  existingPayments = [...existingPayments, { id: Date.now() + 3, amount: transportDebtAmount, date: rentData.entryDate, note: 'Sembol Nakliyat Taşıma Tahsilatı (Otomatik)' }];
+              }
+          }
+          if (proratedDebtAmount > 0) {
+              existingDebts = [...existingDebts, { id: Date.now() + 2, type: 'prorated', date: rentData.entryDate, amount: proratedDebtAmount, desc: `Gün Farkı Bedeli (${dayDiff} Gün)` }];
+          }
+
+          if (db && firebaseUser) {
+              try {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                      extraDebts: existingDebts,
+                      payments: existingPayments
+                  }, { merge: true });
+              } catch(e) { console.error("Firebase Cari Güncelleme Hatası:", e); }
+          }
+      }
+
+      // 4. FİREBASE ODA GÜNCELLEMESİ
+      const roomUpdates = {
+          customerName: rentData.customerName, 
+          entryDate: rentData.entryDate, 
+          paymentDate: rentData.paymentDate, 
+          monthlyFee: rentData.monthlyFee, 
+          hasKdv: rentData.hasKdv, 
+          sealNo: rentData.sealNo,
+          broughtBy: rentData.broughtBy,
+          teamList: rentData.teamList,
+          hasDamage: rentData.hasDamage,
+          damageDescription: rentData.damageDescription,
+          transportPrice: rentData.transportPrice,
+          transportHasKdv: rentData.transportHasKdv,
+          entryPhoto: rentData.entryPhoto,
+          paidMonths: [],
+          rentedBy: currentUserProfile.name,
+          isReserved: false, // Varsa rezerveyi iptal et
+          reservedName: null,
+          reservedPhone: null,
+          reserveExpiry: null,
+          reserveExpiryTimestamp: null
+      };
+
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), roomUpdates, { merge: true });
+          } catch(e) { console.error("Firebase Oda Kiralama Hatası:", e); }
+      }
+
+      // 5. EKRAN DURUMLARINI SIFIRLAMA
+      setIsRentRoomModalOpen(false); 
+      setIsRentSuccessModalOpen(true);
+      setRentData({ customerName: '', entryDate: new Date().toISOString().split('T')[0], paymentDate: new Date().toISOString().split('T')[0], monthlyFee: '', hasKdv: true, sealNo: '', broughtBy: 'kendisi', teamList: '', hasDamage: false, damageDescription: '', transportPrice: '', transportHasKdv: false, entryPhoto: null });
+      setRentCustomerSearch('');
+  };
+
+const handleGlobalPayment = async () => {
+    if (!globalPaymentData.customerId || !globalPaymentData.amount) return;
+
+    const paymentId = Date.now();
+    const newPayment = {
+        id: paymentId,
+        amount: Number(globalPaymentData.amount),
+        date: globalPaymentData.date,
+        note: globalPaymentData.note
+    };
+
+    if (globalPaymentData.customerId === 'askida') {
+        if (db && firebaseUser) {
+            try {
+                // Askıdaki ödemeleri 'pendingCollections' tablosuna kaydet
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(paymentId)), newPayment);
+            } catch(e) { console.error("Askıda Ödeme Kayıt Hatası:", e); }
+        }
+    } else {
+        const customerId = globalPaymentData.customerId;
+        const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
+        if (customerToUpdate && db && firebaseUser) {
+            try {
+                const existingPayments = customerToUpdate.payments || [];
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
+                    payments: [...existingPayments, newPayment]
+                }, { merge: true });
+            } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
+        }
+    }
+
+    setIsGlobalPaymentSuccess(true);
+    setGlobalPaymentData({ customerId: '', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
+    setTimeout(() => setIsGlobalPaymentSuccess(false), 3000);
+  };
+
+const handleSaveEditRent = async () => {
       if (db && firebaseUser) {
           try {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
@@ -307,8 +2993,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       setIsEditRentModalOpen(false);
   };
 
-  const handleEndRentConfirm = async () => {
-      const room = rooms.find(r => String(r.id) === String(selectedRoomId));
+const handleEndRentConfirm = async () => {
+      const room = rooms.find(r => r.id === selectedRoomId);
       if (!room) return;
       
       const entryD = new Date(room.entryDate || Date.now()); 
@@ -318,18 +3004,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const months = Math.floor(diffDays / 30); 
       const durationStr = months > 0 ? `${months} Ay` : `${diffDays} Gün`;
       
-      const historyRecord = { 
-          id: Date.now(), 
-          customerName: room.customerName || null, 
-          entryDate: room.entryDate || null, 
-          exitDate: endRentData.exitDate || null, 
-          duration: durationStr, 
-          monthlyFee: room.monthlyFee || null, 
-          status: 'Çıkış Yaptı', 
-          photo: endRentData.photo || null, 
-          entryPhoto: room.entryPhoto || null, 
-          entryExitHistory: room.entryExitHistory || null 
-      };
+      const historyRecord = { id: Date.now(), customerName: room.customerName, entryDate: room.entryDate, exitDate: endRentData.exitDate, duration: durationStr, monthlyFee: room.monthlyFee, status: 'Çıkış Yaptı', photo: endRentData.photo, entryPhoto: room.entryPhoto, entryExitHistory: room.entryExitHistory };
       
       const roomUpdates = {
           customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null, broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null, paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
@@ -348,8 +3023,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
 
 const handleChangeRoomConfirm = async () => {
     if(!changeRoomTargetRoomId) return;
-    const oldRoom = rooms.find(r => String(r.id) === String(selectedRoomId));
-    const newRoom = rooms.find(r => String(r.id) === String(changeRoomTargetRoomId));
+    const oldRoom = rooms.find(r => r.id === selectedRoomId);
+    const newRoom = rooms.find(r => r.id === parseInt(changeRoomTargetRoomId));
     if(!oldRoom || !newRoom) return;
 
     const entryD = new Date(oldRoom.entryDate || Date.now());
@@ -360,16 +3035,9 @@ const handleChangeRoomConfirm = async () => {
     const durationStr = months > 0 ? `${months} Ay` : `${diffDays} Gün`;
 
     const historyRecord = {
-        id: Date.now(), 
-        customerName: oldRoom.customerName || null, 
-        entryDate: oldRoom.entryDate || null, 
-        exitDate: exitD.toLocaleDateString('tr-TR'),
-        duration: durationStr, 
-        monthlyFee: oldRoom.monthlyFee || null, 
-        status: `${newRoom.name} Odasına Taşındı`, 
-        photo: null,
-        entryPhoto: oldRoom.entryPhoto || null, 
-        entryExitHistory: oldRoom.entryExitHistory || null
+        id: Date.now(), customerName: oldRoom.customerName, entryDate: oldRoom.entryDate, exitDate: exitD.toLocaleDateString('tr-TR'),
+        duration: durationStr, monthlyFee: oldRoom.monthlyFee, status: `${newRoom.name} Odasına Taşındı`, photo: null,
+        entryPhoto: oldRoom.entryPhoto, entryExitHistory: oldRoom.entryExitHistory
     };
 
     if (db && firebaseUser) {
@@ -384,27 +3052,15 @@ const handleChangeRoomConfirm = async () => {
 
             // 2. Yeni odaya müşterinin tüm verilerini taşı
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), {
-                customerName: oldRoom.customerName || null, 
-                entryDate: oldRoom.entryDate || null, 
-                paymentDate: oldRoom.paymentDate || null,
-                monthlyFee: oldRoom.monthlyFee || null, 
-                hasKdv: oldRoom.hasKdv !== undefined ? oldRoom.hasKdv : true, 
-                sealNo: oldRoom.sealNo || null,
-                broughtBy: oldRoom.broughtBy || 'kendisi', 
-                teamList: oldRoom.teamList || null, 
-                hasDamage: oldRoom.hasDamage || false,
-                damageDescription: oldRoom.damageDescription || null, 
-                transportPrice: oldRoom.transportPrice || null,
-                transportHasKdv: oldRoom.transportHasKdv || false, 
-                entryPhoto: oldRoom.entryPhoto || null,
-                entryExitHistory: oldRoom.entryExitHistory || null, 
-                paidMonths: oldRoom.paidMonths || [],
+                customerName: oldRoom.customerName, entryDate: oldRoom.entryDate, paymentDate: oldRoom.paymentDate,
+                monthlyFee: oldRoom.monthlyFee, hasKdv: oldRoom.hasKdv, sealNo: oldRoom.sealNo,
+                broughtBy: oldRoom.broughtBy, teamList: oldRoom.teamList, hasDamage: oldRoom.hasDamage,
+                damageDescription: oldRoom.damageDescription, transportPrice: oldRoom.transportPrice,
+                transportHasKdv: oldRoom.transportHasKdv, entryPhoto: oldRoom.entryPhoto,
+                entryExitHistory: oldRoom.entryExitHistory, paidMonths: oldRoom.paidMonths || [],
                 rentedBy: oldRoom.rentedBy || currentUserProfile.name,
-                movedFrom: oldRoom.name || null, 
-                isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null,
-                isFreeRoom: oldRoom.isFreeRoom || false, 
-                freeRoomReason: oldRoom.freeRoomReason || null, 
-                giftMonths: oldRoom.giftMonths || 0
+                movedFrom: oldRoom.name, isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null,
+                isFreeRoom: oldRoom.isFreeRoom, freeRoomReason: oldRoom.freeRoomReason, giftMonths: oldRoom.giftMonths
             }, { merge: true });
 
         } catch (e) { console.error("Firebase Oda Değiştirme Hatası:", e); }
@@ -415,7 +3071,7 @@ const handleChangeRoomConfirm = async () => {
     setChangeRoomBlockId('');
     setChangeRoomTargetRoomId('');
     
-    const targetBlock = blocks.find(b => String(b.id) === String(newRoom.blockId));
+    const targetBlock = blocks.find(b => b.id === newRoom.blockId);
     if (targetBlock) {
         setSelectedWarehouseId(targetBlock.warehouseId);
         setSelectedBlockId(newRoom.blockId);
@@ -1423,15 +4079,15 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                             <button onClick={() => setShowGlobalSearchResults(false)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
                         </div>
                         {(() => {
-                            const term = normalizeStr(globalSearchTerm);
+                            const term = globalSearchTerm.toLowerCase();
                             const results = customers.map(c => {
                                 const cRooms = rooms.filter(r => r.customerName === c.name);
                                 return { customer: c, rooms: cRooms };
                             }).filter(item => {
-                                const matchName = normalizeStr(item.customer.name).includes(term);
+                                const matchName = item.customer.name?.toLowerCase().includes(term);
                                 const matchNo = item.customer.customerNo?.includes(term);
                                 const matchPhone = item.customer.phone?.includes(term);
-                                const matchRoom = item.rooms.some(r => normalizeStr(r.name).includes(term));
+                                const matchRoom = item.rooms.some(r => r.name?.toLowerCase().includes(term));
                                 return matchName || matchNo || matchPhone || matchRoom;
                             });
 
@@ -1836,7 +4492,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Alternatif Telefon (İsteğe Bağlı)</label><input type="text" value={newCustomer.altPhone} onChange={(e) => setNewCustomer({...newCustomer, altPhone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Müşteri Adresi</label><input type="text" value={newCustomer.address} onChange={(e) => setNewCustomer({...newCustomer, address: e.target.value})} placeholder="Tam Adres" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2 mt-2">
-                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'Kimlik Fotoğrafı (İsteğe Bağlı)' : 'Kurumsal Belgeler (İsteğe Bağlı)'}</label>
+                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'Kimlik Fotoğrafı (Ön ve Arka Yüz)' : 'Kurumsal Belgeler (Vergi Levhası vb.)'}</label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {/* ÖN YÜZ */}
                           <label className="border-2 border-dashed border-gray-300 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-red-50 hover:border-red-300 transition-colors cursor-pointer bg-slate-50 group h-full">
@@ -1954,8 +4610,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
               <div className="overflow-x-auto border border-gray-200 rounded-lg flex-1 bg-slate-50 w-full block">
                  {(() => {
                     const displayedCustomers = activeMenu === 'mevcut-musteriler' ? customers.filter(c => rooms.some(r => r.customerName === c.name)) : customers;
-                    const term = normalizeStr(customerSearchTerm);
-                    const finalFiltered = displayedCustomers.filter(c => normalizeStr(c.name).includes(term));
+                    const finalFiltered = displayedCustomers.filter(c => c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()));
                     if (finalFiltered.length === 0) return (<div className="flex flex-col items-center justify-center text-center py-20 w-full min-h-[300px]"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><Users size={32} /></div><h3 className="text-lg font-bold text-gray-600 mb-1">Müşteri Kaydı Bulunmuyor</h3><p className="text-sm text-gray-400 max-w-sm mx-auto">Bu listede gösterilecek müşteri bulunamadı. Soldaki menüden "Yeni Müşteri Ekle" diyerek ekleme yapabilirsiniz.</p></div>);
 
                     return (
@@ -2342,10 +4997,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <option value="askida" className="font-bold text-orange-600 bg-orange-50">⚠️ ASKIDA KALAN TAHSİLAT (Kime ait olduğu bilinmeyen ödeme)</option>
                               {customers.filter(c => {
                                   if (!paymentCustomerSearch) return true;
-                                  const searchLower = normalizeStr(paymentCustomerSearch);
-                                  const matchName = normalizeStr(c.name).includes(searchLower);
-                                  const matchNo = c.customerNo && String(c.customerNo).includes(searchLower);
-                                  const matchRoom = rooms.some(r => r.customerName === c.name && normalizeStr(r.name).includes(searchLower));
+                                  const searchLower = paymentCustomerSearch.toLowerCase();
+                                  const matchName = c.name?.toLowerCase().includes(searchLower) || false;
+                                  const matchNo = c.customerNo && String(c.customerNo).toLowerCase().includes(searchLower);
+                                  const matchRoom = rooms.some(r => r.customerName === c.name && r.name?.toLowerCase().includes(searchLower));
                                   return matchName || matchNo || matchRoom;
                               }).map(c => {
                                   const cRooms = rooms.filter(r => r.customerName === c.name).map(r => r.name).join(', ');
@@ -2474,8 +5129,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           };
                       }).filter(c => c.totalDebt > 0);
 
-                      let term = normalizeStr(debtSearchTerm);
-                      let filteredDebtors = debtors.filter(c => normalizeStr(c.name).includes(term));
+                      let filteredDebtors = debtors.filter(c => c.name.toLowerCase().includes(debtSearchTerm.toLowerCase()));
 
                       if (debtMonthFilter !== 'all') {
                           if (debtMonthFilter === '5+') {
@@ -2628,8 +5282,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                   const filteredCollections = allCollections.filter(item => {
                       // İsim araması
-                      const term = normalizeStr(collectionSearchTerm);
-                      if (collectionSearchTerm && !normalizeStr(item.customerName).includes(term) && !item.customerNo.includes(collectionSearchTerm)) {
+                      if (collectionSearchTerm && !item.customerName.toLowerCase().includes(collectionSearchTerm.toLowerCase()) && !item.customerNo.includes(collectionSearchTerm)) {
                           return false;
                       }
                       
@@ -2922,8 +5575,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                     
                                     // Sadece geçmiş yıllarda ve seçili ayda girenleri göster
                                     const isAnniversary = eMonth === parseInt(anniversaryMonth) && eYear < parseInt(anniversaryYear);
-                                    const term = normalizeStr(anniversarySearchTerm);
-                                    const matchesSearch = normalizeStr(room.customerName).includes(term) || normalizeStr(room.name).includes(term);
+                                    const matchesSearch = room.customerName.toLowerCase().includes(anniversarySearchTerm.toLowerCase()) || room.name.toLowerCase().includes(anniversarySearchTerm.toLowerCase());
                                     
                                     return isAnniversary && matchesSearch;
                                 }).map(room => {
@@ -5895,10 +8547,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         <option value="">Lütfen eşleştirilecek müşteriyi seçin...</option>
                         {customers.filter(c => {
                             if (!pendingSearchTerm) return true;
-                            const searchLower = normalizeStr(pendingSearchTerm);
-                            const matchName = normalizeStr(c.name).includes(searchLower);
-                            const matchNo = c.customerNo && String(c.customerNo).includes(searchLower);
-                            const matchRoom = rooms.some(r => r.customerName === c.name && normalizeStr(r.name).includes(searchLower));
+                            const searchLower = pendingSearchTerm.toLowerCase();
+                            const matchName = c.name?.toLowerCase().includes(searchLower) || false;
+                            const matchNo = c.customerNo && String(c.customerNo).toLowerCase().includes(searchLower);
+                            const matchRoom = rooms.some(r => r.customerName === c.name && r.name?.toLowerCase().includes(searchLower));
                             return matchName || matchNo || matchRoom;
                         }).map(c => {
                             const cRooms = rooms.filter(r => r.customerName === c.name).map(r => r.name).join(', ');
