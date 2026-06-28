@@ -820,12 +820,26 @@ const clausesHtml = processedClauses.map(clause => `
                   .header-area { position: fixed; top: -15mm; left: 0; right: 0; text-align: center; height: 50px; }
                   .header-logo { height: 50px; object-fit: contain; }
                   
-                  /* Her sayfanın altına tam oturan İmza / Mühür alanı */
-                  .footer-area { position: fixed; bottom: -35mm; left: 0; right: 0; display: flex; justify-content: space-between; font-size: 10pt; line-height: 1.5; }
-                  .sign-box { width: 48%; position: relative; text-align: left; }
-                  .sign-box div { margin-bottom: 1px; }
-                  .stamp-img { position: absolute; top: 55px; left: -5px; width: 140px; mix-blend-mode: multiply; opacity: 0.95; }
-                  
+/* Her sayfanın altına oturan 3'lü İmza / Logo / Mühür alanı */
+.footer-area { 
+    position: fixed; 
+    bottom: -35mm; 
+    left: 0; 
+    right: 0; 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: flex-end;
+    font-size: 10pt; 
+    line-height: 1.5; 
+}
+.sign-box-left { width: 33%; position: relative; text-align: left; }
+.logo-box-center { width: 33%; text-align: center; margin-bottom: 15px; }
+.sign-box-right { width: 33%; text-align: right; }
+
+.sign-box-left div, .sign-box-right div { margin-bottom: 4px; }
+
+.stamp-img { position: absolute; top: 45px; left: -5px; width: 130px; mix-blend-mode: multiply; opacity: 0.95; }
+.center-logo { width: 120px; opacity: 0.85; margin: 0 auto; display: block; }                  
                   .doc-title { text-align: center; font-size: 14pt; font-weight: bold; margin-bottom: 20px; text-decoration: underline; margin-top: 10px; }
               </style>
           </head>
@@ -838,21 +852,24 @@ const clausesHtml = processedClauses.map(clause => `
               </div>
 
               <!-- ALT İMZA/MÜHÜR ALANI -->
-              <div class="footer-area">
-                  <div class="sign-box">
-                      <div><strong>HİZMET VEREN</strong></div>
-                      <div><strong>Ad Soyad / Ünvan:</strong> ${contractSettings.accountHolder}</div>
-                      <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                      <div><strong>İmza:</strong></div>
-                      <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" class="stamp-img" alt="Kaşe" />
-                  </div>
-                  <div class="sign-box">
-                      <div><strong>DEPOLATAN KİŞİ</strong></div>
-                      <div><strong>Ad Soyad / Ünvan:</strong> ${contractCustomer?.name || ''}</div>
-                      <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                      <div><strong>İmza:</strong></div>
-                  </div>
-              </div>
+<div class="footer-area">
+    <div class="sign-box-left">
+        <div><strong>HİZMET VEREN</strong></div>
+        <div style="font-size: 9pt;"><strong>Ünvan:</strong> ${contractSettings.accountHolder}</div>
+        <div><strong>İmza:</strong></div>
+        <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" class="stamp-img" alt="Sembol / Depoevim Kaşe" />
+    </div>
+    
+    <div class="logo-box-center">
+        <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" class="center-logo" alt="Depoevim Logo" />
+    </div>
+    
+    <div class="sign-box-right">
+        <div><strong>DEPOLATAN KİŞİ</strong></div>
+        <div><strong>Ad Soyad:</strong> ${contractCustomer?.name || ''}</div>
+        <div><strong>İmza:</strong></div>
+        <div style="height: 50px;"></div> </div>
+</div>
               
               <!-- ANA SÖZLEŞME İÇERİĞİ -->
               <div class="content">
