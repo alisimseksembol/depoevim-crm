@@ -7514,10 +7514,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">Sistemdeki Müşteriler (Zorunlu)</label>
                    <input type="text" placeholder="Müşteri Adı veya No ile Ara..." value={rentCustomerSearch} onChange={(e) => setRentCustomerSearch(e.target.value)} className="w-full mb-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700 bg-white" />
-                   <select value={rentData.customerName} onChange={(e) => setRentData({...rentData, customerName: e.target.value})} className="w-full border-2 border-white shadow-sm rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[#1bc5bd] focus:ring-4 focus:ring-teal-50 font-medium text-slate-700 bg-white">
+<select value={rentData.customerName} onChange={(e) => setRentData({...rentData, customerName: e.target.value})} className="w-full border-2 border-white shadow-sm rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[#1bc5bd] focus:ring-4 focus:ring-teal-50 font-medium text-slate-700 bg-white">
                      <option value="">Lütfen listeden bir müşteri seçin...</option>
                      {customers
-{customers
                        .filter(c => normalizeStr(c.name).includes(normalizeStr(rentCustomerSearch)) || c.customerNo.includes(rentCustomerSearch))
                        .sort((a, b) => b.id - a.id)
                        .map((c) => (<option key={c.id} value={c.name}>{c.name} (No: {c.customerNo} - {c.phone})</option>))}
@@ -8558,20 +8557,21 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
         </div>
       )}
 
-      {/* ASKIDAKİ ÖDEMEYİ CARİYE İŞLEME MODALI */}
+{/* ASKIDAKİ ÖDEMEYİ CARİYE İŞLEME MODALI */}
       {isAssignModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
-             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-orange-50 rounded-t-xl">
-                 <h3 className="text-lg font-bold text-orange-700 flex items-center gap-2"><Wallet size={18} /> Ödemeyi Cariye Eşleştir</h3>
-                 <button onClick={() => setIsAssignModalOpen(false)}><X size={20} className="text-orange-500 hover:text-orange-700"/></button>
-             </div>
-             <div className="p-6">
-                <p className="text-xs text-gray-500 mb-4 text-center">Askıda bekleyen bu tahsilatı hangi müşterinin cari hesabına işlemek istediğinizi seçin.</p>
-                
-                {(() => {
-                    const payment = pendingCollections.find(p => p.id === assignData.paymentId);
-                    if (!payment) return null;
+              <div className="flex justify-between items-center mb-4 text-sm text-gray-600">
+                <div className="flex items-center gap-2"><span>Show</span><select className="border border-gray-300 rounded p-1 outline-none focus:border-cyan-400"><option>10</option><option>25</option><option>50</option></select><span>entries</span></div>
+                <div className="flex items-center gap-2"><span>Search:</span><input type="text" value={customerSearchTerm} onChange={(e) => setCustomerSearchTerm(e.target.value)} className="border border-gray-300 rounded p-1.5 outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 w-48 lg:w-64" /></div>
+              </div>
+              <div className="overflow-x-auto border border-gray-200 rounded-lg flex-1 bg-slate-50 w-full block">
+                 {(() => {
+                    const displayedCustomers = activeMenu === 'mevcut-musteriler' ? customers.filter(c => rooms.some(r => r.customerName === c.name)) : customers;
+                    const term = normalizeStr(customerSearchTerm);
+                    const finalFiltered = displayedCustomers.filter(c => normalizeStr(c.name).includes(term));
+                    if (finalFiltered.length === 0) return (<div className="flex flex-col items-center justify-center text-center py-20 w-full min-h-[300px]"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><Users size={32} /></div><h3 className="text-lg font-bold text-gray-600 mb-1">Müşteri Kaydı Bulunmuyor</h3><p className="text-sm text-gray-400 max-w-sm mx-auto">Bu listede gösterilecek müşteri bulunamadı. Soldaki menüden "Yeni Müşteri Ekle" diyerek ekleme yapabilirsiniz.</p></div>);
+
                     return (
                         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-6 flex justify-between items-center">
                             <div>
@@ -9038,7 +9038,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
              )}
           </div>
         </div>
-      )}
+)}
 
     </div>
   );
