@@ -40,7 +40,9 @@ History,
   Key,
   Check,
   Gift,
-  Database
+  Database,
+  MapPin,
+  Lock
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
@@ -425,7 +427,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   
   const [newCustomer, setNewCustomer] = useState({
       name: '', tc: '', phone: '', altPhone: '', address: '', notes: '',
-      hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null
+      hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null,
+      documentPhotoFront: null, documentPhotoBack: null
   });
   const [customerSaveError, setCustomerSaveError] = useState('');
 
@@ -1052,6 +1055,520 @@ const handleSaveEditPending = async () => {
       }, 500);
   };
 
+  const handleCustomerSelfPickupNotification = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date();
+      const todayStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+      
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Müşteri Kendi Alma Bilgilendirme - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.6; font-size: 11pt; color: #000; margin: 0; padding: 0; }
+                  .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #1bc5bd; padding-bottom: 10px; }
+                  .logo { font-size: 36px; font-weight: 900; margin-bottom: 5px; }
+                  .logo .black { color: #1f2937; }
+                  .logo .blue { color: #0ea5e9; }
+                  .subtitle { font-size: 11pt; color: #64748b; font-weight: bold; letter-spacing: 2px; margin-bottom: 10px; }
+                  .title { font-size: 14pt; font-weight: bold; text-align: center; margin-bottom: 20px; text-decoration: underline; }
+                  .info-box { border: 1px solid #e2e8f0; padding: 15px; margin-bottom: 25px; border-radius: 8px; background-color: #f8fafc; }
+                  .content-list { margin-bottom: 30px; padding-left: 20px; }
+                  .content-list li { margin-bottom: 10px; text-align: justify; }
+                  .price-list { margin-top: 5px; font-weight: bold; }
+                  .footer { display: flex; justify-content: flex-end; margin-top: 30px; }
+                  .signature-box { text-align: center; width: 250px; }
+                  .sig-title { font-weight: bold; margin-bottom: 10px; }
+                  .sig-name { margin-top: 10px; font-size: 11pt; }
+                  .sig-line { border-bottom: 1px solid #000; margin-top: 40px; width: 80%; margin-left: auto; margin-right: auto; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Depoevim</div>
+              <div class="header">
+                  <div class="logo"><span class="black">Depo</span><span class="blue">evim</span></div>
+                  <div class="subtitle">EŞYA DEPOLAMA</div>
+              </div>
+              
+              <div class="title">FARKLI FİRMA VEYA MÜŞTERİ TARAFINDAN DEPO ÇIKIŞLARI<br/>Talimatlar & Kurallar</div>
+              
+              <div class="info-box">
+                  <strong>Müşteri Adı Soyadı:</strong> ${customer.name}<br/>
+                  <strong>Müşteri No / Telefon:</strong> ${customer.customerNo} / ${customer.phone}<br/>
+                  <strong>Oda Numarası:</strong> ${room.name} <br/>
+                  <strong>Tarih:</strong> ${todayStr}
+              </div>
+
+              <ol class="content-list">
+                  <li>Depolayan kişinin depo borcunun tamamı ödenmiş olması gerekmektedir.</li>
+                  <li>Depolayan kişinin eşya teslim sırasında bulunması gerekmektedir.</li>
+                  <li>Eşyalar depodan çıkış yapmadan depolayan kişi teslim tutanağını ıslak imza ile imzalaması gerekmektedir.</li>
+                  <li>Depo sorumluluğumuz yalnızca depoyu açma ve kapama işlemi yapmaktır.</li>
+                  <li>Depolayan kişi başka nakliye hizmeti için minimum 48 saat öncesinden haber verip randevu alması gerekmektedir.</li>
+                  <li>Depolayan kişi, Sembol Nakliyat dışında başka bir firmadan hizmet alır ise, deposu açıldığı andan itibaren oluşabilecek hasar, eksik eşya veya fazla eşya alınması vb. durumlarda depolayan kişi sorumludur.</li>
+                  <li>Ümraniye, Kartal ve Çekmeköy depolar fabrikada bulunduğundan dolayı dışarıdan gelen nakliye personelinin sigortalı olması zorunludur.</li>
+                  <li>Ümraniye, Kartal ve Çekmeköy deposundan çıkarılacak eşyalar için dışarıdan gelen nakliyeci 1 gün öncesinden gelecek personellerin sigorta giriş belgelerini firmamıza iletmesi gerekmektedir.</li>
+                  <li>Depo çalışma saatleri: 10.00-17.00. Pazar günleri kapalıdır.</li>
+                  <li>Depodan eşyaların alınma süresi maksimum 2 saattir. Bu sürenin uzaması durumunda mesai ücreti alınması gerekmektedir.</li>
+                  <li>Eşyanın tamamı alınmadığı süre zarfında çıkış işlemi yapılmayacaktır.</li>
+                  <li>Taşıma sırasında oluşabilecek iş güvenliği ve depoya hasar durumlarından depolayan kişi sorumludur.</li>
+                  <li>Depolayan kişi daha önce nakliye hizmetini depo firmasından almış ise kalıcı ambalaj iadesi ya da ücretini ödemek mecburidir.</li>
+                  <li>Kalıcı Ambalaj Ücretleri:
+                      <ul class="price-list">
+                          <li>15 m³ - 2.000 TL + KDV</li>
+                          <li>22 m³ - 3.000 TL + KDV</li>
+                          <li>30 m³ - 4.000 TL + KDV</li>
+                      </ul>
+                  </li>
+              </ol>
+
+              <div class="footer">
+                  <div class="signature-box">
+                      <div class="sig-title">Depolayan Kişinin Ad Soyad ve İmzası</div>
+                      <div class="sig-name">${customer.name}</div>
+                      <div class="sig-line"></div>
+                  </div>
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Farklı Firma veya Müşteri Tarafından Depo Çıkışları - Talimatlar ve Kurallar" belgesi oluşturulmuştur.\n\nİlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip onaylayınız.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
+  const handleExternalTransportEntry = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date();
+      const todayStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+      
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Farklı Firma İle Giriş Tutanağı - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.6; font-size: 11pt; color: #000; margin: 0; padding: 0; }
+                  .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1bc5bd; padding-bottom: 15px; }
+                  .logo { font-size: 36px; font-weight: 900; margin-bottom: 5px; }
+                  .logo .black { color: #1f2937; }
+                  .logo .blue { color: #0ea5e9; }
+                  .subtitle { font-size: 11pt; color: #64748b; font-weight: bold; letter-spacing: 2px; margin-bottom: 15px; }
+                  .title { font-size: 14pt; font-weight: bold; text-align: center; margin-bottom: 25px; text-decoration: underline; }
+                  .info-box { border: 1px solid #e2e8f0; padding: 15px; margin-bottom: 25px; border-radius: 8px; background-color: #f8fafc; }
+                  .content-list { margin-bottom: 40px; padding-left: 20px; }
+                  .content-list li { margin-bottom: 12px; text-align: justify; }
+                  .footer { display: flex; justify-content: flex-end; margin-top: 40px; }
+                  .signature-box { text-align: center; width: 250px; }
+                  .sig-title { font-weight: bold; margin-bottom: 10px; }
+                  .sig-name { margin-top: 10px; font-size: 11pt; }
+                  .sig-line { border-bottom: 1px solid #000; margin-top: 40px; width: 80%; margin-left: auto; margin-right: auto; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Depoevim</div>
+              <div class="header">
+                  <div class="logo"><span class="black">Depo</span><span class="blue">evim</span></div>
+                  <div class="subtitle">EŞYA DEPOLAMA</div>
+              </div>
+              
+              <div class="title">DEPOEVİM FARKLI FİRMA İLE DEPOYA EŞYA GİRİŞ TUTANAĞI</div>
+              
+              <div class="info-box">
+                  <strong>Müşteri Adı Soyadı:</strong> ${customer.name}<br/>
+                  <strong>Müşteri No / Telefon:</strong> ${customer.customerNo} / ${customer.phone}<br/>
+                  <strong>Oda Numarası:</strong> ${room.name} <br/>
+                  <strong>Tarih:</strong> ${todayStr}
+              </div>
+
+              <ol class="content-list">
+                  <li>Depolayan kişi deponun ilk ayını ödemesini eşya depoya yerleşmeden yapmalıdır.</li>
+                  <li>Depolayan kişinin eşya yerleştirme sırasında bulunması gerekmektedir.</li>
+                  <li>Eşyalar depodan giriş yapmadan depolayan kişi sözleşmeyi imzalaması gerekmektedir.</li>
+                  <li>Depo sorumlumuz yalnızca depoyu açma ve kapama işlemi yapmaktadır.</li>
+                  <li>Depolayan kişi başka nakliye hizmeti için minimum 48 saat öncesinden haber ve randevu alması gerekmektedir.</li>
+                  <li>Depolayan kişi, Sembol Nakliyat dışında başka bir firmadan hizmet alır ise, deposu açıldığı andan itibaren oluşabilecek hasar, eksik eşya veya fazla eşya alınması vb. durumlarında depolayan kişi sorumludur.</li>
+                  <li>Ümraniye ve Kartal ve Çekmeköy’deki depolar fabrika olduğundan dolayı dışardan gelen nakliye personelinin sigortalı olması zorunludur.</li>
+                  <li>Ümraniye ve Kartal ve Çekmeköy deposuna getirilecek eşyalar için dışardan gelen nakliyeci 1 gün öncesinden gelecek personellerin sigorta giriş belgelerini firmamıza iletmesi gerekmektedir.</li>
+                  <li>Depo çalışma saatleri: 10:00 – 17:00 saatleri arasındadır. Pazar günleri kapalıdır.</li>
+                  <li>Depoya eşyaların yerleştirme süresi maksimum 2 saattir. Bu sürenin uzaması durumunda mesai ücreti alınması gerekmektedir.</li>
+                  <li>Taşıma sırasında oluşabilecek iş güvenliği, asansör hasarı ve depoya hasar durumlarından depoyu kiralayan kişi sorumludur.</li>
+              </ol>
+
+              <div class="footer">
+                  <div class="signature-box">
+                      <div class="sig-title">Depolayan Kişinin Ad Soyad ve İmzası</div>
+                      <div class="sig-name">${customer.name}</div>
+                      <div class="sig-line"></div>
+                  </div>
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Farklı Firma İle Depoya Eşya Giriş Tutanağı" oluşturulmuştur. \n\nİlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip onaylayınız.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
+  const handleDamageReportDocument = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Nakliye Hasar Tutanağı - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.8; font-size: 13pt; color: #000; margin: 0; padding: 0; position: relative; min-height: 250mm; }
+                  .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #e30a17; padding-bottom: 15px; }
+                  .logo-text { color: #e30a17; font-size: 36px; font-weight: 900; margin: 0 0 5px 0; letter-spacing: 1px; }
+                  .subtitle { font-size: 14pt; color: #000; font-weight: bold; margin: 0; }
+                  .title { font-size: 16pt; font-weight: bold; text-align: center; margin: 40px 0; text-decoration: underline; }
+                  .content { text-align: justify; margin-bottom: 50px; font-size: 14pt; line-height: 2; }
+                  .form-group { margin-bottom: 20px; font-weight: bold; }
+                  .flex-line { display: flex; align-items: flex-end; }
+                  .footer { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; font-size: 11pt; border-top: 1px solid #ccc; padding-top: 15px; color: #333; line-height: 1.5; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Sembol Nakliyat</div>
+              <div class="header">
+                  <h1 class="logo-text">SEMBOL NAKLİYAT</h1>
+                  <h3 class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</h3>
+              </div>
+              
+              <div class="title">DEPOEVİM NAKLİYE HASAR TUTANAĞI</div>
+              
+              <div class="content">
+                  <p>
+                      Depoevim firmasının deposunda bulunan <strong>${room.name}</strong> oda numaralı <strong>${customer.name}</strong> adlı müşteriye ait olan eşyaları teslim alırken taşıma sırasında deponun içinde ve çevresinde oluşabilecek tüm hasarlardan sorumlu olduğumu taahhüt ederim.
+                  </p>
+                  
+                  <div style="margin-top: 60px;">
+                      <div class="form-group flex-line">
+                          <span style="white-space: nowrap;">Nakliye Firması Ünvanı:</span> <span style="flex: 1; border-bottom: 1px dotted #000; margin-left: 10px;">&nbsp;</span>
+                      </div>
+                      <div class="form-group flex-line">
+                          <span style="white-space: nowrap;">Nakliye Firması VKN:</span> <span style="flex: 1; border-bottom: 1px dotted #000; margin-left: 10px;">&nbsp;</span>
+                      </div>
+                      <div class="form-group flex-line" style="margin-top: 40px;">
+                          <span style="white-space: nowrap;">Nakliye Firması Yetkili Kişi İsim Soyisim İmza:</span> <span style="flex: 1; border-bottom: 1px dotted #000; margin-left: 10px;">&nbsp;</span>
+                      </div>
+                  </div>
+              </div>
+
+              <div class="footer">
+                  <strong>SEMBOL NAKLİYAT DEPOCULUK TİC.LTD.ŞTİ.</strong><br/>
+                  Bahçelievler mah. Yeni sokak No 5 C Pendik / İstanbul<br/>
+                  0(216) 390 89 99 / 0(554) 726 16 61<br/>
+                  www.sembolevdeneve.com
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Nakliye Hasar Tutanağı" oluşturulmuştur.\n\nİlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip nakliye firmasına imzalattığınızdan emin olunuz.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
+  const handleProxyDocument = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date();
+      const todayStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+      
+      // Müşterinin vekili varsa ismini yaz, yoksa noktalı boşluk bırak
+      const proxyName = customer.proxyName || '......................................................';
+      const proxyTc = customer.proxyTc || '...........................';
+
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Vekalet Tutanağı - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.8; font-size: 13pt; color: #000; margin: 0; padding: 0; position: relative; min-height: 250mm; }
+                  .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #e30a17; padding-bottom: 15px; }
+                  .logo-text { color: #e30a17; font-size: 36px; font-weight: 900; margin: 0 0 5px 0; letter-spacing: 1px; }
+                  .subtitle { font-size: 14pt; color: #000; font-weight: bold; margin: 0; }
+                  .title { font-size: 16pt; font-weight: bold; text-align: center; margin: 40px 0; text-decoration: underline; }
+                  .content { text-align: justify; margin-bottom: 50px; font-size: 14pt; line-height: 2; }
+                  .signatures { display: flex; justify-content: space-between; margin-top: 60px; }
+                  .sig-box { text-align: center; width: 40%; }
+                  .sig-title { font-weight: bold; margin-bottom: 10px; font-size: 12pt; }
+                  .sig-name { margin-bottom: 40px; font-size: 12pt; }
+                  .sig-line { border-bottom: 1px solid #000; width: 80%; margin: 0 auto; }
+                  .footer { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; font-size: 11pt; border-top: 1px solid #ccc; padding-top: 15px; color: #333; line-height: 1.5; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Sembol Nakliyat</div>
+              <div class="header">
+                  <h1 class="logo-text">SEMBOL NAKLİYAT</h1>
+                  <h3 class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</h3>
+              </div>
+              
+              <div class="title">DEPOEVİM DEPO GİRİŞ TUTANAĞI</div>
+              
+              <div class="content">
+                  <p>
+                      SEMBOL NAKLİYAT firmasının deposunda bulunan <strong>${customer.name}</strong> isimli, <strong>${room.name}</strong> oda numaralı depoya benim adıma <strong>${proxyName}</strong> (TC: ${proxyTc}) isimli kişi benim nezaretim olmadan giriş yapabilir.
+                  </p>
+                  <p style="margin-top: 30px;">
+                      Tarih: ${todayStr}
+                  </p>
+              </div>
+
+              <div class="signatures">
+                  <div class="sig-box">
+                      <div class="sig-title">Müşteri İsim Soyisim</div>
+                      <div class="sig-name">${customer.name}</div>
+                      <div class="sig-title">İmza</div>
+                      <div class="sig-line"></div>
+                  </div>
+                  <div class="sig-box">
+                      <div class="sig-title">Vekil İsim Soyisim</div>
+                      <div class="sig-name">${proxyName}</div>
+                      <div class="sig-title">İmza</div>
+                      <div class="sig-line"></div>
+                  </div>
+              </div>
+
+              <div class="footer">
+                  <strong>SEMBOL NAKLİYAT DEPOCULUK TİC.LTD.ŞTİ.</strong><br/>
+                  Bahçelievler mah. Yeni sokak No 5 C Pendik / İstanbul<br/>
+                  0(216) 390 89 99 / 0(554) 726 16 61<br/>
+                  www.sembolevdeneve.com
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          let proxyText = customer.proxyName ? customer.proxyName : 'belirttiğiniz kişi';
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Vekalet ve Depo Giriş Tutanağı" oluşturulmuştur.\n\nSistemimize vekiliniz olarak ${proxyText} tanımlanmıştır. İlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip imzalayınız.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
+  const handleRoomEntryExitDocument = () => {
+      setIsTutanakDropdownOpen(false);
+      const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      
+      if (!room || !customer) {
+          alert("Oda veya müşteri bilgisi bulunamadı!");
+          return;
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const d = new Date();
+      const todayStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+      const currentTime = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+
+      const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Depo Giriş Çıkış Tutanağı - ${customer.name}</title>
+              <style>
+                  @page { size: A4 portrait; margin: 20mm; }
+                  body { font-family: 'Arial', sans-serif; line-height: 1.8; font-size: 13pt; color: #000; margin: 0; padding: 0; position: relative; min-height: 250mm; }
+                  .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #e30a17; padding-bottom: 15px; }
+                  .logo-text { color: #e30a17; font-size: 36px; font-weight: 900; margin: 0 0 5px 0; letter-spacing: 1px; }
+                  .subtitle { font-size: 14pt; color: #000; font-weight: bold; margin: 0; }
+                  .title { font-size: 16pt; font-weight: bold; text-align: center; margin: 40px 0; text-decoration: underline; }
+                  .content { text-align: justify; margin-bottom: 30px; font-size: 14pt; line-height: 2; }
+                  .input-line { display: inline-block; border-bottom: 1px dotted #000; width: 100px; }
+                  .warning-box { border: 2px solid #e30a17; padding: 15px; text-align: center; font-weight: bold; margin-top: 30px; margin-bottom: 40px; font-size: 12pt; color: #e30a17; }
+                  .signatures { display: flex; justify-content: flex-end; margin-top: 60px; }
+                  .sig-box { text-align: center; width: 40%; }
+                  .sig-title { font-weight: bold; margin-bottom: 10px; font-size: 12pt; }
+                  .sig-name { margin-bottom: 40px; font-size: 12pt; }
+                  .sig-line { border-bottom: 1px solid #000; width: 80%; margin: 0 auto; }
+                  .footer { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; font-size: 11pt; border-top: 1px solid #ccc; padding-top: 15px; color: #333; line-height: 1.5; }
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.03); z-index: -1; }
+              </style>
+          </head>
+          <body>
+              <div class="watermark">Sembol Nakliyat</div>
+              <div class="header">
+                  <h1 class="logo-text">SEMBOL NAKLİYAT</h1>
+                  <h3 class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</h3>
+              </div>
+              
+              <div class="title">DEPOEVİM DEPO GİRİŞ ÇIKIŞ TUTANAĞI</div>
+              
+              <div class="content">
+                  <p>
+                      SEMBOL NAKLİYAT firmasının deposunda bulunan <strong>${customer.name}</strong> isimli, <strong>${room.name}</strong> oda numaralı depoya giriş yapmış olup olabilecek tüm hasarların ve eksik eşyaların sorumluluğu şahsıma aittir.
+                  </p>
+                  
+                  <div style="margin-top: 40px; display: flex; flex-direction: column; gap: 15px; font-weight: bold;">
+                      <div>GİRİŞ TARİHİ : ${todayStr}</div>
+                      <div>SAAT : ${currentTime}</div>
+                      <div style="margin-top: 20px;">GİRİŞ <span class="input-line"></span> / ÇIKIŞ <span class="input-line"></span></div>
+                  </div>
+              </div>
+
+              <div class="warning-box">
+                  MÜHÜR DEĞİŞTİRME ÜCRETİ ${collectionRates.sealFee} TL + KDV FATURANIZA EKLENECEKTİR. (1 SAATLİK ÜCRETTİR.)
+              </div>
+
+              <div class="signatures">
+                  <div class="sig-box">
+                      <div class="sig-title">Müşteri İsim Soyisim</div>
+                      <div class="sig-name">${customer.name}</div>
+                      <div class="sig-title">İmza</div>
+                      <div class="sig-line"></div>
+                  </div>
+              </div>
+
+              <div class="footer">
+                  <strong>SEMBOL NAKLİYAT DEPOCULUK TİC.LTD.ŞTİ.</strong><br/>
+                  Bahçelievler mah. Yeni sokak No 5 C Pendik / İstanbul<br/>
+                  0(216) 390 89 99 / 0(554) 726 16 61<br/>
+                  www.sembolevdeneve.com
+              </div>
+          </body>
+          </html>
+      `;
+
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+
+      setTimeout(() => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+          
+          const text = `Sayın ${customer.name},\n\n*${room.name}* numaralı odanız için "Depo Giriş Çıkış Tutanağı" oluşturulmuştur.\n\nİlgili PDF belgesi sistemimiz üzerinden hazırlanmış olup tarafınıza iletilmek üzere kaydedilmiştir. Lütfen belgeyi inceleyip imzalayınız.\n\nİyi günler dileriz.`;
+          const encodedText = encodeURIComponent(text);
+          let waPhone = customer.phone.replace(/\D/g, '');
+          if (waPhone.length === 10) waPhone = '90' + waPhone;
+          else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+          
+          window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+      }, 500);
+  };
+
   const handleViewEInvoice = (tx) => {
       const iframe = document.createElement('iframe');
       iframe.style.display = 'none';
@@ -1271,7 +1788,9 @@ const handleSaveCustomer = async () => {
           type: customerType,
           createdAt: new Date().toLocaleDateString('tr-TR'),
           invoices: [],
-          documentPhoto: newCustomer.documentPhoto,
+          documentPhoto: newCustomer.documentPhotoFront || newCustomer.documentPhoto,
+          documentPhotoFront: newCustomer.documentPhotoFront,
+          documentPhotoBack: newCustomer.documentPhotoBack,
           payments: [], extraDebts: [], ledgerOverrides: []
       };
 
@@ -1282,7 +1801,7 @@ const handleSaveCustomer = async () => {
       }
       
       setCustomerSaveError('');
-      setNewCustomer({ name: '', tc: '', phone: '', altPhone: '', address: '', notes: '', documentPhoto: null, hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null });
+      setNewCustomer({ name: '', tc: '', phone: '', altPhone: '', address: '', notes: '', documentPhotoFront: null, documentPhotoBack: null, hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null });
       setActiveMenu('tum-musteriler');
   };
 
@@ -1522,6 +2041,7 @@ const handleAddInvoice = async () => {
   const [isAddWarehouseModalOpen, setIsAddWarehouseModalOpen] = useState(false);
   const [newDepoName, setNewDepoName] = useState('');
   const [newDepoM3, setNewDepoM3] = useState('');
+  const [newDepoAddress, setNewDepoAddress] = useState('');
   
   const [isEditWarehouseModalOpen, setIsEditWarehouseModalOpen] = useState(false);
   const [editWarehouseData, setEditWarehouseData] = useState(null);
@@ -1533,16 +2053,16 @@ const handleAddInvoice = async () => {
 
   const handleAddWarehouse = async () => {
       if (!newDepoName) return;
-      const newWarehouse = { id: Date.now(), name: newDepoName, m3: newDepoM3 || 0, orderIndex: warehouses.length };
+      const newWarehouse = { id: Date.now(), name: newDepoName, m3: newDepoM3 || 0, address: newDepoAddress, orderIndex: warehouses.length };
       if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(newWarehouse.id)), newWarehouse);
-      setIsAddWarehouseModalOpen(false); setNewDepoName(''); setNewDepoM3('');
+      setIsAddWarehouseModalOpen(false); setNewDepoName(''); setNewDepoM3(''); setNewDepoAddress('');
   };
 
   const handleEditWarehouse = async () => {
       if (!editWarehouseData?.name) return;
       if (db && firebaseUser) {
           try {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(editWarehouseData.id)), { name: editWarehouseData.name, m3: editWarehouseData.m3 }, { merge: true });
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(editWarehouseData.id)), { name: editWarehouseData.name, m3: editWarehouseData.m3, address: editWarehouseData.address || '' }, { merge: true });
           } catch (e) { console.error("Firebase Depo Güncelleme Hatası:", e); }
       }
       setIsEditWarehouseModalOpen(false); setEditWarehouseData(null);
@@ -1812,6 +2332,8 @@ const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
   const [isRoomHistoryModalOpen, setIsRoomHistoryModalOpen] = useState(false);
   const [isEditRentModalOpen, setIsEditRentModalOpen] = useState(false);
   const [editRentData, setEditRentData] = useState({ customerName: '', entryDate: '', paymentDate: '', monthlyFee: '', hasKdv: true, sealNo: '', broughtBy: 'kendisi', teamList: '' });
+
+  const [isTutanakDropdownOpen, setIsTutanakDropdownOpen] = useState(false);
 
   // --- HEDİYE AY STATE'LERİ ---
   const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
@@ -3970,22 +4492,44 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Alternatif Telefon (İsteğe Bağlı)</label><input type="text" value={newCustomer.altPhone} onChange={(e) => setNewCustomer({...newCustomer, altPhone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Müşteri Adresi</label><input type="text" value={newCustomer.address} onChange={(e) => setNewCustomer({...newCustomer, address: e.target.value})} placeholder="Tam Adres" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2 mt-2">
-                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'Kimlik Fotoğrafı / Belgesi Yükle' : 'Vergi Levhası Fotoğrafı / Belgesi Yükle'}</label>
-                      <label className="border-2 border-dashed border-gray-300 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-red-50 hover:border-red-300 transition-colors cursor-pointer bg-slate-50 group">
-                        {newCustomer.documentPhoto ? (
-                           <div className="flex flex-col items-center">
-                              <Check size={32} className="text-green-500 mb-2" />
-                              <span className="text-sm font-bold text-green-600">Belge Eklendi</span>
-                              <img src={newCustomer.documentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
-                           </div>
-                        ) : (
-                           <>
-                             <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><Upload size={20} className="text-red-400" /></div>
-                             <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-red-500">Dosya seçmek için tıklayın</span> veya sürükleyip bırakın</p>
-                             <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
-                           </>
-                        )}
- <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setNewCustomer({...newCustomer, documentPhoto: url}); } }} />                      </label>
+                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'Kimlik Fotoğrafı (Ön ve Arka Yüz)' : 'Kurumsal Belgeler (Vergi Levhası vb.)'}</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {/* ÖN YÜZ */}
+                          <label className="border-2 border-dashed border-gray-300 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-red-50 hover:border-red-300 transition-colors cursor-pointer bg-slate-50 group h-full">
+                            {newCustomer.documentPhotoFront ? (
+                               <div className="flex flex-col items-center">
+                                  <Check size={32} className="text-green-500 mb-2" />
+                                  <span className="text-sm font-bold text-green-600">Ön Yüz Eklendi</span>
+                                  <img src={newCustomer.documentPhotoFront} alt="Ön Yüz" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                               </div>
+                            ) : (
+                               <>
+                                 <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><Upload size={20} className="text-red-400" /></div>
+                                 <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-red-500">{customerType === 'bireysel' ? 'Kimlik Ön Yüzü' : 'Belge 1'} Seç</span></p>
+                                 <p className="text-xs text-gray-400">PNG, JPG, PDF</p>
+                               </>
+                            )}
+                            <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setNewCustomer({...newCustomer, documentPhotoFront: url}); } }} />
+                          </label>
+
+                          {/* ARKA YÜZ */}
+                          <label className="border-2 border-dashed border-gray-300 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-red-50 hover:border-red-300 transition-colors cursor-pointer bg-slate-50 group h-full">
+                            {newCustomer.documentPhotoBack ? (
+                               <div className="flex flex-col items-center">
+                                  <Check size={32} className="text-green-500 mb-2" />
+                                  <span className="text-sm font-bold text-green-600">Arka Yüz Eklendi</span>
+                                  <img src={newCustomer.documentPhotoBack} alt="Arka Yüz" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                               </div>
+                            ) : (
+                               <>
+                                 <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><Upload size={20} className="text-red-400" /></div>
+                                 <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-red-500">{customerType === 'bireysel' ? 'Kimlik Arka Yüzü' : 'Belge 2 (Opsiyonel)'} Seç</span></p>
+                                 <p className="text-xs text-gray-400">PNG, JPG, PDF</p>
+                               </>
+                            )}
+                            <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setNewCustomer({...newCustomer, documentPhotoBack: url}); } }} />
+                          </label>
+                      </div>
                   </div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Özel Notlar</label><textarea value={newCustomer.notes} onChange={(e) => setNewCustomer({...newCustomer, notes: e.target.value})} rows="3" placeholder="Müşteri hakkında eklemek istediğiniz notlar..." className="border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 resize-none font-medium text-slate-700"></textarea></div>
                   
@@ -4203,19 +4747,35 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                    {/* Kimlik / Vergi Levhası Alanı */}
                                    <div className="flex flex-col gap-2">
                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center justify-between">
-                                          {customer.type === 'bireysel' ? 'Kimlik Belgesi' : 'Vergi Levhası'}
+                                          {customer.type === 'bireysel' ? 'Kimlik Belgesi (Ön ve Arka)' : 'Vergi Levhası / Ek Belgeler'}
                                        </span>
-                                       {customer.documentPhoto ? (
-                                           <div className="border border-gray-200 rounded p-2 bg-white w-max relative group shadow-sm hover:shadow transition-shadow">
-                                               <a href={customer.documentPhoto} target="_blank" rel="noreferrer">
-                                                   <img src={customer.documentPhoto} alt="Belge" className="h-32 object-contain rounded" />
-                                               </a>
-                                           </div>
-                                       ) : (
-                                           <div className="border border-dashed border-gray-300 rounded p-4 bg-gray-50 flex items-center justify-center h-36 shadow-inner">
-                                               <span className="text-xs text-gray-400 font-medium text-center px-4">Belge yüklenmemiş. Profili düzenleyerek ekleyebilirsiniz.</span>
-                                           </div>
-                                       )}
+                                       <div className="flex flex-wrap gap-4">
+                                           {(customer.documentPhotoFront || customer.documentPhoto) ? (
+                                               <div className="border border-gray-200 rounded p-2 bg-white w-max relative group shadow-sm hover:shadow transition-shadow">
+                                                   <a href={customer.documentPhotoFront || customer.documentPhoto} target="_blank" rel="noreferrer">
+                                                       <img src={customer.documentPhotoFront || customer.documentPhoto} alt="Ön Yüz" className="h-32 object-contain rounded" />
+                                                   </a>
+                                                   <div className="text-[10px] text-center text-gray-500 mt-1 font-medium">Ön Yüz</div>
+                                               </div>
+                                           ) : (
+                                               <div className="border border-dashed border-gray-300 rounded p-4 bg-gray-50 flex flex-col items-center justify-center h-36 w-32 shadow-inner">
+                                                   <span className="text-xs text-gray-400 font-medium text-center px-2">Ön Yüz Yok</span>
+                                               </div>
+                                           )}
+                                           
+                                           {customer.documentPhotoBack ? (
+                                               <div className="border border-gray-200 rounded p-2 bg-white w-max relative group shadow-sm hover:shadow transition-shadow">
+                                                   <a href={customer.documentPhotoBack} target="_blank" rel="noreferrer">
+                                                       <img src={customer.documentPhotoBack} alt="Arka Yüz" className="h-32 object-contain rounded" />
+                                                   </a>
+                                                   <div className="text-[10px] text-center text-gray-500 mt-1 font-medium">Arka Yüz</div>
+                                               </div>
+                                           ) : (
+                                               <div className="border border-dashed border-gray-300 rounded p-4 bg-gray-50 flex flex-col items-center justify-center h-36 w-32 shadow-inner">
+                                                   <span className="text-xs text-gray-400 font-medium text-center px-2">Arka Yüz Yok</span>
+                                               </div>
+                                           )}
+                                       </div>
                                    </div>
                                    
                                    {/* Ek Belgeler / Arşiv Belgeleri Alanı */}
@@ -4768,17 +5328,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               </div>
                           </div>
 
-                          <div className="bg-green-50 border border-green-200 rounded-2xl p-6 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm gap-4">
-                              <div className="flex items-center gap-4">
-                                  <div className="w-14 h-14 bg-green-100 text-green-600 rounded-xl flex items-center justify-center shadow-inner"><Wallet size={28}/></div>
-                                  <div>
-                                      <h3 className="text-green-800 font-extrabold text-lg">Toplam Tahsilat</h3>
-                                      <p className="text-green-600 text-sm font-medium">Filtrelenen aralıktaki toplam alınan ödeme</p>
-                                  </div>
-                              </div>
-                              <div className="text-3xl sm:text-4xl font-black text-green-700">{totalCollected.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
-                          </div>
-
                           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex-1 flex flex-col">
                               <div className="overflow-x-auto flex-1">
                                   <table className="w-full text-left text-sm text-gray-600 min-w-[800px]">
@@ -5299,6 +5848,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         </div>
                         
                         <h3 className={`text-xl font-black ${wColor.text} uppercase tracking-tight mb-1 transition-colors`}>{depo.name}</h3>
+                        {depo.address && <p className="text-[10px] text-gray-500 font-medium mb-1 line-clamp-1 flex items-center gap-1" title={depo.address}><MapPin size={10} /> {depo.address}</p>}
                         <p className="text-xs text-gray-500 font-semibold mb-6 flex items-center gap-1"><Box size={14}/> Ana Depo Merkezi</p>
                         
                         <div className="mb-6 mt-auto">
@@ -5418,8 +5968,16 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              style={{ backgroundImage: 'repeating-linear-gradient(to bottom, #f8fafc, #f8fafc 12px, #e2e8f0 12px, #e2e8f0 14px)' }}>
                              
                              {/* Kilit/Kulp Detayı */}
-                             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-10 h-3 bg-slate-300 border border-slate-400 rounded-sm flex items-center justify-center shadow-sm">
-                                <div className="w-3 h-1 bg-slate-500 rounded-full"></div>
+                             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center justify-center">
+                                {oda.customerName ? (
+                                    <div className="bg-gradient-to-b from-amber-300 to-amber-500 border border-amber-600 rounded p-1 shadow-md text-amber-900" title="Dolu - Kilitli">
+                                        <Lock size={16} strokeWidth={2.5} />
+                                    </div>
+                                ) : (
+                                    <div className="w-10 h-3 bg-slate-300 border border-slate-400 rounded-sm flex items-center justify-center shadow-sm">
+                                       <div className="w-3 h-1 bg-slate-500 rounded-full"></div>
+                                    </div>
+                                )}
                              </div>
 
                              {/* Durum Etiketi */}
@@ -5607,6 +6165,37 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              <button onClick={() => setIsChangeRoomModalOpen(true)} className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><RefreshCcw size={14}/> Oda Değiştir</button>
                              <button onClick={() => { setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null }); setIsEndRentModalOpen(true); }} className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><LogOut size={14}/> Depodan Çıkış Yap</button>
                              
+                             {/* TUTANAK GÖNDER AÇILIR MENÜSÜ */}
+                             <div className="relative">
+                                <button onClick={() => setIsTutanakDropdownOpen(!isTutanakDropdownOpen)} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors">
+                                  <FileTextIcon size={14}/> Tutanak Gönder/Bilgilendir <ChevronDown size={14} className={`transition-transform ${isTutanakDropdownOpen ? 'rotate-180' : ''}`} />
+                                </button>
+                                {isTutanakDropdownOpen && (
+                                  <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsTutanakDropdownOpen(false)}></div>
+                                     <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-72 bg-white border border-gray-100 rounded-xl shadow-lg z-50 py-1 animate-in fade-in slide-in-from-top-2">
+                                       {[
+                                         { label: '1- Müşteri Kendi Alma Bilgilendirme', action: handleCustomerSelfPickupNotification },
+                                         { label: '2- Odaya Giriş Çıkış Tutanağı', action: handleRoomEntryExitDocument },
+                                         { label: '3- Hasar Tutanağı', action: handleDamageReportDocument },
+                                         { label: '4- Vekalet Tutanağı', action: handleProxyDocument },
+                                         { label: '5- Başka Nakliyeci Tarafından Giriş', action: handleExternalTransportEntry },
+                                         { label: '6- Başka Nakliyeci Tarafından Çıkış', action: () => { setIsTutanakDropdownOpen(false); alert('"6- Başka Nakliyeci Tarafından Çıkış" yakında eklenecektir.'); } },
+                                         { label: '7- Başka Müşteriye Teslim', action: () => { setIsTutanakDropdownOpen(false); alert('"7- Başka Müşteriye Teslim" yakında eklenecektir.'); } }
+                                       ].map((tutanakObj, idx) => (
+                                          <button 
+                                            key={idx}
+                                            onClick={tutanakObj.action}
+                                            className="w-full px-4 py-2.5 text-left text-xs font-bold text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors border-b border-gray-50 last:border-0"
+                                          >
+                                            {tutanakObj.label}
+                                          </button>
+                                       ))}
+                                    </div>
+                                  </>
+                                )}
+                             </div>
+
                              {selectedRoomDetail?.giftMonths > 0 ? (
                                 <div className="flex items-center bg-purple-100 text-purple-700 px-3 py-2 rounded text-xs font-bold gap-1 shadow-sm border border-purple-200">
                                    <Gift size={14}/> {selectedRoomDetail.giftMonths} Ay Hediye Edildi
@@ -7009,6 +7598,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
              <div className="p-5 border-b border-gray-100 flex justify-between items-center"><h3 className="text-lg font-medium w-full text-center">Yeni Depo Ekle</h3><button onClick={()=>setIsAddWarehouseModalOpen(false)}><X size={20} className="text-gray-400"/></button></div>
              <div className="p-6">
                 <input type="text" value={newDepoName} onChange={(e)=>setNewDepoName(e.target.value.toUpperCase())} placeholder="Depo Adı" className="w-full border border-gray-300 rounded px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500" />
+                <input type="text" value={newDepoAddress} onChange={(e)=>setNewDepoAddress(e.target.value)} placeholder="Depo Adresi" className="w-full border border-gray-300 rounded px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500" />
                 <input type="number" value={newDepoM3} onChange={(e)=>setNewDepoM3(e.target.value)} placeholder="Toplam Hacim (m³)" className="w-full border border-gray-300 rounded px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500" />
                 <button onClick={handleAddWarehouse} className="w-full bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded transition-colors">Kaydet</button>
              </div>
@@ -7022,6 +7612,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
              <div className="p-5 border-b border-gray-100 flex justify-between items-center"><h3 className="text-lg font-medium w-full text-center">Depoyu Düzenle</h3><button onClick={()=>setIsEditWarehouseModalOpen(false)}><X size={20} className="text-gray-400"/></button></div>
              <div className="p-6">
                 <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Depo Adı</label><input type="text" value={editWarehouseData.name} onChange={(e)=>setEditWarehouseData({...editWarehouseData, name: e.target.value.toUpperCase()})} placeholder="Depo Adı" className="w-full border border-gray-300 rounded px-3 py-2 mb-4 focus:outline-none focus:border-cyan-500" />
+                <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Depo Adresi</label><input type="text" value={editWarehouseData.address || ''} onChange={(e)=>setEditWarehouseData({...editWarehouseData, address: e.target.value})} placeholder="Depo Adresi" className="w-full border border-gray-300 rounded px-3 py-2 mb-4 focus:outline-none focus:border-cyan-500" />
                 <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Toplam Hacim (m³)</label><input type="number" value={editWarehouseData.m3} onChange={(e)=>setEditWarehouseData({...editWarehouseData, m3: e.target.value})} placeholder="Toplam Hacim (m³)" className="w-full border border-gray-300 rounded px-3 py-2 mb-6 focus:outline-none focus:border-cyan-500" />
                 <button onClick={handleEditWarehouse} className="w-full bg-[#1bc5bd] hover:bg-teal-500 text-white px-4 py-2 rounded transition-colors font-medium">Değişiklikleri Kaydet</button>
              </div>
@@ -7586,27 +8177,56 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Alternatif Telefon</label><input type="text" value={editCustomerData.altPhone} onChange={(e) => setEditCustomerData({...editCustomerData, altPhone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Müşteri Adresi</label><input type="text" value={editCustomerData.address} onChange={(e) => setEditCustomerData({...editCustomerData, address: e.target.value})} placeholder="Tam Adres" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2 mt-2">
-                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{editCustomerData.type === 'bireysel' ? 'Kimlik Fotoğrafı / Belgesi Yükle' : 'Vergi Levhası Fotoğrafı / Belgesi Yükle'}</label>
-                      <label className="border-2 border-dashed border-gray-300 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-gray-50 hover:border-gray-400 transition-colors cursor-pointer bg-slate-50 group">
-                        {editCustomerData.documentPhoto ? (
-                           <div className="flex flex-col items-center">
-                              <Check size={32} className="text-[#1bc5bd] mb-2" />
-                              <span className="text-sm font-bold text-teal-600">Belge Eklendi</span>
-                              <img src={editCustomerData.documentPhoto} alt="Belge" className="mt-4 h-24 object-contain rounded border border-gray-200" />
-                           </div>
-                        ) : (
-                           <>
-                             <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><Upload size={20} className="text-gray-400 group-hover:text-[#1bc5bd]" /></div>
-                             <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-[#1bc5bd]">Dosya seçmek için tıklayın</span> veya sürükleyip bırakın</p>
-                             <p className="text-xs text-gray-400">PNG, JPG veya PDF formatında yükleyebilirsiniz</p>
-                           </>
-                        )}
-<input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEditCustomerData({...editCustomerData, documentPhoto: url}); } }} />                      </label>
-                      {editCustomerData.documentPhoto && (
-                          <div className="flex justify-center mt-2">
-                              <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, documentPhoto: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Mevcut Belgeyi Kaldır</button>
+                      <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{editCustomerData.type === 'bireysel' ? 'Kimlik Fotoğrafı (Ön ve Arka Yüz)' : 'Kurumsal Belgeler'}</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {/* ÖN YÜZ DÜZENLE */}
+                          <div className="flex flex-col gap-2">
+                              <label className="border-2 border-dashed border-gray-300 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-gray-50 hover:border-gray-400 transition-colors cursor-pointer bg-slate-50 group h-full relative">
+                                {editCustomerData.documentPhotoFront || editCustomerData.documentPhoto ? (
+                                   <div className="flex flex-col items-center">
+                                      <Check size={32} className="text-[#1bc5bd] mb-2" />
+                                      <span className="text-sm font-bold text-teal-600">Ön Yüz Eklendi</span>
+                                      <img src={editCustomerData.documentPhotoFront || editCustomerData.documentPhoto} alt="Ön Yüz" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                                   </div>
+                                ) : (
+                                   <>
+                                     <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><Upload size={20} className="text-gray-400 group-hover:text-[#1bc5bd]" /></div>
+                                     <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-[#1bc5bd]">{editCustomerData.type === 'bireysel' ? 'Ön Yüz Seç' : 'Belge 1 Seç'}</span></p>
+                                   </>
+                                )}
+                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEditCustomerData({...editCustomerData, documentPhotoFront: url, documentPhoto: url}); } }} />
+                              </label>
+                              {(editCustomerData.documentPhotoFront || editCustomerData.documentPhoto) && (
+                                  <div className="flex justify-center mt-1">
+                                      <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, documentPhotoFront: null, documentPhoto: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Ön Yüzü Kaldır</button>
+                                  </div>
+                              )}
                           </div>
-                      )}
+
+                          {/* ARKA YÜZ DÜZENLE */}
+                          <div className="flex flex-col gap-2">
+                              <label className="border-2 border-dashed border-gray-300 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-gray-50 hover:border-gray-400 transition-colors cursor-pointer bg-slate-50 group h-full relative">
+                                {editCustomerData.documentPhotoBack ? (
+                                   <div className="flex flex-col items-center">
+                                      <Check size={32} className="text-[#1bc5bd] mb-2" />
+                                      <span className="text-sm font-bold text-teal-600">Arka Yüz Eklendi</span>
+                                      <img src={editCustomerData.documentPhotoBack} alt="Arka Yüz" className="mt-4 h-24 object-contain rounded border border-gray-200" />
+                                   </div>
+                                ) : (
+                                   <>
+                                     <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><Upload size={20} className="text-gray-400 group-hover:text-[#1bc5bd]" /></div>
+                                     <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-[#1bc5bd]">{editCustomerData.type === 'bireysel' ? 'Arka Yüz Seç' : 'Belge 2 Seç'}</span></p>
+                                   </>
+                                )}
+                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEditCustomerData({...editCustomerData, documentPhotoBack: url}); } }} />
+                              </label>
+                              {editCustomerData.documentPhotoBack && (
+                                  <div className="flex justify-center mt-1">
+                                      <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, documentPhotoBack: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Arka Yüzü Kaldır</button>
+                                  </div>
+                              )}
+                          </div>
+                      </div>
                   </div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Özel Notlar</label><textarea value={editCustomerData.notes} onChange={(e) => setEditCustomerData({...editCustomerData, notes: e.target.value})} rows="3" className="border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#1bc5bd] resize-none font-medium text-slate-700"></textarea></div>
                   
