@@ -1783,31 +1783,31 @@ const handleSaveCustomer = async () => {
       }
 
       const custId = 'cust_' + Date.now();
-      const cust = {
-          id: custId,
-          customerNo: newNo,
-          name: newCustomer.name.toUpperCase(),
-          tc: newCustomer.tc,
-          phone: newCustomer.phone,
-          altPhone: newCustomer.altPhone,
-          address: newCustomer.address,
-          notes: newCustomer.notes,
-          hasProxy: newCustomer.hasProxy,
-          proxyName: newCustomer.hasProxy ? newCustomer.proxyName.toUpperCase() : '',
-          proxyTc: newCustomer.hasProxy ? newCustomer.proxyTc : '',
-          proxyPhone: newCustomer.hasProxy ? newCustomer.proxyPhone : '',
-          proxyAltPhone: newCustomer.hasProxy ? newCustomer.proxyAltPhone : '',
-          proxyAddress: newCustomer.hasProxy ? newCustomer.proxyAddress : '',
-          proxyDocumentPhoto: newCustomer.hasProxy ? newCustomer.proxyDocumentPhoto : null,
-          type: customerType,
-          createdAt: new Date().toLocaleDateString('tr-TR'),
-          invoices: [],
-          documentPhoto: newCustomer.documentPhotoFront || newCustomer.documentPhoto,
-          documentPhotoFront: newCustomer.documentPhotoFront,
-          documentPhotoBack: newCustomer.documentPhotoBack,
-          payments: [], extraDebts: [], ledgerOverrides: []
-      };
-
+const cust = {
+              id: custId,
+              customerNo: newNo,
+              name: newCustomer.name.toUpperCase(),
+              tc: newCustomer.tc,
+              phone: newCustomer.phone,
+              altPhone: newCustomer.altPhone,
+              address: newCustomer.address,
+              notes: newCustomer.notes,
+              hasProxy: newCustomer.hasProxy,
+              proxyName: newCustomer.hasProxy ? newCustomer.proxyName.toUpperCase() : '',
+              proxyTc: newCustomer.hasProxy ? newCustomer.proxyTc : '',
+              proxyPhone: newCustomer.hasProxy ? newCustomer.proxyPhone : '',
+              proxyAltPhone: newCustomer.hasProxy ? newCustomer.proxyAltPhone : '',
+              proxyAddress: newCustomer.hasProxy ? newCustomer.proxyAddress : '',
+              proxyDocumentPhoto: newCustomer.hasProxy ? newCustomer.proxyDocumentPhoto : null,
+              type: customerType,
+              createdAt: new Date().toLocaleDateString('tr-TR'),
+              invoices: [],
+              documentPhoto: newCustomer.documentPhotoFront || null,
+              documentPhotoFront: newCustomer.documentPhotoFront || null,
+              documentPhotoBack: newCustomer.documentPhotoBack || null,
+              payments: [], extraDebts: [], ledgerOverrides: []
+          };
+          
       if (db && firebaseUser) {
           try {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', custId), cust);
