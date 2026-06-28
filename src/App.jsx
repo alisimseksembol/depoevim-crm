@@ -6376,24 +6376,24 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                           </div>
                                        </div>
                                     </div>
-                                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-8 w-full sm:w-auto">
-                                       <div className="flex flex-col sm:items-end">
-<div className="flex items-center gap-3">
-                                            <span className={`font-extrabold text-2xl ${payment.isGifted ? 'text-purple-600' : (payment.isFree ? 'text-cyan-600' : 'text-gray-800')}`}>{(Number(payment.amount) || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL</span>
-                                            {!payment.isGifted && !payment.isFree && (
-                                                <button onClick={() => {
-                                                    setSpecificMonthEditData({
-                                                        txId: payment.txId,
-                                                        title: payment.title,
-                                                        currentAmount: payment.amount,
-                                                        newAmount: payment.amount,
-                                                        date: payment.dateObj,
-                                                        desc: `${selectedRoomDetail.name} Odası - Kira Düzenlemesi (${payment.month} ${payment.year})`
-                                                    });
-                                                    setIsEditSpecificMonthModalOpen(true);
-                                                }} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-2 rounded-lg transition-colors shadow-sm" title="Bu ayın kirasını düzenle"><Edit size={16}/></button>
-                                            )}
-                                         </div>
+<div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-8 w-full sm:w-auto">
+                                        <div className="flex flex-col sm:items-end">
+                                          <div className="flex items-center gap-3">
+                                             <span className={`font-extrabold text-2xl ${payment.isGifted ? 'text-purple-600' : (payment.isFree ? 'text-cyan-600' : 'text-gray-800')}`}>{(Number(payment.amount) || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL</span>
+                                             {!payment.isFree && (
+                                                 <button onClick={() => {
+                                                     setSpecificMonthEditData({
+                                                         txId: payment.txId,
+                                                         title: payment.title,
+                                                         currentAmount: payment.amount,
+                                                         newAmount: payment.amount,
+                                                         date: payment.dateObj,
+                                                         desc: `${selectedRoomDetail.name} Odası - Kira Düzenlemesi (${payment.month} ${payment.year})`
+                                                     });
+                                                     setIsEditSpecificMonthModalOpen(true);
+                                                 }} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-2 rounded-lg transition-colors shadow-sm" title="Bu ayın kirasını düzenle"><Edit size={16}/></button>
+                                             )}
+                                          </div>
 <span className="text-[11px] text-gray-400 font-medium mt-1">Net: {Number(payment.baseAmount).toFixed(0)} TL {payment.hasKdv && `+ KDV: ${Number(payment.kdvAmount).toFixed(0)} TL`}</span>                                       </div>
                                     </div>
                                  </div>
