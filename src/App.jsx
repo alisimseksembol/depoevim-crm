@@ -819,7 +819,8 @@ const handleSaveEditPending = async () => {
       }).join('');
 
       // Footer: tfoot tekniği ile her sayfada tekrar eder
-      const footerHtml = `
+const footerHtml = `
+          <div style="padding: 0 24px;">
           <table style="width:100%; border-collapse:collapse; border:none; font-family:Arial,sans-serif; font-size:9pt;">
               <tr>
                   <td style="width:33%; vertical-align:bottom; padding:0; border:none;">
@@ -846,14 +847,18 @@ const handleSaveEditPending = async () => {
                   </td>
               </tr>
           </table>
+          </div>
       `;
 
-      iframe.contentWindow.document.open();
+iframe.contentWindow.document.open();
+      
+      const fileName = contractCustomer?.name ? normalizeStr(contractCustomer.name).replace(/\s+/g, '-') : 'musteri';
+      
       iframe.contentWindow.document.write(`
           <!DOCTYPE html>
           <html>
           <head>
-              <title>${contractCustomer?.name} - Sözleşme</title>
+              <title>musteri_${fileName}_sozlesme</title>
               <style>
                   @page { size: A4 portrait; margin: 15mm 15mm 28mm 15mm; }
 
@@ -926,8 +931,9 @@ const handleSaveEditPending = async () => {
                   table.page-table > tbody > tr > td,
                   table.page-table > tfoot > tr > td { border: none; padding: 0; vertical-align: top; }
 
-                  tfoot.repeat-footer > tr > td {
-                      padding-top: 10px;
+tfoot.repeat-footer > tr > td {
+                      padding-top: 30px;
+                      padding-bottom: 10px;
                       border-top: 1px solid #bbb;
                   }
               </style>
@@ -7573,53 +7579,76 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  </div>
              </div>
 
-             {/* Modal Body - Printable Area Wrapper */}
+{/* Modal Body - Printable Area Wrapper */}
              <div className="p-6 overflow-y-auto flex-1 flex justify-center bg-gray-200">
                 {/* A4 Kağıt Simülasyonu */}
-                <div id="printable-contract" className="bg-white shadow-md border border-gray-300 text-black relative flex flex-col" style={{ width: '210mm', minHeight: '297mm', padding: '20mm 20mm 35mm 20mm' }}>
+                <div id="printable-contract" className="bg-white shadow-md text-black relative flex flex-col" style={{ width: '210mm', minHeight: '297mm', padding: '15mm 15mm 28mm 15mm', fontFamily: 'Arial, sans-serif' }}>
                     
                     {/* Filigran (Watermark) */}
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-45 text-[80pt] font-bold text-black opacity-5 pointer-events-none z-0 whitespace-nowrap">Depoevim</div>
                     
-                    <div className="relative z-10 flex-1">
-                        <div className="text-center text-[14pt] font-bold underline mb-8">Eşya Depolama Sözleşmesi</div>
-                        
-                        {contractSettings.clauses.map(clause => (
-                            <div key={clause.id} className="mb-4">
-                                <h3 className="text-[12pt] font-bold mb-1">{clause.title}</h3>
-                                <p className="text-[11pt] whitespace-pre-wrap leading-relaxed text-justify">
-                                    {renderClauseWithData(clause.content)}
-                                </p>
-                            </div>
-                        ))}
-
-                        <div className="mt-12 flex justify-between break-inside-avoid">
-                            <div className="w-[45%] text-center">
-                                <div className="font-bold mb-6 text-[11pt]">HİZMET VEREN</div>
-                                <div className="text-[10pt]">Ad Soyad / Ünvan:<br/>{contractSettings.accountHolder}</div>
-                                <div className="text-[10pt] mt-6">İmza Yetkili Kişi Ad Soyad:</div>
-                                <div className="border-b border-black w-[60%] mx-auto mt-10"></div>
-                            </div>
-                            <div className="w-[45%] text-center">
-                                <div className="font-bold mb-6 text-[11pt]">DEPOLATAN KİŞİ</div>
-                                <div className="text-[10pt]">Ad Soyad / Ünvan:<br/>{contractCustomer.name}</div>
-                                <div className="text-[10pt] mt-6">İmza:</div>
-                                <div className="border-b border-black w-[60%] mx-auto mt-10"></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Önizleme İçin Alt Bilgi (Footer) Simülasyonu */}
-                    <div className="absolute bottom-[10mm] left-[20mm] right-[20mm] flex justify-between items-end border-t border-gray-200 pt-2 text-[9pt]">
-                        <div className="w-[45%]">
-                            <div className="font-bold text-gray-500 mb-1">HİZMET VEREN</div>
-                            <div className="font-bold">{contractSettings.accountHolder}</div>
-                        </div>
-                        <div className="w-[45%] text-right">
-                            <div className="font-bold text-gray-500 mb-1">DEPOLATAN KİŞİ</div>
-                            <div className="font-bold">{contractCustomer.name}</div>
-                        </div>
-                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', flex: 1, position: 'relative', zIndex: 10 }}>
+                        <tfoot style={{ display: 'table-footer-group' }}>
+                            <tr>
+                                <td style={{ paddingTop: '30px', paddingBottom: '10px', borderTop: '1px solid #bbb' }}>
+                                    <div style={{ padding: '0 24px' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', border: 'none', fontSize: '9pt' }}>
+                                            <tbody>
+                                                <tr>
+                                                    <td style={{ width: '33%', verticalAlign: 'bottom', padding: 0, border: 'none' }}>
+                                                        <div style={{ lineHeight: '1.7' }}>
+                                                            <div style={{ fontWeight: 'bold' }}>HİZMET VEREN</div>
+                                                            <div><strong>Ad Soyad / Ünvan:</strong> {contractSettings.accountHolder}</div>
+                                                            <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
+                                                            <div><strong>İmza:</strong></div>
+                                                            <div style={{ marginTop: '6px' }}>
+                                                                <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style={{ width: '110px', mixBlendMode: 'multiply', opacity: 0.95 }} alt="Kaşe" />
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ width: '34%', verticalAlign: 'bottom', textAlign: 'center', paddingBottom: '4px', border: 'none' }}>
+                                                        <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style={{ height: '40px', objectFit: 'contain' }} />
+                                                    </td>
+                                                    <td style={{ width: '33%', verticalAlign: 'bottom', padding: 0, border: 'none' }}>
+                                                        <div style={{ lineHeight: '1.7' }}>
+                                                            <div style={{ fontWeight: 'bold' }}>DEPOLATAN KİŞİ</div>
+                                                            <div><strong>Ad Soyad / Ünvan:</strong> {contractCustomer.name}</div>
+                                                            <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
+                                                            <div><strong>İmza:</strong></div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tfoot>
+                        <tbody>
+                            <tr>
+                                <td style={{ padding: 0, verticalAlign: 'top' }}>
+                                    <div style={{ border: '1px solid #d0d0d0', borderRadius: '4px', padding: '22px 24px', background: '#fff' }}>
+                                        <div style={{ textAlign: 'center', fontSize: '15pt', fontWeight: 'bold', marginBottom: '20px', color: '#111' }}>Eşya Depolama Sözleşmesi</div>
+                                        
+                                        {contractSettings.clauses.map(clause => (
+                                            <div key={clause.id} style={{ marginBottom: '16px', pageBreakInside: 'avoid' }}>
+                                                <h3 style={{ fontSize: '10.5pt', fontWeight: 'bold', color: '#111', margin: '0 0 5px 0' }}>{clause.title}</h3>
+                                                {renderClauseWithData(clause.content).split('\n').map((line, idx) => {
+                                                    const trimmed = line.trim();
+                                                    if (!trimmed) return <br key={idx} />;
+                                                    const colonIdx = trimmed.indexOf(':');
+                                                    if (colonIdx > 0 && colonIdx < 60 && trimmed.substring(0, colonIdx).split(' ').length <= 8) {
+                                                        return <p key={idx} style={{ margin: '0 0 3px 0', textAlign: 'justify', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}><strong>{trimmed.substring(0, colonIdx)}:</strong> {trimmed.substring(colonIdx + 1)}</p>;
+                                                    }
+                                                    return <p key={idx} style={{ margin: '0 0 3px 0', textAlign: 'justify', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}>{trimmed}</p>;
+                                                })}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
              </div>
 
