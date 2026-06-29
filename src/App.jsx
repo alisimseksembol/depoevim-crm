@@ -830,19 +830,19 @@ const footerHtml = `
                           <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
                           <div><strong>İmza:</strong><br/><br/></div>
                           <div style="margin-top:6px;">
-                              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style="width:110px; mix-blend-mode:multiply; opacity:0.95;" />
+                              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style="width:110px; mix-blend-mode:multiply; opacity:0.95;" /><br/><br/>
                           </div>
                       </div>
                   </td>
                   <td style="width:34%; vertical-align:bottom; text-align:center; padding-bottom:4px; border:none;">
-                      <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:40px; object-fit:contain;" />
+                      <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:40px; object-fit:contain;" /><br/><br/>
                   </td>
                   <td style="width:33%; vertical-align:bottom; padding:0; border:none;">
                       <div style="line-height:1.7;">
                           <div style="font-weight:bold;">DEPOLATAN KİŞİ</div>
                           <div><strong>Ad Soyad / Ünvan:</strong> ${contractCustomer?.name}</div>
                           <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                          <div><strong>İmza:</strong></div>
+                          <div><strong>İmza:</strong><br/><br/></div>
                       </div>
                   </td>
               </tr>
