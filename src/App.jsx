@@ -797,84 +797,89 @@ const handleSaveEditPending = async () => {
           </div>
       `).join('');
 
+      // Her sayfanın altına tekrarlayan imza/damga/logo footer'ı için thead/tfoot tekniği
+      // Hamdi Gökbulut sözleşmesiyle aynı temiz tasarım
+      const footerHtml = `
+          <table style="width:100%; border-collapse:collapse; border:none;">
+              <tr>
+                  <td style="width:33%; vertical-align:bottom; padding:0; border:none;">
+                      <div style="font-size:9.5pt; line-height:1.6;">
+                          <div style="font-weight:bold; margin-bottom:2px;">HİZMET VEREN</div>
+                          <div><strong>Ad Soyad / Ünvan:</strong> ${contractSettings.accountHolder}</div>
+                          <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
+                          <div><strong>İmza:</strong></div>
+                          <div style="margin-top:4px;">
+                              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style="width:120px; mix-blend-mode:multiply; opacity:0.95;" />
+                          </div>
+                      </div>
+                  </td>
+                  <td style="width:34%; vertical-align:bottom; text-align:center; padding:0; border:none;">
+                      <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:42px; object-fit:contain;" />
+                  </td>
+                  <td style="width:33%; vertical-align:bottom; text-align:right; padding:0; border:none;">
+                      <div style="font-size:9.5pt; line-height:1.6; text-align:left; float:right; max-width:220px;">
+                          <div style="font-weight:bold; margin-bottom:2px;">DEPOLATAN KİŞİ</div>
+                          <div><strong>Ad Soyad / Ünvan:</strong> ${contractCustomer?.name}</div>
+                          <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
+                          <div><strong>İmza:</strong></div>
+                      </div>
+                  </td>
+              </tr>
+          </table>
+      `;
+
       iframe.contentWindow.document.open();
-iframe.contentWindow.document.write(`
+      iframe.contentWindow.document.write(`
           <!DOCTYPE html>
           <html>
           <head>
               <title>${contractCustomer?.name} - Sözleşme</title>
               <style>
-                  @page { size: A4 portrait; margin: 15mm; } 
-                  body { font-family: 'Arial', sans-serif; line-height: 1.4; font-size: 11pt; color: #000; margin: 0; padding: 0; }
-                  
-                  /* Sola dayalı düzen (PDF'teki gibi) */
-                  h3 { font-size: 11pt; font-weight: bold; margin-top: 12px; margin-bottom: 4px; color: #000; text-align: left; }
-                  p { margin-bottom: 6px; text-align: justify; page-break-inside: avoid; }
-                  .clause { page-break-inside: avoid; margin-bottom: 15px; }
-                  
+                  @page { size: A4 portrait; margin: 20mm 15mm 25mm 15mm; }
+                  body { font-family: Arial, sans-serif; font-size: 10.5pt; color: #000; line-height: 1.5; margin: 0; padding: 0; }
+
+                  /* Başlık */
+                  .doc-title { text-align: center; font-size: 14pt; font-weight: bold; text-decoration: underline; margin-bottom: 18px; }
+
+                  /* Maddeler */
+                  .clause { margin-bottom: 14px; page-break-inside: avoid; }
+                  .clause h3 { font-size: 10.5pt; font-weight: bold; margin: 0 0 4px 0; }
+                  .clause p { margin: 0; text-align: justify; }
+
                   /* Filigran */
-                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80pt; font-weight: bold; color: rgba(0, 0, 0, 0.04); z-index: -1; white-space: nowrap; }
-                  
-                  /* Sayfa boşluklarını koruyan ve sayfaları sonuna kadar dolduran tablo yapısı */
-                  table { width: 100%; border-collapse: collapse; border: none; }
-                  td, th { border: none; padding: 0; vertical-align: top; }
-.footer-space { height: 170px; } /* Alt imza alanı biraz yukarı çıktığı için ana metin çarpmasın diye boşluk artırıldı */
-                  
-                  /* Her sayfanın altına sabitlenen Mühür/Logo/İmza alanı */
-                  .fixed-footer { 
-                      position: fixed; 
-                      bottom: 15mm; /* Tüm imza alanı sayfanın en dibinden 1.5 cm yukarı çekildi */
-                      left: 0; 
-                      right: 0; 
-                      height: 120px; 
-                      display: flex; 
-                      justify-content: space-between; 
-                      align-items: flex-end; 
-                      font-size: 10pt; 
-                      text-align: left;
-                      background: white;
-                  }
-                  .footer-box { width: 33%; position: relative; }
-                  .footer-box.center { text-align: center; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 10px; }
-                  .footer-box div { margin-bottom: 3px; }
-                  .stamp { position: absolute; top: 60px; left: -5px; width: 140px; mix-blend-mode: multiply; opacity: 0.95; } /* Mühür yazıların üstüne binmesin diye yazının altına itildi */
+                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 72pt; font-weight: bold; color: rgba(0,0,0,0.035); z-index: -1; white-space: nowrap; pointer-events: none; }
+
+                  /* Her sayfada tekrarlayan footer: tfoot tekniği */
+                  table.page-table { width: 100%; border-collapse: collapse; }
+                  table.page-table td, table.page-table th { border: none; padding: 0; vertical-align: top; }
+
+                  thead.repeat-header td { height: 0; padding: 0; }
+                  tfoot.repeat-footer td { padding-top: 12px; }
+
+                  /* Bölücü çizgi footer üstünde */
+                  tfoot.repeat-footer td { border-top: 1px solid #ccc; }
               </style>
           </head>
           <body>
               <div class="watermark">Depoevim</div>
 
-              <!-- ALT ALAN: Solda Mühür, Ortada Logo, Sağda Müşteri (HER SAYFADA SABİT) -->
-              <div class="fixed-footer">
-                  <div class="footer-box">
-                      <div><strong>HİZMET VEREN</strong></div>
-                      <div><strong>Ad Soyad / Ünvan:</strong> ${contractSettings.accountHolder}</div>
-                      <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                      <div><strong>İmza:</strong></div>
-                      <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" class="stamp" />
-                  </div>
-                  <div class="footer-box center">
-                      <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Logo" style="height: 45px; object-fit: contain;" />
-                  </div>
-                  <div class="footer-box">
-                      <div><strong>DEPOLATAN KİŞİ</strong></div>
-                      <div><strong>Ad Soyad / Ünvan:</strong> ${contractCustomer?.name}</div>
-                      <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                      <div><strong>İmza:</strong></div>
-                  </div>
-              </div>
-              
-              <!-- ANA İÇERİK (SAYFA DOLUNCA OTOMATİK DİĞER SAYFAYA GEÇER) -->
-              <table>
-                  <thead><tr><td><div style="height: 10px;"></div></td></tr></thead>
+              <table class="page-table">
+                  <thead class="repeat-header">
+                      <tr><td></td></tr>
+                  </thead>
+                  <tfoot class="repeat-footer">
+                      <tr>
+                          <td>${footerHtml}</td>
+                      </tr>
+                  </tfoot>
                   <tbody>
                       <tr>
                           <td>
-                              <div style="text-align: center; font-size: 14pt; font-weight: bold; margin-bottom: 20px; text-decoration: underline;">Eşya Depolama Sözleşmesi</div>
+                              <div class="doc-title">Eşya Depolama Sözleşmesi</div>
                               ${clausesHtml}
                           </td>
                       </tr>
                   </tbody>
-                  <tfoot><tr><td><div class="footer-space"></div></td></tr></tfoot>
               </table>
           </body>
           </html>
