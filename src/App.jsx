@@ -962,12 +962,20 @@ tfoot.repeat-footer > tr > td {
       `);
       iframe.contentWindow.document.close();
       
-      setTimeout(() => {
+setTimeout(() => {
+          // Yazdırma anında sayfa başlığını değiştirip PDF ismini ayarlıyoruz
+          const originalTitle = document.title;
+          const fileName = contractCustomer?.name ? normalizeStr(contractCustomer.name).replace(/\s+/g, '-') : 'musteri';
+          document.title = `musteri_${fileName}_sozlesme`;
+          
           iframe.contentWindow.focus();
           iframe.contentWindow.print(); // PDF olarak kaydetme ekranını doğrudan tetikler
+          
+          // Yazdırma penceresi açıldıktan sonra orijinal başlığı geri al
+          document.title = originalTitle;
           setTimeout(() => { document.body.removeChild(iframe); }, 1000);
       }, 500);
-  };
+};
 
   const handlePrintLedger = (customer, ledgerTransactions, finalBalance, periodStr = 'all') => {
       const iframe = document.createElement('iframe');
@@ -7581,77 +7589,68 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
 {/* Modal Body - Printable Area Wrapper */}
              <div className="p-6 overflow-y-auto flex-1 flex justify-center bg-gray-200">
-                {/* A4 Kağıt Simülasyonu */}
-                <div id="printable-contract" className="bg-white shadow-md text-black relative flex flex-col" style={{ width: '210mm', minHeight: '297mm', padding: '15mm 15mm 28mm 15mm', fontFamily: 'Arial, sans-serif' }}>
+                {/* Kağıt Simülasyonu (Ekranda Düzgün Görünmesi İçin Tablo Yerine Flex Akışı) */}
+                <div id="printable-contract" className="bg-white shadow-md text-black relative flex flex-col justify-between" style={{ width: '100%', maxWidth: '210mm', minHeight: '297mm', padding: '20px', fontFamily: 'Arial, sans-serif' }}>
                     
                     {/* Filigran (Watermark) */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-45 text-[80pt] font-bold text-black opacity-5 pointer-events-none z-0 whitespace-nowrap">Depoevim</div>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-45 text-[40pt] md:text-[80pt] font-bold text-black opacity-5 pointer-events-none z-0 whitespace-nowrap">Depoevim</div>
                     
-                    <table style={{ width: '100%', borderCollapse: 'collapse', flex: 1, position: 'relative', zIndex: 10 }}>
-                        <tfoot style={{ display: 'table-footer-group' }}>
-                            <tr>
-                                <td style={{ paddingTop: '30px', paddingBottom: '10px', borderTop: '1px solid #bbb' }}>
-                                    <div style={{ padding: '0 24px' }}>
-                                        <table style={{ width: '100%', borderCollapse: 'collapse', border: 'none', fontSize: '9pt' }}>
-                                            <tbody>
-                                                <tr>
-                                                    <td style={{ width: '33%', verticalAlign: 'bottom', padding: 0, border: 'none' }}>
-                                                        <div style={{ lineHeight: '1.7' }}>
-                                                            <div style={{ fontWeight: 'bold' }}>HİZMET VEREN</div>
-                                                            <div><strong>Ad Soyad / Ünvan:</strong> {contractSettings.accountHolder}</div>
-                                                            <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                                                            <div><strong>İmza:</strong></div>
-                                                            <div style={{ marginTop: '6px' }}>
-                                                                <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style={{ width: '110px', mixBlendMode: 'multiply', opacity: 0.95 }} alt="Kaşe" />
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                    <td style={{ width: '34%', verticalAlign: 'bottom', textAlign: 'center', paddingBottom: '4px', border: 'none' }}>
-                                                        <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style={{ height: '40px', objectFit: 'contain' }} />
-                                                    </td>
-                                                    <td style={{ width: '33%', verticalAlign: 'bottom', padding: 0, border: 'none' }}>
-                                                        <div style={{ lineHeight: '1.7' }}>
-                                                            <div style={{ fontWeight: 'bold' }}>DEPOLATAN KİŞİ</div>
-                                                            <div><strong>Ad Soyad / Ünvan:</strong> {contractCustomer.name}</div>
-                                                            <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                                                            <div><strong>İmza:</strong></div>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </td>
-                            </tr>
-                        </tfoot>
-                        <tbody>
-                            <tr>
-                                <td style={{ padding: 0, verticalAlign: 'top' }}>
-                                    <div style={{ border: '1px solid #d0d0d0', borderRadius: '4px', padding: '22px 24px', background: '#fff' }}>
-                                        <div style={{ textAlign: 'center', fontSize: '15pt', fontWeight: 'bold', marginBottom: '20px', color: '#111' }}>Eşya Depolama Sözleşmesi</div>
-                                        
-                                        {contractSettings.clauses.map(clause => (
-                                            <div key={clause.id} style={{ marginBottom: '16px', pageBreakInside: 'avoid' }}>
-                                                <h3 style={{ fontSize: '10.5pt', fontWeight: 'bold', color: '#111', margin: '0 0 5px 0' }}>{clause.title}</h3>
-                                                {renderClauseWithData(clause.content).split('\n').map((line, idx) => {
-                                                    const trimmed = line.trim();
-                                                    if (!trimmed) return <br key={idx} />;
-                                                    const colonIdx = trimmed.indexOf(':');
-                                                    if (colonIdx > 0 && colonIdx < 60 && trimmed.substring(0, colonIdx).split(' ').length <= 8) {
-                                                        return <p key={idx} style={{ margin: '0 0 3px 0', textAlign: 'justify', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}><strong>{trimmed.substring(0, colonIdx)}:</strong> {trimmed.substring(colonIdx + 1)}</p>;
-                                                    }
-                                                    return <p key={idx} style={{ margin: '0 0 3px 0', textAlign: 'justify', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}>{trimmed}</p>;
-                                                })}
+                    {/* İçerik Kısmı */}
+                    <div className="relative z-10">
+                        <div style={{ border: '1px solid #d0d0d0', borderRadius: '4px', padding: '22px 24px', background: '#fff', marginBottom: '20px' }}>
+                            <div style={{ textAlign: 'center', fontSize: '15pt', fontWeight: 'bold', marginBottom: '20px', color: '#111' }}>Eşya Depolama Sözleşmesi</div>
+                            
+                            {contractSettings.clauses.map(clause => (
+                                <div key={clause.id} style={{ marginBottom: '16px' }}>
+                                    <h3 style={{ fontSize: '10.5pt', fontWeight: 'bold', color: '#111', margin: '0 0 5px 0' }}>{clause.title}</h3>
+                                    {renderClauseWithData(clause.content).split('\n').map((line, idx) => {
+                                        const trimmed = line.trim();
+                                        if (!trimmed) return <br key={idx} />;
+                                        const colonIdx = trimmed.indexOf(':');
+                                        if (colonIdx > 0 && colonIdx < 60 && trimmed.substring(0, colonIdx).split(' ').length <= 8) {
+                                            return <p key={idx} style={{ margin: '0 0 3px 0', textAlign: 'justify', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}><strong>{trimmed.substring(0, colonIdx)}:</strong> {trimmed.substring(colonIdx + 1)}</p>;
+                                        }
+                                        return <p key={idx} style={{ margin: '0 0 3px 0', textAlign: 'justify', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}>{trimmed}</p>;
+                                    })}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Footer Kısmı (Ekranda sadece en altta görünür) */}
+                    <div className="relative z-10 mt-auto pt-6 border-t border-gray-300">
+                        <table style={{ width: '100%', borderCollapse: 'collapse', border: 'none', fontSize: '9pt' }}>
+                            <tbody>
+                                <tr>
+                                    <td style={{ width: '33%', verticalAlign: 'bottom', padding: 0, border: 'none' }}>
+                                        <div style={{ lineHeight: '1.7' }}>
+                                            <div style={{ fontWeight: 'bold' }}>HİZMET VEREN</div>
+                                            <div><strong>Ad Soyad / Ünvan:</strong> {contractSettings.accountHolder}</div>
+                                            <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
+                                            <div><strong>İmza:</strong></div>
+                                            <div style={{ marginTop: '6px' }}>
+                                                <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style={{ width: '110px', mixBlendMode: 'multiply', opacity: 0.95 }} alt="Kaşe" />
                                             </div>
-                                        ))}
-                                    </div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                                        </div>
+                                    </td>
+                                    <td style={{ width: '34%', verticalAlign: 'bottom', textAlign: 'center', paddingBottom: '4px', border: 'none' }}>
+                                        <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style={{ height: '40px', objectFit: 'contain' }} />
+                                    </td>
+                                    <td style={{ width: '33%', verticalAlign: 'bottom', padding: 0, border: 'none' }}>
+                                        <div style={{ lineHeight: '1.7' }}>
+                                            <div style={{ fontWeight: 'bold' }}>DEPOLATAN KİŞİ</div>
+                                            <div><strong>Ad Soyad / Ünvan:</strong> {contractCustomer?.name}</div>
+                                            <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
+                                            <div><strong>İmza:</strong></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
                 </div>
              </div>
-
           </div>
         </div>
       )}
