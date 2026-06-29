@@ -860,7 +860,7 @@ iframe.contentWindow.document.open();
           <head>
               <title>musteri_${fileName}_sozlesme</title>
               <style>
-                  @page { size: A4 portrait; margin: 15mm 15mm 28mm 15mm; }
+                  @page { size: A4 portrait; margin: 15mm 15mm 55mm 15mm; }
 
                   /* Temel font — Hamdi sözleşmesiyle aynı */
                   body {
