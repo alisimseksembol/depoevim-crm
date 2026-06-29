@@ -828,7 +828,7 @@ const footerHtml = `
                           <div style="font-weight:bold;">HİZMET VEREN</div>
                           <div><strong>Ad Soyad / Ünvan:</strong> ${contractSettings.accountHolder}</div>
                           <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                          <div><strong>İmza:</strong><br/><br/></div>
+                          <div><strong>İmza:</strong></div>
                           <div style="margin-top:6px;">
                               <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style="width:110px; mix-blend-mode:multiply; opacity:0.95;" /><br/><br/>
                           </div>
@@ -842,7 +842,7 @@ const footerHtml = `
                           <div style="font-weight:bold;">DEPOLATAN KİŞİ</div>
                           <div><strong>Ad Soyad / Ünvan:</strong> ${contractCustomer?.name}</div>
                           <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                          <div><strong>İmza:</strong><br/><br/></div>
+                          <div><strong>İmza:</strong><br/><br/><br/><br/></div>
                       </div>
                   </td>
               </tr>
