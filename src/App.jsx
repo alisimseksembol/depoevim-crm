@@ -4642,9 +4642,13 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                      </div>
                                                  </div>
                                              </div>
-                                             <div className="flex flex-col items-start sm:items-end gap-2 sm:pl-4 sm:border-l border-white/50">
+<div className="flex flex-col items-start sm:items-end gap-2 sm:pl-4 sm:border-l border-white/50">
                                                  <span className={`text-xs font-bold px-2 py-1 rounded bg-white shadow-sm ${pData.text}`}>{pData.label}</span>
-                                                 <span className="font-black text-gray-800 bg-white/50 px-2 py-0.5 rounded text-sm">{appt.time}</span>
+                                                 <div className="flex items-center gap-2">
+                                                     <span className="font-black text-gray-800 bg-white/50 px-2 py-0.5 rounded text-sm">{appt.time}</span>
+                                                     <button onClick={() => { setEditApptData({...appt}); setIsEditApptModalOpen(true); }} className="bg-white hover:bg-indigo-50 text-indigo-600 p-1.5 rounded-lg transition-colors shadow-sm border border-indigo-100" title="Randevuyu Düzenle"><Edit size={14}/></button>
+                                                     <button onClick={() => { if(window.confirm('Bu randevuyu silmek istediğinize emin misiniz?')) handleDeleteAppointment(appt.id); }} className="bg-white hover:bg-red-50 text-red-600 p-1.5 rounded-lg transition-colors shadow-sm border border-red-100" title="Randevuyu Sil"><Trash2 size={14}/></button>
+                                                 </div>
                                              </div>
                                          </div>
                                      );
@@ -9198,6 +9202,67 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
         </div>
 )}
 
+{/* RANDEVU DÜZENLEME MODALI */}
+      {isEditApptModalOpen && editApptData && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 lg:p-8">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-in fade-in zoom-in duration-200">
+                <div className="flex items-center justify-between p-5 border-b border-gray-100 bg-indigo-50 rounded-t-2xl">
+                    <h3 className="text-lg font-bold text-indigo-700 flex items-center gap-2"><Edit size={20} /> Randevuyu Düzenle</h3>
+                    <button onClick={() => setIsEditApptModalOpen(false)} className="text-indigo-400 hover:text-indigo-600 transition-colors bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
+                </div>
+                <div className="p-6">
+                    <div className="flex flex-col gap-4">
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-gray-600">Müşteri Ad Soyad</label>
+                            <input type="text" value={editApptData.customerName} onChange={(e) => setEditApptData({...editApptData, customerName: e.target.value.toUpperCase()})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-gray-600">Telefon Numarası</label>
+                            <input type="text" value={editApptData.customerPhone} onChange={(e) => setEditApptData({...editApptData, customerPhone: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-xs font-semibold text-gray-600">Randevu Tarihi</label>
+                                <input type="date" value={editApptData.date} onChange={(e) => setEditApptData({...editApptData, date: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-xs font-semibold text-gray-600">Saat Aralığı</label>
+                                <select value={editApptData.time} onChange={(e) => setEditApptData({...editApptData, time: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700 bg-white cursor-pointer">
+                                   <option value="09:00 - 10:00">09:00 - 10:00</option>
+                                   <option value="10:00 - 11:00">10:00 - 11:00</option>
+                                   <option value="11:00 - 12:00">11:00 - 12:00</option>
+                                   <option value="12:00 - 13:00">12:00 - 13:00</option>
+                                   <option value="13:00 - 14:00">13:00 - 14:00</option>
+                                   <option value="14:00 - 15:00">14:00 - 15:00</option>
+                                   <option value="15:00 - 16:00">15:00 - 16:00</option>
+                                   <option value="16:00 - 17:00">16:00 - 17:00</option>
+                                   <option value="17:00 - 18:00">17:00 - 18:00</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-gray-600">Randevu Amacı</label>
+                            <select value={editApptData.purpose} onChange={(e) => setEditApptData({...editApptData, purpose: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700 bg-white cursor-pointer">
+                                {Object.entries(appointmentPurposes).map(([key, data]) => (
+                                    <option key={key} value={key}>{data.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-gray-600">Depo Şubesi Seçimi</label>
+                            <select value={editApptData.warehouseId} onChange={(e) => setEditApptData({...editApptData, warehouseId: parseInt(e.target.value)})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700 bg-white cursor-pointer">
+                                {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                    <div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-6">
+                        <button onClick={() => setIsEditApptModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl font-bold transition-colors text-sm">İptal</button>
+                        <button onClick={handleSaveEditAppointment} className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-2.5 rounded-xl font-bold text-sm transition-colors flex items-center gap-2 shadow-lg shadow-indigo-500/30"><Check size={18}/> Değişiklikleri Kaydet</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 }
