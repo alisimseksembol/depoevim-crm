@@ -3474,22 +3474,33 @@ const handleSaveAppointment = async () => {
         purpose: appointmentData.purpose
     };
 
-    // FİREBASE'E KAYIT İŞLEMİ
+// FİREBASE'E KAYIT İŞLEMİ
     if (db && firebaseUser) {
         try {
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', String(newAppt.id)), newAppt);
         } catch(e) { console.error("Firebase Randevu Kayıt Hatası:", e); }
     }
 
-const handleDeleteAppointment = async (id) => {
-      if (db && firebaseUser) {
-          try {
-              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', String(id)));
-          } catch(e) { console.error("Randevu Silme Hatası:", e); }
-      }
-  };
+    // EKSİK OLAN KISIM BURASIYDI
+    setAppointmentData({
+        customerType: 'registered',
+        customerId: '',
+        unregisteredName: '',
+        unregisteredPhone: '',
+        warehouseId: '',
+        date: new Date().toISOString().split('T')[0],
+        time: '10:00 - 11:00',
+        purpose: 'giris-cikis'
+    });
+    setSelectedCalendarDate(appointmentData.date);
+    const d = new Date(appointmentData.date);
+    setCalendarMonth(d.getMonth());
+    setCalendarYear(d.getFullYear());
+    setActiveMenu('takvim');
+}; 
+// KAPANIS PARANTEZI BURADA BITIYOR
 
-  const handleSaveEditAppointment = async () => {
+const handleDeleteAppointment = async (id) => {
       if (!editApptData) return;
       if (db && firebaseUser) {
           try {
