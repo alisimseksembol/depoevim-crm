@@ -3462,7 +3462,7 @@ const handleSaveAppointment = async () => {
         }
     }
 
-    const newAppt = {
+const newAppt = {
         id: Date.now(),
         customerType: appointmentData.customerType,
         customerId: cId,
@@ -3474,14 +3474,14 @@ const handleSaveAppointment = async () => {
         purpose: appointmentData.purpose
     };
 
-// FİREBASE'E KAYIT İŞLEMİ
+    // FİREBASE'E KAYIT İŞLEMİ
     if (db && firebaseUser) {
         try {
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', String(newAppt.id)), newAppt);
         } catch(e) { console.error("Firebase Randevu Kayıt Hatası:", e); }
     }
 
-    // EKSİK OLAN KISIM BURASIYDI
+    // RANDEVU EKLENDİKTEN SONRA EKRANI SIFIRLA
     setAppointmentData({
         customerType: 'registered',
         customerId: '',
@@ -3492,15 +3492,23 @@ const handleSaveAppointment = async () => {
         time: '10:00 - 11:00',
         purpose: 'giris-cikis'
     });
+    
     setSelectedCalendarDate(appointmentData.date);
     const d = new Date(appointmentData.date);
     setCalendarMonth(d.getMonth());
     setCalendarYear(d.getFullYear());
     setActiveMenu('takvim');
-}; 
-// KAPANIS PARANTEZI BURADA BITIYOR
+  }; // <--- İŞTE SİSTEMİ ÇÖKERTEN EKSİK PARANTEZ BURASIYDI, EKLENDİ!
 
-const handleDeleteAppointment = async (id) => {
+  const handleDeleteAppointment = async (id) => {
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', String(id)));
+          } catch(e) { console.error("Randevu Silme Hatası:", e); }
+      }
+  };
+
+  const handleSaveEditAppointment = async () => {
       if (!editApptData) return;
       if (db && firebaseUser) {
           try {
@@ -9225,7 +9233,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     <div className="flex flex-col gap-4">
                         <div className="flex flex-col gap-1.5">
                             <label className="text-xs font-semibold text-gray-600">Müşteri Ad Soyad</label>
-                            <input type="text" value={editApptData?.customerName || ''} onChange={(e) => setEditApptData({...editApptData, customerName: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
+                            <input type="text" value={editApptData?.customerName || ''} onChange={(e) => setEditApptData({...editApptData, customerName: e.target.value.toUpperCase()})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
                         </div>
                         <div className="flex flex-col gap-1.5">
                             <label className="text-xs font-semibold text-gray-600">Telefon Numarası</label>
