@@ -842,7 +842,7 @@ const footerHtml = `
                           <div style="font-weight:bold;">DEPOLATAN KİŞİ</div>
                           <div><strong>Ad Soyad / Ünvan:</strong> ${contractCustomer?.name}</div>
                           <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                          <div><strong>İmza:</strong><br/><br/><br/><br/></div>
+                          <div><strong>İmza:</strong><br/><br/><br/><br/><br/><br/></div>
                       </div>
                   </td>
               </tr>
