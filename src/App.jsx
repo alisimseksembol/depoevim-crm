@@ -828,7 +828,7 @@ const footerHtml = `
                           <div style="font-weight:bold;">HİZMET VEREN</div>
                           <div><strong>Ad Soyad / Ünvan:</strong> ${contractSettings.accountHolder}</div>
                           <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
-                          <div><strong>İmza:</strong></div>
+                          <div><strong>İmza:</strong><br/><br/></div>
                           <div style="margin-top:6px;">
                               <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style="width:110px; mix-blend-mode:multiply; opacity:0.95;" />
                           </div>
@@ -7588,9 +7588,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
              </div>
 
 {/* Modal Body - Printable Area Wrapper */}
-             <div className="p-6 overflow-y-auto flex-1 flex justify-center bg-gray-200">
+             <div className="p-6 overflow-y-auto flex-1 flex justify-center items-start bg-gray-200">
                 {/* Kağıt Simülasyonu (Ekranda Düzgün Görünmesi İçin Tablo Yerine Flex Akışı) */}
-                <div id="printable-contract" className="bg-white shadow-md text-black relative flex flex-col justify-between" style={{ width: '100%', maxWidth: '210mm', minHeight: '297mm', padding: '20px', fontFamily: 'Arial, sans-serif' }}>
+                <div id="printable-contract" className="bg-white shadow-md text-black relative flex flex-col justify-between" style={{ width: '100%', maxWidth: '210mm', minHeight: '297mm', height: 'max-content', padding: '40px 40px 60px 40px', fontFamily: 'Arial, sans-serif' }}>
                     
                     {/* Filigran (Watermark) */}
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-45 text-[40pt] md:text-[80pt] font-bold text-black opacity-5 pointer-events-none z-0 whitespace-nowrap">Depoevim</div>
