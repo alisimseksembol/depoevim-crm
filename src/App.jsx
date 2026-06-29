@@ -790,35 +790,55 @@ const handleSaveEditPending = async () => {
           return { ...clause, content: text };
       });
 
-      const clausesHtml = processedClauses.map(clause => `
-          <div class="clause">
-              <h3>${clause.title}</h3>
-              <p>${clause.content.replace(/\n/g, '<br/>')}</p>
-          </div>
-      `).join('');
+      // Madde içeriklerini Hamdi sözleşmesi gibi bold satırlar + normal paragraflar olarak render et
+      const clausesHtml = processedClauses.map(clause => {
+          const lines = clause.content.split('\n');
+          const linesHtml = lines.map(line => {
+              const trimmed = line.trim();
+              if (!trimmed) return '<br/>';
+              // "Anahtar: Değer" formatındaki satırlar: anahtar kısmı bold
+              const colonIdx = trimmed.indexOf(':');
+              if (colonIdx > 0 && colonIdx < 60) {
+                  const key = trimmed.substring(0, colonIdx);
+                  const val = trimmed.substring(colonIdx + 1).trim();
+                  // Sadece kısa anahtar kelimeler için bold uygula (uzun cümleler değil)
+                  if (key.split(' ').length <= 8) {
+                      return val
+                          ? `<p><strong>${key}:</strong> ${val}</p>`
+                          : `<p><strong>${key}:</strong></p>`;
+                  }
+              }
+              return `<p>${trimmed}</p>`;
+          }).join('');
+          return `
+              <div class="clause">
+                  <h3>${clause.title}</h3>
+                  ${linesHtml}
+              </div>
+          `;
+      }).join('');
 
-      // Her sayfanın altına tekrarlayan imza/damga/logo footer'ı için thead/tfoot tekniği
-      // Hamdi Gökbulut sözleşmesiyle aynı temiz tasarım
+      // Footer: tfoot tekniği ile her sayfada tekrar eder
       const footerHtml = `
-          <table style="width:100%; border-collapse:collapse; border:none;">
+          <table style="width:100%; border-collapse:collapse; border:none; font-family:Arial,sans-serif; font-size:9pt;">
               <tr>
                   <td style="width:33%; vertical-align:bottom; padding:0; border:none;">
-                      <div style="font-size:9.5pt; line-height:1.6;">
-                          <div style="font-weight:bold; margin-bottom:2px;">HİZMET VEREN</div>
+                      <div style="line-height:1.7;">
+                          <div style="font-weight:bold;">HİZMET VEREN</div>
                           <div><strong>Ad Soyad / Ünvan:</strong> ${contractSettings.accountHolder}</div>
                           <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
                           <div><strong>İmza:</strong></div>
-                          <div style="margin-top:4px;">
-                              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style="width:120px; mix-blend-mode:multiply; opacity:0.95;" />
+                          <div style="margin-top:6px;">
+                              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" style="width:110px; mix-blend-mode:multiply; opacity:0.95;" />
                           </div>
                       </div>
                   </td>
-                  <td style="width:34%; vertical-align:bottom; text-align:center; padding:0; border:none;">
-                      <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:42px; object-fit:contain;" />
+                  <td style="width:34%; vertical-align:bottom; text-align:center; padding-bottom:4px; border:none;">
+                      <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:40px; object-fit:contain;" />
                   </td>
-                  <td style="width:33%; vertical-align:bottom; text-align:right; padding:0; border:none;">
-                      <div style="font-size:9.5pt; line-height:1.6; text-align:left; float:right; max-width:220px;">
-                          <div style="font-weight:bold; margin-bottom:2px;">DEPOLATAN KİŞİ</div>
+                  <td style="width:33%; vertical-align:bottom; padding:0; border:none;">
+                      <div style="line-height:1.7;">
+                          <div style="font-weight:bold;">DEPOLATAN KİŞİ</div>
                           <div><strong>Ad Soyad / Ünvan:</strong> ${contractCustomer?.name}</div>
                           <div><strong>İmza Yetkili Kişi Ad Soyad:</strong></div>
                           <div><strong>İmza:</strong></div>
@@ -835,48 +855,98 @@ const handleSaveEditPending = async () => {
           <head>
               <title>${contractCustomer?.name} - Sözleşme</title>
               <style>
-                  @page { size: A4 portrait; margin: 20mm 15mm 25mm 15mm; }
-                  body { font-family: Arial, sans-serif; font-size: 10.5pt; color: #000; line-height: 1.5; margin: 0; padding: 0; }
+                  @page { size: A4 portrait; margin: 15mm 15mm 28mm 15mm; }
 
-                  /* Başlık */
-                  .doc-title { text-align: center; font-size: 14pt; font-weight: bold; text-decoration: underline; margin-bottom: 18px; }
+                  /* Temel font — Hamdi sözleşmesiyle aynı */
+                  body {
+                      font-family: Arial, sans-serif;
+                      font-size: 10pt;
+                      color: #333;
+                      line-height: 1.55;
+                      margin: 0;
+                      padding: 0;
+                  }
 
-                  /* Maddeler */
-                  .clause { margin-bottom: 14px; page-break-inside: avoid; }
-                  .clause h3 { font-size: 10.5pt; font-weight: bold; margin: 0 0 4px 0; }
-                  .clause p { margin: 0; text-align: justify; }
+                  /* Dış çerçeve kutusu — Hamdi sözleşmesindeki beyaz kart görünümü */
+                  .page-box {
+                      border: 1px solid #d0d0d0;
+                      border-radius: 4px;
+                      padding: 22px 24px;
+                      background: #fff;
+                  }
+
+                  /* Büyük başlık */
+                  .doc-title {
+                      text-align: center;
+                      font-size: 15pt;
+                      font-weight: bold;
+                      margin-bottom: 20px;
+                      color: #111;
+                  }
+
+                  /* Madde başlıkları — bold, siyah */
+                  .clause { margin-bottom: 16px; page-break-inside: avoid; }
+                  .clause h3 {
+                      font-size: 10.5pt;
+                      font-weight: bold;
+                      color: #111;
+                      margin: 0 0 5px 0;
+                      padding: 0;
+                  }
+
+                  /* Normal paragraflar */
+                  .clause p {
+                      margin: 0 0 3px 0;
+                      text-align: justify;
+                      color: #333;
+                  }
+
+                  /* Bold anahtar + değer satırları */
+                  .clause p strong {
+                      color: #111;
+                      font-weight: bold;
+                  }
 
                   /* Filigran */
-                  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 72pt; font-weight: bold; color: rgba(0,0,0,0.035); z-index: -1; white-space: nowrap; pointer-events: none; }
+                  .watermark {
+                      position: fixed;
+                      top: 50%; left: 50%;
+                      transform: translate(-50%, -50%) rotate(-45deg);
+                      font-size: 72pt;
+                      font-weight: bold;
+                      color: rgba(0,0,0,0.03);
+                      z-index: -1;
+                      white-space: nowrap;
+                      pointer-events: none;
+                  }
 
-                  /* Her sayfada tekrarlayan footer: tfoot tekniği */
+                  /* tfoot her sayfada tekrar eder */
                   table.page-table { width: 100%; border-collapse: collapse; }
-                  table.page-table td, table.page-table th { border: none; padding: 0; vertical-align: top; }
+                  table.page-table > thead > tr > td,
+                  table.page-table > tbody > tr > td,
+                  table.page-table > tfoot > tr > td { border: none; padding: 0; vertical-align: top; }
 
-                  thead.repeat-header td { height: 0; padding: 0; }
-                  tfoot.repeat-footer td { padding-top: 12px; }
-
-                  /* Bölücü çizgi footer üstünde */
-                  tfoot.repeat-footer td { border-top: 1px solid #ccc; }
+                  tfoot.repeat-footer > tr > td {
+                      padding-top: 10px;
+                      border-top: 1px solid #bbb;
+                  }
               </style>
           </head>
           <body>
               <div class="watermark">Depoevim</div>
 
               <table class="page-table">
-                  <thead class="repeat-header">
-                      <tr><td></td></tr>
-                  </thead>
+                  <thead><tr><td style="height:0;padding:0;"></td></tr></thead>
                   <tfoot class="repeat-footer">
-                      <tr>
-                          <td>${footerHtml}</td>
-                      </tr>
+                      <tr><td>${footerHtml}</td></tr>
                   </tfoot>
                   <tbody>
                       <tr>
                           <td>
-                              <div class="doc-title">Eşya Depolama Sözleşmesi</div>
-                              ${clausesHtml}
+                              <div class="page-box">
+                                  <div class="doc-title">Eşya Depolama Sözleşmesi</div>
+                                  ${clausesHtml}
+                              </div>
                           </td>
                       </tr>
                   </tbody>
