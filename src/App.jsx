@@ -494,10 +494,16 @@ const [firebaseUser, setFirebaseUser] = useState(null);
     time: '10:00 - 11:00',
     purpose: 'giris-cikis'
   });
-  const [apptCustomerSearch, setApptCustomerSearch] = useState('');
+const [apptCustomerSearch, setApptCustomerSearch] = useState('');
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  // --- RANDEVU DÜZENLEME/SİLME STATE'LERİ ---
+  const [isEditApptModalOpen, setIsEditApptModalOpen] = useState(false);
+  const [editApptData, setEditApptData] = useState(null);
+
+  // --- ASKIDA KALAN TAHSİLATLAR STATE'LERİ ---
 
   // --- ASKIDA KALAN TAHSİLATLAR STATE'LERİ ---
   const [pendingCollections, setPendingCollections] = useState([]);
@@ -3475,22 +3481,23 @@ const handleSaveAppointment = async () => {
         } catch(e) { console.error("Firebase Randevu Kayıt Hatası:", e); }
     }
 
-    setAppointmentData({
-        customerType: 'registered',
-        customerId: '',
-        unregisteredName: '',
-        unregisteredPhone: '',
-        warehouseId: '',
-        date: new Date().toISOString().split('T')[0],
-        time: '10:00 - 11:00',
-        purpose: 'giris-cikis'
-    });
-    
-    setSelectedCalendarDate(appointmentData.date);
-    const d = new Date(appointmentData.date);
-    setCalendarMonth(d.getMonth());
-    setCalendarYear(d.getFullYear());
-    setActiveMenu('takvim');
+const handleDeleteAppointment = async (id) => {
+      if (db && firebaseUser) {
+          try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', String(id)));
+          } catch(e) { console.error("Randevu Silme Hatası:", e); }
+      }
+  };
+
+  const handleSaveEditAppointment = async () => {
+      if (!editApptData) return;
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', String(editApptData.id)), editApptData, { merge: true });
+          } catch(e) { console.error("Randevu Güncelleme Hatası:", e); }
+      }
+      setIsEditApptModalOpen(false);
+      setEditApptData(null);
   };
 
   const getDaysInMonth = (month, year) => new Date(year, month + 1, 0).getDate();
