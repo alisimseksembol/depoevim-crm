@@ -932,8 +932,8 @@ iframe.contentWindow.document.open();
                   table.page-table > tfoot > tr > td { border: none; padding: 0; vertical-align: top; }
 
 tfoot.repeat-footer > tr > td {
-                      padding-top: 30px;
-                      padding-bottom: 10px;
+                      padding-top: 25px;
+                      padding-bottom: 25px;
                       border-top: 1px solid #bbb;
                   }
               </style>
@@ -7595,10 +7595,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     {/* Filigran (Watermark) */}
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-45 text-[40pt] md:text-[80pt] font-bold text-black opacity-5 pointer-events-none z-0 whitespace-nowrap">Depoevim</div>
                     
-                    {/* İçerik Kısmı */}
-                    <div className="relative z-10">
-                        <div style={{ border: '1px solid #d0d0d0', borderRadius: '4px', padding: '22px 24px', background: '#fff', marginBottom: '20px' }}>
-                            <div style={{ textAlign: 'center', fontSize: '15pt', fontWeight: 'bold', marginBottom: '20px', color: '#111' }}>Eşya Depolama Sözleşmesi</div>
+{/* İçerik Kısmı */}
+                        <div className="relative z-10">
+                            <div style={{ marginBottom: '20px' }}>
+                                <div style={{ textAlign: 'center', fontSize: '15pt', fontWeight: 'bold', marginBottom: '20px', color: '#111' }}>Eşya Depolama Sözleşmesi</div>
                             
                             {contractSettings.clauses.map(clause => (
                                 <div key={clause.id} style={{ marginBottom: '16px' }}>
