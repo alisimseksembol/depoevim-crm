@@ -9225,20 +9225,20 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     <div className="flex flex-col gap-4">
                         <div className="flex flex-col gap-1.5">
                             <label className="text-xs font-semibold text-gray-600">Müşteri Ad Soyad</label>
-                            <input type="text" value={editApptData.customerName} onChange={(e) => setEditApptData({...editApptData, customerName: e.target.value.toUpperCase()})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
+                            <input type="text" value={editApptData.customerName || ''} onChange={(e) => setEditApptData({...editApptData, customerName: e.target.value.toUpperCase()})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
                         </div>
                         <div className="flex flex-col gap-1.5">
                             <label className="text-xs font-semibold text-gray-600">Telefon Numarası</label>
-                            <input type="text" value={editApptData.customerPhone} onChange={(e) => setEditApptData({...editApptData, customerPhone: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
+                            <input type="text" value={editApptData.customerPhone || ''} onChange={(e) => setEditApptData({...editApptData, customerPhone: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="flex flex-col gap-1.5">
                                 <label className="text-xs font-semibold text-gray-600">Randevu Tarihi</label>
-                                <input type="date" value={editApptData.date} onChange={(e) => setEditApptData({...editApptData, date: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
+                                <input type="date" value={editApptData.date || ''} onChange={(e) => setEditApptData({...editApptData, date: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700" />
                             </div>
                             <div className="flex flex-col gap-1.5">
                                 <label className="text-xs font-semibold text-gray-600">Saat Aralığı</label>
-                                <select value={editApptData.time} onChange={(e) => setEditApptData({...editApptData, time: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700 bg-white cursor-pointer">
+                                <select value={editApptData.time || ''} onChange={(e) => setEditApptData({...editApptData, time: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700 bg-white cursor-pointer">
                                    <option value="09:00 - 10:00">09:00 - 10:00</option>
                                    <option value="10:00 - 11:00">10:00 - 11:00</option>
                                    <option value="11:00 - 12:00">11:00 - 12:00</option>
@@ -9253,7 +9253,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         </div>
                         <div className="flex flex-col gap-1.5">
                             <label className="text-xs font-semibold text-gray-600">Randevu Amacı</label>
-                            <select value={editApptData.purpose} onChange={(e) => setEditApptData({...editApptData, purpose: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700 bg-white cursor-pointer">
+                            <select value={editApptData.purpose || ''} onChange={(e) => setEditApptData({...editApptData, purpose: e.target.value})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700 bg-white cursor-pointer">
                                 {Object.entries(appointmentPurposes).map(([key, data]) => (
                                     <option key={key} value={key}>{data.label}</option>
                                 ))}
@@ -9261,7 +9261,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         </div>
                         <div className="flex flex-col gap-1.5">
                             <label className="text-xs font-semibold text-gray-600">Depo Şubesi Seçimi</label>
-                            <select value={editApptData.warehouseId} onChange={(e) => setEditApptData({...editApptData, warehouseId: parseInt(e.target.value)})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700 bg-white cursor-pointer">
+                            <select value={editApptData.warehouseId || ''} onChange={(e) => setEditApptData({...editApptData, warehouseId: parseInt(e.target.value)})} className="border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-medium text-slate-700 bg-white cursor-pointer">
+                                <option value="">Şube Seçiniz</option>
                                 {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                             </select>
                         </div>
