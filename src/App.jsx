@@ -2604,18 +2604,40 @@ const handleCancelReservation = async () => {
       const addedPaymentIds = [];
       const addedPendingIds = [];
 
-      for (let i = 1; i < rows.length; i++) {
+      // 1. Sütun Kuralları ve Dinamik Başlık Tespiti (Excel'deki gereksiz üst boşlukları aşmak için)
+      let headerRowIndex = -1;
+      let dateColIdx = 0, descColIdx = 2, amountColIdx = 3; // Varsayılan değerler
+
+      // Başlık satırını bul (İlk 20 satırı tara)
+      for (let i = 0; i < Math.min(20, rows.length); i++) {
+          if (rows[i]) {
+              const rowStr = rows[i].map(c => String(c).toLowerCase()).join('|');
+              if (rowStr.includes('tarih') && (rowStr.includes('tutar') || rowStr.includes('açıklama') || rowStr.includes('aciklama'))) {
+                  headerRowIndex = i;
+                  for (let j = 0; j < rows[i].length; j++) {
+                      const colName = String(rows[i][j] || '').toLowerCase();
+                      if (colName.includes('tarih')) dateColIdx = j;
+                      else if (colName.includes('açıklama') || colName.includes('aciklama')) descColIdx = j;
+                      else if (colName.includes('tutar')) amountColIdx = j;
+                  }
+                  break;
+              }
+          }
+      }
+
+      const startIndex = headerRowIndex !== -1 ? headerRowIndex + 1 : 1;
+
+      for (let i = startIndex; i < rows.length; i++) {
           const row = rows[i];
-          // Boş satırları atla
-          if (!row || row.length === 0 || (!row[0] && !row[1] && !row[2])) continue;
+          if (!row || row.length === 0) continue;
 
-          const dateRaw = row[0];
-          const amountRaw = row[1];
-          const descRaw = row[2];
+          const dateRaw = row[dateColIdx];
+          const amountRaw = row[amountColIdx];
+          const descRaw = row[descColIdx];
 
-          if (!amountRaw) continue;
+          if (amountRaw === undefined || amountRaw === null || amountRaw === '') continue;
 
-          // Tutar (Amount) çözümleme
+          // Tutar Çözümleme (Formatlama)
           let amount = 0;
           if (typeof amountRaw === 'number') {
               amount = amountRaw;
@@ -2633,20 +2655,19 @@ const handleCancelReservation = async () => {
               amount = parseFloat(amountStr);
           }
 
+          // Yalnızca Gelen Tahsilatları (Pozitif tutarları) işle, giden para/kesintileri atla
           if (isNaN(amount) || amount <= 0) continue;
 
-          // Açıklama çözümleme
           const descStr = String(descRaw || '').trim();
           const descUpper = descStr.toUpperCase();
           
-          // Tarih çözümleme
+          // Tarih Çözümleme
           let validDate = new Date().toISOString().split('T')[0];
           if (typeof dateRaw === 'number') {
               const excelEpoch = new Date(1899, 11, 30);
               const jsDate = new Date(excelEpoch.getTime() + dateRaw * 86400000);
               if (!isNaN(jsDate)) validDate = jsDate.toISOString().split('T')[0];
           } else if (dateRaw) {
-              // GG.AA.YYYY formatı kontrolü
               const dateStrRaw = String(dateRaw).trim();
               const trDateMatch = dateStrRaw.match(/^(\d{2})[./-](\d{2})[./-](\d{4})/);
               if (trDateMatch) {
@@ -2661,49 +2682,67 @@ const handleCancelReservation = async () => {
 
           let matchedCustomer = null;
 
-          // 1. Eşleştirme: Müşteri Numarası
-          matchedCustomer = customers.find(c => c.customerNo && descUpper.includes(c.customerNo));
+          // 2. Müşteri Cari Hesabını Bulma Hiyerarşisi
           
-          // 2. Eşleştirme: Ad Soyad
+          // Adım 1: İsim Kontrolü (Açıklama içinde geçiyor mu?)
+          matchedCustomer = customers.find(c => c.name && descUpper.includes(c.name.toUpperCase()));
+          
+          // Adım 2: Oda Numarası Kontrolü (İsim bulunamazsa)
           if (!matchedCustomer) {
-              matchedCustomer = customers.find(c => c.name && descUpper.includes(c.name));
+              const possibleRooms = rooms.filter(r => {
+                  const roomNameClean = r.name.replace(/[\s-]/g, '').toUpperCase();
+                  const descClean = descUpper.replace(/[\s-]/g, '');
+                  return descClean.includes(roomNameClean);
+              });
+              if (possibleRooms.length > 0 && possibleRooms[0].customerName) {
+                  matchedCustomer = customers.find(c => c.name === possibleRooms[0].customerName);
+              }
           }
 
-          // 3. Eşleştirme: Oda Numarası
+          // Adım 3: Müşteri Numarası Kontrolü (Oda da bulunamazsa)
           if (!matchedCustomer) {
-              const matchedRoom = rooms.find(r => r.customerName && r.name && descUpper.includes(r.name));
-              if (matchedRoom) {
-                  matchedCustomer = customers.find(c => c.name === matchedRoom.customerName);
-              }
+              matchedCustomer = customers.find(c => c.customerNo && descUpper.includes(c.customerNo));
           }
 
           if (matchedCustomer) {
-              matchedCount++;
-              totalMatchedAmount += amount;
-              
-              if (!customersUpdates[matchedCustomer.id]) {
-                  customersUpdates[matchedCustomer.id] = [];
+              // 3. Mükerrer Kayıt (Çift İşlem) Kontrolü
+              const existingPayments = matchedCustomer.payments || [];
+              const isDuplicate = existingPayments.some(p => p.date === validDate && Number(p.amount) === amount);
+              const isDuplicateInUpdates = customersUpdates[matchedCustomer.id]?.some(p => p.date === validDate && Number(p.amount) === amount);
+
+              if (!isDuplicate && !isDuplicateInUpdates) {
+                  matchedCount++;
+                  totalMatchedAmount += amount;
+                  
+                  if (!customersUpdates[matchedCustomer.id]) {
+                      customersUpdates[matchedCustomer.id] = [];
+                  }
+                  const pId = Date.now() + Math.random();
+                  customersUpdates[matchedCustomer.id].push({
+                      id: pId,
+                      amount: amount,
+                      date: validDate,
+                      note: 'Banka Tahsilatı: ' + descStr
+                  });
+                  addedPaymentIds.push(pId);
               }
-              const pId = Date.now() + Math.random();
-              customersUpdates[matchedCustomer.id].push({
-                  id: pId,
-                  amount: amount,
-                  date: validDate,
-                  note: 'Toplu Banka Yüklemesi: ' + descStr
-              });
-              addedPaymentIds.push(pId);
           } else {
-              unmatchedCount++;
-              totalUnmatchedAmount += amount;
+              // 4. Eşleşmeyen Kayıtlar -> Askıya Al (Eğer daha önce askıya eklenmediyse)
+              const isDuplicatePending = newPendingCollections.some(p => p.date === validDate && Number(p.amount) === amount);
               
-              const pId = Date.now() + Math.random();
-              newPendingCollections.push({
-                  id: pId,
-                  amount: amount,
-                  date: validDate,
-                  note: 'Toplu Banka Yüklemesi: ' + descStr
-              });
-              addedPendingIds.push(pId);
+              if (!isDuplicatePending) {
+                  unmatchedCount++;
+                  totalUnmatchedAmount += amount;
+                  
+                  const pId = Date.now() + Math.random();
+                  newPendingCollections.push({
+                      id: pId,
+                      amount: amount,
+                      date: validDate,
+                      note: 'Belirsiz Banka Tahsilatı: ' + descStr
+                  });
+                  addedPendingIds.push(pId);
+              }
           }
       }
 
@@ -5909,7 +5948,17 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                       setEditPendingData({ ...tx });
                                                       setIsEditPendingModalOpen(true);
                                                   }} className="bg-blue-50 hover:bg-blue-100 text-blue-600 p-1.5 rounded-lg transition-colors" title="Düzenle"><Edit size={16}/></button>
-                                                  <button onClick={() => setPendingCollections(pendingCollections.filter(p => p.id !== tx.id))} className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded-lg transition-colors" title="Sil"><Trash2 size={16}/></button>
+                                                  <button onClick={async () => {
+                                                      if (window.confirm('Bu tahsilatı kalıcı olarak silmek istediğinize emin misiniz?')) {
+                                                          if (db && firebaseUser) {
+                                                              try {
+                                                                  await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(tx.id)));
+                                                              } catch(e) { console.error("Askıdan Silme Hatası:", e); }
+                                                          } else {
+                                                              setPendingCollections(pendingCollections.filter(p => p.id !== tx.id));
+                                                          }
+                                                      }
+                                                  }} className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded-lg transition-colors" title="Sil"><Trash2 size={16}/></button>
                                               </div>
                                           </td>
                                       </tr>
@@ -8738,60 +8787,62 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
         </div>
       )}
 
-{/* ASKIDAKİ ÖDEMEYİ CARİYE İŞLEME MODALI */}
+      {/* ASKIDAKİ ÖDEMEYİ CARİYE İŞLEME MODALI */}
       {isAssignModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
-              <div className="flex justify-between items-center mb-4 text-sm text-gray-600">
-                <div className="flex items-center gap-2"><span>Show</span><select className="border border-gray-300 rounded p-1 outline-none focus:border-cyan-400"><option>10</option><option>25</option><option>50</option></select><span>entries</span></div>
-                <div className="flex items-center gap-2"><span>Search:</span><input type="text" value={customerSearchTerm} onChange={(e) => setCustomerSearchTerm(e.target.value)} className="border border-gray-300 rounded p-1.5 outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 w-48 lg:w-64" /></div>
-              </div>
-              <div className="overflow-x-auto border border-gray-200 rounded-lg flex-1 bg-slate-50 w-full block">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl animate-in fade-in zoom-in">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-orange-50 rounded-t-xl">
+                 <h3 className="text-lg font-bold text-orange-700 flex items-center gap-2"><Wallet size={18} /> Askıdaki Tahsilatı Cariye İşle</h3>
+                 <button onClick={() => setIsAssignModalOpen(false)}><X size={20} className="text-orange-500 hover:text-orange-700"/></button>
+             </div>
+             <div className="p-6 md:p-8">
                  {(() => {
-                    const displayedCustomers = activeMenu === 'mevcut-musteriler' ? customers.filter(c => rooms.some(r => r.customerName === c.name)) : customers;
-                    const term = normalizeStr(customerSearchTerm);
-                    const finalFiltered = displayedCustomers.filter(c => normalizeStr(c.name).includes(term));
-                    if (finalFiltered.length === 0) return (<div className="flex flex-col items-center justify-center text-center py-20 w-full min-h-[300px]"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><Users size={32} /></div><h3 className="text-lg font-bold text-gray-600 mb-1">Müşteri Kaydı Bulunmuyor</h3><p className="text-sm text-gray-400 max-w-sm mx-auto">Bu listede gösterilecek müşteri bulunamadı. Soldaki menüden "Yeni Müşteri Ekle" diyerek ekleme yapabilirsiniz.</p></div>);
+                    const payment = pendingCollections.find(p => p.id === assignData.paymentId);
+                    if (!payment) return null;
 
                     return (
-                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-6 flex justify-between items-center">
-                            <div>
-                                <div className="text-[10px] font-bold text-gray-400 uppercase">Tutar</div>
-                                <div className="font-black text-orange-600">{payment.amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="flex flex-col gap-1.5 md:col-span-2">
+                                <label className="text-sm font-semibold text-gray-700">Müşteri Cari Hesap Seçimi (Zorunlu)</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search size={16} className="text-gray-400" /></div>
+                                    <input type="text" placeholder="Müşteri Adı, Müşteri No veya Oda Numarası ile Ara..." value={pendingSearchTerm} onChange={(e) => setPendingSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 mb-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700 bg-white shadow-sm" />
+                                </div>
+                                <select value={assignData.customerId} onChange={(e) => setAssignData({...assignData, customerId: e.target.value})} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-50 font-medium text-slate-700">
+                                    <option value="">Lütfen eşleştirilecek müşteriyi seçin...</option>
+                                    {customers.filter(c => {
+                                        if (!pendingSearchTerm) return true;
+                                        const searchLower = normalizeStr(pendingSearchTerm);
+                                        const matchName = normalizeStr(c.name).includes(searchLower);
+                                        const matchNo = c.customerNo && String(c.customerNo).includes(searchLower);
+                                        const matchRoom = rooms.some(r => r.customerName === c.name && normalizeStr(r.name).includes(searchLower));
+                                        return matchName || matchNo || matchRoom;
+                                    }).map(c => {
+                                        const cRooms = rooms.filter(r => r.customerName === c.name).map(r => r.name).join(', ');
+                                        const roomText = cRooms ? ` | Odalar: ${cRooms}` : '';
+                                        return <option key={c.id} value={c.id}>{c.name} (No: {c.customerNo}){roomText}</option>;
+                                    })}
+                                </select>
                             </div>
-                            <div className="text-right">
-                                <div className="text-[10px] font-bold text-gray-400 uppercase">Tarih</div>
-                                <div className="font-bold text-gray-700">{new Date(payment.date).toLocaleDateString('tr-TR')}</div>
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-sm font-semibold text-gray-700">Ödenen Tutar (TL)</label>
+                                <input type="number" readOnly value={payment.amount} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 font-bold text-slate-800 text-lg bg-gray-50 cursor-not-allowed" />
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-sm font-semibold text-gray-700">Ödeme Tarihi</label>
+                                <input type="date" readOnly value={payment.date} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700 bg-gray-50 cursor-not-allowed" />
+                            </div>
+                            <div className="flex flex-col gap-1.5 md:col-span-2">
+                                <label className="text-sm font-semibold text-gray-700">İşlem Açıklaması / Dekont Notu</label>
+                                <textarea rows="3" readOnly value={payment.note} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 resize-none font-medium text-slate-700 bg-gray-50 cursor-not-allowed"></textarea>
                             </div>
                         </div>
                     );
-                })()}
-
-                <div className="flex flex-col gap-1.5 mb-6">
-                    <label className="text-xs font-bold text-gray-600 uppercase">Müşteri Seçin</label>
-                    <input type="text" placeholder="Ad Soyad, Müşteri No veya Oda Ara..." value={pendingSearchTerm} onChange={(e) => setPendingSearchTerm(e.target.value)} className="w-full mb-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700 bg-white" />
-                    <select value={assignData.customerId} onChange={(e) => setAssignData({...assignData, customerId: e.target.value})} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700">
-                        <option value="">Lütfen eşleştirilecek müşteriyi seçin...</option>
-{customers.filter(c => {
-                            if (!pendingSearchTerm) return true;
-                            const searchLower = normalizeStr(pendingSearchTerm);
-                            const matchName = normalizeStr(c.name).includes(searchLower);
-                            const matchNo = c.customerNo && String(c.customerNo).includes(searchLower);
-                            const matchRoom = rooms.some(r => r.customerName === c.name && normalizeStr(r.name).includes(searchLower));
-                            return matchName || matchNo || matchRoom;
-                        }).map(c => {
-                            const cRooms = rooms.filter(r => r.customerName === c.name).map(r => r.name).join(', ');
-                            const roomText = cRooms ? ` | Odalar: ${cRooms}` : '';
-                            return (
-                                <option key={c.id} value={c.id}>{c.name} (No: {c.customerNo}){roomText}</option>
-                            );
-                        })}
-                    </select>
-                </div>
+                 })()}
                 
-                <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                  <button onClick={() => setIsAssignModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors">İptal</button>
-                  <button onClick={handleAssignPendingPayment} disabled={!assignData.customerId} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 transition-colors flex items-center gap-2">
+                <div className="mt-8 pt-6 border-t border-gray-100 flex justify-end gap-3">
+                  <button onClick={() => setIsAssignModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-xl text-sm font-bold transition-colors">İptal</button>
+                  <button onClick={handleAssignPendingPayment} disabled={!assignData.customerId} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 transition-colors flex items-center gap-2">
                       <Check strokeWidth={3} size={18} /> Cariye İşle
                   </button>
                 </div>
