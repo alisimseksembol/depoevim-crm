@@ -3241,6 +3241,25 @@ const handleGlobalPayment = async () => {
       }
   };
 
+  // YENİ EKLENEN: Cariye işlenmiş bir tahsilatı geri alıp Askıda Kalan Tahsilatlara gönderir
+  const handleSendPaymentToPending = async (customerId, paymentId) => {
+      if (!window.confirm("Bu tahsilatı cariden kaldırıp Askıda Kalan Tahsilatlara göndermek istediğinize emin misiniz?")) return;
+      const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
+      if (!customerToUpdate || !db || !firebaseUser) return;
+      const payment = (customerToUpdate.payments || []).find(p => Number(p.id) === Number(paymentId));
+      if (!payment) return;
+      try {
+          // 1. Cariden kaldır
+          const updatedPayments = (customerToUpdate.payments || []).filter(p => Number(p.id) !== Number(paymentId));
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { payments: updatedPayments }, { merge: true });
+
+          // 2. Askıda Kalan Tahsilatlara (pendingCollections) yeni kayıt olarak ekle
+          const { id: _oldId, ...paymentRest } = payment;
+          const newPendingId = Date.now();
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(newPendingId)), { ...paymentRest, id: newPendingId });
+      } catch(e) { console.error("Askıya Gönderme Hatası:", e); }
+  };
+
   const handleSaveEditCollection = async () => {
       if (!editCollectionData || !editCollectionData.amount) return;
       const customerToUpdate = customers.find(c => String(c.id) === String(editCollectionData.customerId));
@@ -9241,7 +9260,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
       {/* ASKIDAKİ ÖDEMEYİ CARİYE İŞLEME MODALI */}
       {isAssignModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 z-[90] flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl animate-in fade-in zoom-in">
              <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-orange-50 rounded-t-xl">
                  <h3 className="text-lg font-bold text-orange-700 flex items-center gap-2"><Wallet size={18} /> Askıdaki Tahsilatı Cariye İşle</h3>
@@ -9853,7 +9872,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       <th className="px-4 py-3 text-center">Tarih</th>
                                       <th className="px-4 py-3">Açıklama (Dekont)</th>
                                       <th className="px-4 py-3 text-right">Tutar</th>
-                                      <th className="px-4 py-3 text-center w-32">İşlem</th>
+                                      <th className="px-4 py-3 text-center w-64">İşlem</th>
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
@@ -9861,20 +9880,31 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       bulkDetailsData.addedPaymentRecords.map((record, idx) => {
                                           const cust = customers.find(c => String(c.id) === String(record.customerId));
                                           const payment = cust?.payments?.find(p => String(p.id) === String(record.paymentId));
+                                          const goToCari = () => {
+                                              setSelectedCustomerId(cust.id);
+                                              setIsBulkDetailsModalOpen(false);
+                                              setActiveMenu('tum-musteriler');
+                                          };
                                           return (
                                               <tr key={idx} className="hover:bg-gray-50">
                                                   <td className="px-4 py-3 text-gray-400 font-bold">{idx + 1}</td>
-                                                  <td className="px-4 py-3 font-bold text-gray-800">{cust ? cust.name : <span className="text-red-400">Silinmiş Müşteri</span>}</td>
+                                                  <td className="px-4 py-3 font-bold text-gray-800">
+                                                      {cust ? (
+                                                          <button onClick={goToCari} className="hover:text-emerald-600 hover:underline transition-colors text-left">{cust.name}</button>
+                                                      ) : (
+                                                          <span className="text-red-400">Silinmiş Müşteri</span>
+                                                      )}
+                                                  </td>
                                                   <td className="px-4 py-3 text-center">{payment ? new Date(payment.date).toLocaleDateString('tr-TR') : '-'}</td>
                                                   <td className="px-4 py-3 text-xs opacity-80 truncate max-w-[200px]" title={payment?.note}>{payment ? payment.note : '-'}</td>
                                                   <td className="px-4 py-3 text-right font-black text-emerald-600">{payment ? payment.amount.toLocaleString('tr-TR') + ' TL' : 'Kayıt Bulunamadı'}</td>
                                                   <td className="px-4 py-3 text-center">
-                                                      {cust && (
-                                                          <button onClick={() => {
-                                                              setSelectedCustomerId(cust.id);
-                                                              setIsBulkDetailsModalOpen(false);
-                                                              setActiveMenu('tum-musteriler');
-                                                          }} className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-bold transition-colors w-full">Cariyi Gör</button>
+                                                      {cust && payment && (
+                                                          <div className="flex flex-wrap items-center justify-center gap-1.5">
+                                                              <button onClick={() => { setEditCollectionData({ ...payment, customerId: cust.id }); setIsBulkDetailsModalOpen(false); setIsEditCollectionModalOpen(true); }} className="text-[10px] bg-orange-50 hover:bg-orange-100 text-orange-600 px-2.5 py-1.5 rounded-lg font-bold transition-colors flex items-center gap-1" title="Cariyi Düzenle"><Edit size={12}/> Düzenle</button>
+                                                              <button onClick={() => handleSendPaymentToPending(cust.id, payment.id)} className="text-[10px] bg-blue-50 hover:bg-blue-100 text-blue-600 px-2.5 py-1.5 rounded-lg font-bold transition-colors flex items-center gap-1" title="Askıda Kalan Tahsilatlara Gönder"><Upload size={12}/> Askıya Gönder</button>
+                                                              <button onClick={() => handleDeleteCollection(cust.id, payment.id)} className="text-[10px] bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1.5 rounded-lg font-bold transition-colors flex items-center gap-1" title="Cariden Kaldır"><Trash2 size={12}/> Cariden Kaldır</button>
+                                                          </div>
                                                       )}
                                                   </td>
                                               </tr>
@@ -9899,7 +9929,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       <th className="px-4 py-3 text-center">Tarih</th>
                                       <th className="px-4 py-3">Açıklama (Dekont)</th>
                                       <th className="px-4 py-3 text-right">Tutar</th>
-                                      <th className="px-4 py-3 text-center w-32">İşlem</th>
+                                      <th className="px-4 py-3 text-center w-48">İşlem</th>
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
@@ -9914,11 +9944,22 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                   <td className="px-4 py-3 text-right font-black text-orange-600">{pending ? pending.amount.toLocaleString('tr-TR') + ' TL' : '-'}</td>
                                                   <td className="px-4 py-3 text-center">
                                                       {pending && (
-                                                          <button onClick={() => {
-                                                              setAssignData({ paymentId: pending.id, customerId: '' });
-                                                              setIsAssignModalOpen(true);
-                                                              setIsBulkDetailsModalOpen(false);
-                                                          }} className="text-[10px] bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-sm transition-colors flex items-center justify-center gap-1 w-full"><Wallet size={12}/> Cariye İşle</button>
+                                                          <div className="flex flex-wrap items-center justify-center gap-1.5">
+                                                              <button onClick={() => {
+                                                                  setAssignData({ paymentId: pending.id, customerId: '' });
+                                                                  setIsAssignModalOpen(true);
+                                                              }} className="text-[10px] bg-orange-500 hover:bg-orange-600 text-white px-2.5 py-1.5 rounded-lg font-bold shadow-sm transition-colors flex items-center gap-1"><Wallet size={12}/> Cariye İşle</button>
+                                                              <button onClick={async () => {
+                                                                  if (!window.confirm('Bu tahsilatı Askıda Kalan Tahsilatlardan kalıcı olarak silmek istediğinize emin misiniz?')) return;
+                                                                  if (db && firebaseUser) {
+                                                                      try {
+                                                                          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)));
+                                                                      } catch(e) { console.error("Askıdan Silme Hatası:", e); }
+                                                                  } else {
+                                                                      setPendingCollections(pendingCollections.filter(p => p.id !== pending.id));
+                                                                  }
+                                                              }} className="text-[10px] bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1.5 rounded-lg font-bold shadow-sm transition-colors flex items-center gap-1" title="Askıda İşlemlerden Sil"><Trash2 size={12}/> Sil</button>
+                                                          </div>
                                                       )}
                                                   </td>
                                               </tr>
