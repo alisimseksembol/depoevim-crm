@@ -298,7 +298,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
       const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
       
-      // 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
+// 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
       const unsubSettings = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'settings'), (snapshot) => {
           snapshot.docs.forEach(doc => {
               if (doc.id === 'contract') setContractSettings(doc.data());
@@ -306,9 +306,15 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           });
       }, (error) => console.error("Ayar Çekme Hatası:", error));
 
+      // YENİ EKLENEN: TOPLU YÜKLEME GEÇMİŞİ FİREBASE DİNLEYİCİSİ
+      const unsubBulkUploadHistory = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'bulkUploadHistory'), (snapshot) => {
+          const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.timestamp - a.timestamp);
+          setBulkUploadHistory(fetchedData);
+      }, (error) => console.error("Toplu Yükleme Hatası:", error));
+
       return () => { 
           unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); 
-          unsubSettings(); // 👈 Ayar telsizini kapat
+          unsubSettings(); unsubBulkUploadHistory();
       };
   }, [firebaseUser]);
   // ============================================================================
@@ -1940,12 +1946,12 @@ const handleDeleteLedgerItem = async (txId) => {
         try {
             let updatePayload = {};
 
-            if (txId.startsWith('debt-extra-')) {
-                const debtId = parseInt(txId.replace('debt-extra-', ''));
-                updatePayload = { extraDebts: (customerToUpdate.extraDebts || []).filter(d => d.id !== debtId) };
+if (txId.startsWith('debt-extra-')) {
+                const debtId = Number(txId.replace('debt-extra-', ''));
+                updatePayload = { extraDebts: (customerToUpdate.extraDebts || []).filter(d => Number(d.id) !== debtId) };
             } else if (txId.startsWith('credit-global-')) {
-                const payId = parseInt(txId.replace('credit-global-', ''));
-                updatePayload = { payments: (customerToUpdate.payments || []).filter(p => p.id !== payId) };
+                const payId = Number(txId.replace('credit-global-', ''));
+                updatePayload = { payments: (customerToUpdate.payments || []).filter(p => Number(p.id) !== payId) };
             } else {
                 updatePayload = { 
                     ledgerOverrides: [
@@ -1970,13 +1976,21 @@ const handleSaveLedgerEdit = async () => {
         try {
             let updatePayload = {};
 
-            if (txId.startsWith('debt-extra-')) {
-                const debtId = parseInt(txId.replace('debt-extra-', ''));
-                const updatedDebts = (customerToUpdate.extraDebts || []).map(d => d.id === debtId ? { ...d, date: editDate, desc: editDesc, amount: newAmount } : d);
+if (txId.startsWith('debt-extra-')) {
+                const debtId = Number(txId.replace('debt-extra-', ''));
+                const updatedDebts = (customerToUpdate.extraDebts || []).map(d => Number(d.id) === debtId ? { ...d, date: editDate, desc: editDesc, amount: newAmount } : d);
                 updatePayload = { extraDebts: updatedDebts };
             } else if (txId.startsWith('credit-global-')) {
-                const payId = parseInt(txId.replace('credit-global-', ''));
-                const updatedPayments = (customerToUpdate.payments || []).map(p => p.id === payId ? { ...p, date: editDate, note: editDesc, amount: newAmount } : p);
+                const payId = Number(txId.replace('credit-global-', ''));
+                
+                const existingPayments = customerToUpdate.payments || [];
+                // Aynı gün kontrolü (Kendisi hariç)
+                if (existingPayments.some(p => Number(p.id) !== payId && p.date === editDate)) {
+                    alert("HATA: Bu müşterinin carisinde seçili tarihe ait zaten bir tahsilat bulunmaktadır. Aynı güne başka tahsilat kaydedilemez.");
+                    return;
+                }
+
+                const updatedPayments = existingPayments.map(p => Number(p.id) === payId ? { ...p, date: editDate, note: editDesc, amount: newAmount } : p);
                 updatePayload = { payments: updatedPayments };
             } else {
                 // Otomatik hesaplanan oda kiralarına müdahale (Override)
@@ -2023,21 +2037,29 @@ const handleManualAddDebt = async () => {
 
 const handleManualAddPayment = async () => {
     if (!newPaymentData.amount) return;
-    const newPayment = {
-        id: Date.now(),
-        amount: Number(newPaymentData.amount),
-        date: newPaymentData.date,
-        note: newPaymentData.note
-    };
-
+    
     const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
-    if (customerToUpdate && db && firebaseUser) {
-        try {
-            const existingPayments = customerToUpdate.payments || [];
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
-                payments: [...existingPayments, newPayment]
-            }, { merge: true });
-        } catch(e) { console.error("Manuel Ödeme Ekleme Hatası:", e); }
+    if (customerToUpdate) {
+        const existingPayments = customerToUpdate.payments || [];
+        if (existingPayments.some(p => p.date === newPaymentData.date)) {
+            alert(`HATA: Bu müşteriye ait aynı günde (${newPaymentData.date}) zaten bir tahsilat kaydı bulunmaktadır. Aynı güne başka tahsilat girişi yapılamaz!`);
+            return;
+        }
+        
+        const newPayment = {
+            id: Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString()), // benzersiz tam sayı ID
+            amount: Number(newPaymentData.amount),
+            date: newPaymentData.date,
+            note: newPaymentData.note
+        };
+        
+        if (db && firebaseUser) {
+            try {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                    payments: [...existingPayments, newPayment]
+                }, { merge: true });
+            } catch(e) { console.error("Manuel Ödeme Ekleme Hatası:", e); }
+        }
     }
 
     setIsAddPaymentModalOpen(false);
@@ -2545,10 +2567,15 @@ const handleCancelReservation = async () => {
   const [isGlobalPaymentSuccess, setIsGlobalPaymentSuccess] = useState(false);
   const [paymentCustomerSearch, setPaymentCustomerSearch] = useState('');
 
-  // --- YENİ EKLENEN: TOPLU ÖDEME STATE'LERİ ---
+// --- YENİ EKLENEN: TOPLU ÖDEME STATE'LERİ ---
   const [paymentEntryMode, setPaymentEntryMode] = useState('single'); // 'single' | 'bulk'
   const [bulkProcessResult, setBulkProcessResult] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [bulkUploadHistory, setBulkUploadHistory] = useState([]);
+
+  // --- TAHSİLAT HAREKETLERİ DÜZENLEME STATE'LERİ ---
+  const [isEditCollectionModalOpen, setIsEditCollectionModalOpen] = useState(false);
+  const [editCollectionData, setEditCollectionData] = useState(null);
 
   // --- YENİ EKLENEN: TOPLU MÜŞTERİ İÇE AKTARMA STATE'LERİ ---
   const [isCustomerUploading, setIsCustomerUploading] = useState(false);
@@ -2570,7 +2597,7 @@ const handleCancelReservation = async () => {
                   const firstSheetName = workbook.SheetNames[0];
                   const worksheet = workbook.Sheets[firstSheetName];
                   const rows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                  processBulkData(rows);
+                  processBulkData(rows, file.name);
               } catch (err) {
                   console.error(err);
                   alert("Dosya okunurken bir hata oluştu. Lütfen formatı kontrol edin.");
@@ -2587,7 +2614,7 @@ const handleCancelReservation = async () => {
       e.target.value = ''; // Input'u temizle
   };
 
-  const processBulkData = async (rows) => {
+  const processBulkData = async (rows, fileName) => {
       if (!rows || rows.length <= 1) {
           alert("Dosya boş veya geçersiz format.");
           return;
@@ -2601,14 +2628,13 @@ const handleCancelReservation = async () => {
       const newPendingCollections = [...pendingCollections];
       const customersUpdates = {}; 
 
-      const addedPaymentIds = [];
+      const addedPaymentRecords = [];
       const addedPendingIds = [];
 
-      // 1. Sütun Kuralları ve Dinamik Başlık Tespiti (Excel'deki gereksiz üst boşlukları aşmak için)
+      // 1. Sütun Kuralları ve Dinamik Başlık Tespiti
       let headerRowIndex = -1;
-      let dateColIdx = 0, descColIdx = 2, amountColIdx = 3; // Varsayılan değerler
+      let dateColIdx = 0, descColIdx = 2, amountColIdx = 3;
 
-      // Başlık satırını bul (İlk 20 satırı tara)
       for (let i = 0; i < Math.min(20, rows.length); i++) {
           if (rows[i]) {
               const rowStr = rows[i].map(c => String(c).toLowerCase()).join('|');
@@ -2637,7 +2663,6 @@ const handleCancelReservation = async () => {
 
           if (amountRaw === undefined || amountRaw === null || amountRaw === '') continue;
 
-          // Tutar Çözümleme (Formatlama)
           let amount = 0;
           if (typeof amountRaw === 'number') {
               amount = amountRaw;
@@ -2655,13 +2680,11 @@ const handleCancelReservation = async () => {
               amount = parseFloat(amountStr);
           }
 
-          // Yalnızca Gelen Tahsilatları (Pozitif tutarları) işle, giden para/kesintileri atla
           if (isNaN(amount) || amount <= 0) continue;
 
           const descStr = String(descRaw || '').trim();
           const descUpper = descStr.toUpperCase();
           
-          // Tarih Çözümleme
           let validDate = new Date().toISOString().split('T')[0];
           if (typeof dateRaw === 'number') {
               const excelEpoch = new Date(1899, 11, 30);
@@ -2681,13 +2704,8 @@ const handleCancelReservation = async () => {
           }
 
           let matchedCustomer = null;
-
-          // 2. Müşteri Cari Hesabını Bulma Hiyerarşisi
-          
-          // Adım 1: İsim Kontrolü (Açıklama içinde geçiyor mu?)
           matchedCustomer = customers.find(c => c.name && descUpper.includes(c.name.toUpperCase()));
           
-          // Adım 2: Oda Numarası Kontrolü (İsim bulunamazsa)
           if (!matchedCustomer) {
               const possibleRooms = rooms.filter(r => {
                   const roomNameClean = r.name.replace(/[\s-]/g, '').toUpperCase();
@@ -2699,16 +2717,15 @@ const handleCancelReservation = async () => {
               }
           }
 
-          // Adım 3: Müşteri Numarası Kontrolü (Oda da bulunamazsa)
           if (!matchedCustomer) {
               matchedCustomer = customers.find(c => c.customerNo && descUpper.includes(c.customerNo));
           }
 
           if (matchedCustomer) {
-              // 3. Mükerrer Kayıt (Çift İşlem) Kontrolü
+              // SADECE TARIH KONTROLU - AYNI GUNE IKINCi BIR TAHSILAT EKLENMESIN
               const existingPayments = matchedCustomer.payments || [];
-              const isDuplicate = existingPayments.some(p => p.date === validDate && Number(p.amount) === amount);
-              const isDuplicateInUpdates = customersUpdates[matchedCustomer.id]?.some(p => p.date === validDate && Number(p.amount) === amount);
+              const isDuplicate = existingPayments.some(p => p.date === validDate);
+              const isDuplicateInUpdates = customersUpdates[matchedCustomer.id]?.some(p => p.date === validDate);
 
               if (!isDuplicate && !isDuplicateInUpdates) {
                   matchedCount++;
@@ -2717,24 +2734,23 @@ const handleCancelReservation = async () => {
                   if (!customersUpdates[matchedCustomer.id]) {
                       customersUpdates[matchedCustomer.id] = [];
                   }
-                  const pId = Date.now() + Math.random();
+                  const pId = Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString());
                   customersUpdates[matchedCustomer.id].push({
                       id: pId,
                       amount: amount,
                       date: validDate,
-                      note: 'Banka Tahsilatı: ' + descStr
+                      note: 'Toplu Banka Tahsilatı: ' + descStr
                   });
-                  addedPaymentIds.push(pId);
+                  addedPaymentRecords.push({ customerId: matchedCustomer.id, paymentId: pId });
               }
           } else {
-              // 4. Eşleşmeyen Kayıtlar -> Askıya Al (Eğer daha önce askıya eklenmediyse)
-              const isDuplicatePending = newPendingCollections.some(p => p.date === validDate && Number(p.amount) === amount);
+              const isDuplicatePending = newPendingCollections.some(p => p.date === validDate);
               
               if (!isDuplicatePending) {
                   unmatchedCount++;
                   totalUnmatchedAmount += amount;
                   
-                  const pId = Date.now() + Math.random();
+                  const pId = Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString());
                   newPendingCollections.push({
                       id: pId,
                       amount: amount,
@@ -2746,7 +2762,7 @@ const handleCancelReservation = async () => {
           }
       }
 
-  if (Object.keys(customersUpdates).length > 0 && db && firebaseUser) {
+      if (Object.keys(customersUpdates).length > 0 && db && firebaseUser) {
           for (const cId of Object.keys(customersUpdates)) {
               const customerToUpdate = customers.find(c => String(c.id) === String(cId));
               if (customerToUpdate) {
@@ -2757,41 +2773,75 @@ const handleCancelReservation = async () => {
           }
       }
 
-if (unmatchedCount > 0 && db && firebaseUser) {
+      if (unmatchedCount > 0 && db && firebaseUser) {
           for (const pending of newPendingCollections) {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)), pending, { merge: true });
+              if (addedPendingIds.includes(pending.id)) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)), pending, { merge: true });
+              }
           }
       }
 
-      setBulkProcessResult({
+      // YENİ EKLENEN: Yükleme işlemini Firebase'e kaydet (Tarihçe Raporu İçin)
+      const uploadRecordId = Date.now().toString();
+      const uploadRecord = {
+          id: uploadRecordId,
+          timestamp: Date.now(),
+          dateStr: new Date().toLocaleString('tr-TR'),
+          fileName: fileName || 'Bilinmeyen Dosya',
           matchedCount,
           unmatchedCount,
           totalMatchedAmount,
           totalUnmatchedAmount,
-          addedPaymentIds,
+          addedPaymentRecords,
           addedPendingIds
-      });
+      };
+      
+      if (db && firebaseUser && (matchedCount > 0 || unmatchedCount > 0)) {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bulkUploadHistory', uploadRecordId), uploadRecord);
+      }
+
+      setBulkProcessResult(uploadRecord);
+  };
+
+  const handleRevertBulkUpload = async (historyRecord) => {
+      if (!window.confirm("Bu toplu yüklemeyi ve eklediği tüm tahsilatları sistemden (carilerden ve askıdan) silip geri almak istediğinize emin misiniz?")) return;
+      
+      setIsUploading(true);
+      if (db && firebaseUser) {
+          try {
+              const customerGroups = {};
+              if (historyRecord.addedPaymentRecords) {
+                  historyRecord.addedPaymentRecords.forEach(record => {
+                      if (!customerGroups[record.customerId]) customerGroups[record.customerId] = [];
+                      customerGroups[record.customerId].push(Number(record.paymentId));
+                  });
+              }
+
+              for (const cId of Object.keys(customerGroups)) {
+                  const customer = customers.find(c => String(c.id) === String(cId));
+                  if (customer) {
+                      const idsToRemove = customerGroups[cId];
+                      const cleanedPayments = (customer.payments || []).filter(p => !idsToRemove.includes(Number(p.id)));
+                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cId)), { payments: cleanedPayments }, { merge: true });
+                  }
+              }
+
+              if (historyRecord.addedPendingIds) {
+                  for (const pId of historyRecord.addedPendingIds) {
+                      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pId)));
+                  }
+              }
+
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bulkUploadHistory', String(historyRecord.id)));
+              if (bulkProcessResult?.id === historyRecord.id) {
+                  setBulkProcessResult(null);
+              }
+          } catch (e) { console.error("Geri Alma Hatası:", e); }
+      }
+      setIsUploading(false);
   };
 
   const handleUndoBulkProcess = async () => {
-      if (!bulkProcessResult) return;
-      const { addedPaymentIds, addedPendingIds } = bulkProcessResult;
-      
-      if (addedPaymentIds && addedPaymentIds.length > 0 && db && firebaseUser) {
-          for (const c of customers) {
-              const hasAddedPayment = c.payments?.some(p => addedPaymentIds.includes(p.id));
-              if (hasAddedPayment) {
-                  const cleanedPayments = c.payments.filter(p => !addedPaymentIds.includes(p.id));
-                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(c.id)), { payments: cleanedPayments }, { merge: true });
-              }
-          }
-      }
-      
-      if (addedPendingIds && addedPendingIds.length > 0 && db && firebaseUser) {
-          for (const pId of addedPendingIds) {
-              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pId)));
-          }
-      }
       setBulkProcessResult(null);
   };
 
@@ -3058,7 +3108,7 @@ const handleRentRoom = async () => {
 const handleGlobalPayment = async () => {
     if (!globalPaymentData.customerId || !globalPaymentData.amount) return;
 
-    const paymentId = Date.now();
+    const paymentId = Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString());
     const newPayment = {
         id: paymentId,
         amount: Number(globalPaymentData.amount),
@@ -3069,26 +3119,65 @@ const handleGlobalPayment = async () => {
     if (globalPaymentData.customerId === 'askida') {
         if (db && firebaseUser) {
             try {
-                // Askıdaki ödemeleri 'pendingCollections' tablosuna kaydet
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(paymentId)), newPayment);
             } catch(e) { console.error("Askıda Ödeme Kayıt Hatası:", e); }
         }
     } else {
         const customerId = globalPaymentData.customerId;
         const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
-        if (customerToUpdate && db && firebaseUser) {
-            try {
-                const existingPayments = customerToUpdate.payments || [];
-                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
-                    payments: [...existingPayments, newPayment]
-                }, { merge: true });
-            } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
+        if (customerToUpdate) {
+            const existingPayments = customerToUpdate.payments || [];
+            if (existingPayments.some(p => p.date === globalPaymentData.date)) {
+                alert(`HATA: Bu müşteriye ait aynı günde (${globalPaymentData.date}) zaten bir tahsilat kaydı bulunmaktadır. Aynı güne başka tahsilat girişi yapılamaz!`);
+                return;
+            }
+            if (db && firebaseUser) {
+                try {
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
+                        payments: [...existingPayments, newPayment]
+                    }, { merge: true });
+                } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
+            }
         }
     }
 
     setIsGlobalPaymentSuccess(true);
     setGlobalPaymentData({ customerId: '', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
     setTimeout(() => setIsGlobalPaymentSuccess(false), 3000);
+  };
+
+  const handleDeleteCollection = async (customerId, paymentId) => {
+      if (!window.confirm("Bu tahsilatı silmek istediğinize emin misiniz? İşlem müşterinin cari hesabından silinecektir.")) return;
+      const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              const updatedPayments = (customerToUpdate.payments || []).filter(p => Number(p.id) !== Number(paymentId));
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { payments: updatedPayments }, { merge: true });
+          } catch(e) { console.error("Tahsilat Silme Hatası:", e); }
+      }
+  };
+
+  const handleSaveEditCollection = async () => {
+      if (!editCollectionData || !editCollectionData.amount) return;
+      const customerToUpdate = customers.find(c => String(c.id) === String(editCollectionData.customerId));
+      
+      if (customerToUpdate && db && firebaseUser) {
+          const existingPayments = customerToUpdate.payments || [];
+          if (existingPayments.some(p => Number(p.id) !== Number(editCollectionData.id) && p.date === editCollectionData.date)) {
+              alert("Bu müşterinin carisinde seçilen tarihte zaten bir tahsilat kaydı bulunmaktadır. Aynı güne birden fazla tahsilat girilemez.");
+              return;
+          }
+          try {
+              const updatedPayments = existingPayments.map(p =>
+                  Number(p.id) === Number(editCollectionData.id)
+                  ? { ...p, date: editCollectionData.date, note: editCollectionData.note, amount: Number(editCollectionData.amount) }
+                  : p
+              );
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(editCollectionData.customerId)), { payments: updatedPayments }, { merge: true });
+          } catch(e) { console.error("Tahsilat Düzenleme Hatası:", e); }
+      }
+      setIsEditCollectionModalOpen(false);
+      setEditCollectionData(null);
   };
 
 const handleSaveEditRent = async () => {
@@ -5313,13 +5402,50 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       <button onClick={handleUndoBulkProcess} className="bg-red-50 hover:bg-red-100 text-red-600 px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 shadow-sm border border-red-100">
                                           <RefreshCcw size={16} /> Geri Al
                                       </button>
-                                      <button onClick={() => setBulkProcessResult(null)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm">
+<button onClick={() => setBulkProcessResult(null)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm">
                                           Sonucu Kapat
                                       </button>
                                   </div>
                               </div>
                           </div>
                       )}
+
+                      <div className="mt-8 border-t border-gray-200 pt-8">
+                          <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><History size={20} className="text-[#1bc5bd]"/> Geçmiş Toplu Yüklemeler</h3>
+                          <div className="overflow-x-auto border border-gray-200 rounded-xl">
+                              <table className="w-full text-left text-sm text-gray-600">
+                                  <thead className="bg-slate-50 border-b border-gray-200 font-bold text-gray-700 text-xs uppercase">
+                                      <tr>
+                                          <th className="p-4">Yükleme Tarihi</th>
+                                          <th className="p-4">Dosya Adı</th>
+                                          <th className="p-4 text-center">İşlenen (Cari)</th>
+                                          <th className="p-4 text-center">Askıya Alınan</th>
+                                          <th className="p-4 text-right">Toplam Tutar</th>
+                                          <th className="p-4 text-center">İşlem</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100 bg-white">
+                                      {bulkUploadHistory.length > 0 ? bulkUploadHistory.map(history => (
+                                          <tr key={history.id} className="hover:bg-gray-50">
+                                              <td className="p-4 font-bold text-gray-800">{history.dateStr}</td>
+                                              <td className="p-4 font-medium text-gray-600">{history.fileName}</td>
+                                              <td className="p-4 text-center font-bold text-emerald-600">{history.matchedCount} Kayıt</td>
+                                              <td className="p-4 text-center font-bold text-orange-500">{history.unmatchedCount} Kayıt</td>
+                                              <td className="p-4 text-right font-black text-[#1bc5bd]">{(history.totalMatchedAmount + history.totalUnmatchedAmount).toLocaleString('tr-TR')} TL</td>
+                                              <td className="p-4 text-center">
+                                                  <button onClick={() => handleRevertBulkUpload(history)} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 mx-auto shadow-sm border border-red-100 whitespace-nowrap">
+                                                      <Trash2 size={14}/> Geri Al / Sil
+                                                  </button>
+                                              </td>
+                                          </tr>
+                                      )) : (
+                                          <tr><td colSpan="6" className="p-8 text-center text-gray-500 font-medium">Henüz kayıtlı toplu yükleme geçmişi bulunmuyor.</td></tr>
+                                      )}
+                                  </tbody>
+                              </table>
+                          </div>
+                      </div>
+
                   </div>
               )}
             </div>
@@ -5625,18 +5751,20 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                                       <FileTextIcon size={14}/> E-Fatura Kes
                                                                   </button>
                                                               )}
-                                                              <button onClick={() => handlePrintInvoice(tx)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm" title="Tahsilat Makbuzu Yazdır">
+                       <button onClick={() => handlePrintInvoice(tx)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm" title="Tahsilat Makbuzu Yazdır">
                                                                   <Download size={14}/>
                                                               </button>
-                                                              <button onClick={() => setSelectedCustomerId(tx.customerId)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm">
+                                                              <button onClick={() => { setEditCollectionData({...tx}); setIsEditCollectionModalOpen(true); }} className="bg-orange-50 hover:bg-orange-100 text-orange-600 px-2 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm" title="Düzenle">
+                                                                  <Edit size={14}/>
+                                                              </button>
+                                                              <button onClick={() => handleDeleteCollection(tx.customerId, tx.id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm" title="Sil">
+                                                                  <Trash2 size={14}/>
+                                                              </button>
+                                                              <button onClick={() => setSelectedCustomerId(tx.customerId)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm whitespace-nowrap">
                                                                   Cariyi Gör
                                                               </button>
                                                           </div>
                                                       </td>
-                                                  </tr>
-                                              );
-                                          }) : (
-                                              <tr>
                                                   <td colSpan="5" className="px-6 py-12 text-center">
                                                       <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3"><History size={24} className="text-gray-300" /></div>
                                                       <p className="text-gray-500 font-medium">Bu kriterlere uygun herhangi bir tahsilat kaydı bulunamadı.</p>
@@ -9338,7 +9466,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             </select>
                         </div>
                     </div>
-                    <div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-6">
+<div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-6">
                         <button onClick={() => setIsEditApptModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl font-bold transition-colors text-sm">İptal</button>
                         <button onClick={handleSaveEditAppointment} className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-2.5 rounded-xl font-bold text-sm transition-colors flex items-center gap-2 shadow-lg shadow-indigo-500/30"><Check size={18}/> Değişiklikleri Kaydet</button>
                     </div>
@@ -9346,6 +9474,43 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
             </div>
         </div>
       )}
+
+      {/* TAHSİLAT HAREKETİ DÜZENLEME MODALI */}
+      {isEditCollectionModalOpen && editCollectionData && (
+        <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in zoom-in">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-orange-50 rounded-t-xl">
+                 <h3 className="text-lg font-bold text-orange-700 flex items-center gap-2"><Edit size={18} /> Tahsilatı Düzenle</h3>
+                 <button onClick={() => setIsEditCollectionModalOpen(false)}><X size={20} className="text-orange-500 hover:text-orange-700"/></button>
+             </div>
+             <div className="p-6">
+                <div className="flex flex-col gap-4">
+                  <div className="bg-orange-50/50 border border-orange-100 rounded-lg p-3 text-center mb-2">
+                     <span className="text-xs font-bold text-gray-500 block mb-1">Müşteri</span>
+                     <span className="text-sm font-bold text-gray-800">{editCollectionData.customerName}</span>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-gray-600">Ödenen Tutar (TL)</label>
+                    <input type="number" value={editCollectionData.amount} onChange={(e) => setEditCollectionData({...editCollectionData, amount: e.target.value})} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 font-bold text-lg text-slate-800" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-gray-600">Ödeme Tarihi</label>
+                    <input type="date" value={editCollectionData.date} onChange={(e) => setEditCollectionData({...editCollectionData, date: e.target.value})} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-gray-600">Açıklama / Dekont Notu</label>
+                    <textarea value={editCollectionData.note} onChange={(e) => setEditCollectionData({...editCollectionData, note: e.target.value})} rows="3" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 resize-none"></textarea>
+                  </div>
+                </div>
+                <div className="mt-6 flex justify-end gap-3">
+                  <button onClick={() => setIsEditCollectionModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold">İptal</button>
+                  <button onClick={handleSaveEditCollection} disabled={!editCollectionData.amount || !editCollectionData.date} className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white px-6 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"><Check size={16} strokeWidth={3}/> Kaydet</button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
