@@ -1,4 +1,3 @@
-/* eslint-disable */
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
@@ -5762,6 +5761,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                               </button>
                                                           </div>
                                                       </td>
+                                                  </tr>
+                                              );
+                                          }) : (
+                                              <tr>
                                                   <td colSpan="5" className="px-6 py-12 text-center">
                                                       <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3"><History size={24} className="text-gray-300" /></div>
                                                       <p className="text-gray-500 font-medium">Bu kriterlere uygun herhangi bir tahsilat kaydı bulunamadı.</p>
