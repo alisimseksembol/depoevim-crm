@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
-  FileText, 
   Users, 
   Calendar, 
   Clock, 
-  CreditCard, 
   AlertCircle, 
   Box, 
   Table, 
@@ -17,7 +15,6 @@ import {
   Search,
   Bell,
   ChevronDown,
-  Calculator,
   X,
   Plus,
   Upload,
@@ -34,13 +31,12 @@ import {
   MessageCircle,
   Phone,
   FileText as FileTextIcon,
-History,
+  History,
   Download,
   Info,
   Key,
   Check,
   Gift,
-  Database,
   MapPin,
   Lock
 } from 'lucide-react';
@@ -7638,7 +7634,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       <td className="px-6 py-4">
                                           <div className="flex items-center gap-3">
                                               <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0 overflow-hidden">
-                                                  {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover"/> : user.name.charAt(0)}
+                                                  {user.avatar ? <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover"/> : user.name.charAt(0)}
                                               </div>
                                               <div>
                                                   <div className="font-bold text-gray-800 text-[15px]">{user.name}</div>
