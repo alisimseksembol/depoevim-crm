@@ -319,6 +319,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [rememberMe, setRememberMe] = useState(false); // YENİ EKLENDİ
+  const [isAuthenticated, setIsAuthenticated] = useState(false); // EKLENDİ: eksikti, beyaz ekran hatasına sebep oluyordu
 
   // YENİ EKLENDİ: Sayfa yüklendiğinde beni hatırla verisi varsa otomatik giriş yap
   useEffect(() => {
