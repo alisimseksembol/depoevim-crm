@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
-  FileText, 
   Users, 
   Calendar, 
   Clock, 
-  CreditCard, 
   AlertCircle, 
   Box, 
   Table, 
@@ -17,7 +15,6 @@ import {
   Search,
   Bell,
   ChevronDown,
-  Calculator,
   X,
   Plus,
   Upload,
@@ -34,13 +31,12 @@ import {
   MessageCircle,
   Phone,
   FileText as FileTextIcon,
-History,
+  History,
   Download,
   Info,
   Key,
   Check,
   Gift,
-  Database,
   MapPin,
   Lock
 } from 'lucide-react';
@@ -298,7 +294,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
       const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
       
-      // 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
+// 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
       const unsubSettings = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'settings'), (snapshot) => {
           snapshot.docs.forEach(doc => {
               if (doc.id === 'contract') setContractSettings(doc.data());
@@ -306,17 +302,37 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           });
       }, (error) => console.error("Ayar Çekme Hatası:", error));
 
+      // YENİ EKLENEN: TOPLU YÜKLEME GEÇMİŞİ FİREBASE DİNLEYİCİSİ
+      const unsubBulkUploadHistory = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'bulkUploadHistory'), (snapshot) => {
+          const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.timestamp - a.timestamp);
+          setBulkUploadHistory(fetchedData);
+      }, (error) => console.error("Toplu Yükleme Hatası:", error));
+
       return () => { 
           unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); 
-          unsubSettings(); // 👈 Ayar telsizini kapat
+          unsubSettings(); unsubBulkUploadHistory();
       };
   }, [firebaseUser]);
   // ============================================================================
 
   // --- YENİ: AUTH VE KULLANICI STATE'LERİ ---
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
+  const [rememberMe, setRememberMe] = useState(false); // YENİ EKLENDİ
+
+  // YENİ EKLENDİ: Sayfa yüklendiğinde beni hatırla verisi varsa otomatik giriş yap
+  useEffect(() => {
+      const savedUser = localStorage.getItem('depoevim_saved_user');
+      if (savedUser) {
+          try {
+              const userObj = JSON.parse(savedUser);
+              setCurrentUserProfile({...userObj, oldPassword: '', newPassword: '', confirmPassword: ''});
+              setIsAuthenticated(true);
+          } catch (e) {
+              localStorage.removeItem('depoevim_saved_user');
+          }
+      }
+  }, []);
   
   const [systemUsers, setSystemUsers] = useState([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]);
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
@@ -526,7 +542,9 @@ const [apptCustomerSearch, setApptCustomerSearch] = useState('');
   const [updateAllStats, setUpdateAllStats] = useState(null);
 
   // --- FİNANS RAPOR STATE'LERİ ---
-  const [finansReportFilter, setFinansReportFilter] = useState('year'); // today, week, month, year
+  const [finansReportFilter, setFinansReportFilter] = useState('year'); // today, week, month, year, custom
+  const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().split('T')[0]); // YENİ
+  const [customEndDate, setCustomEndDate] = useState(new Date().toISOString().split('T')[0]);     // YENİ
   const [branchPaymentFilter, setBranchPaymentFilter] = useState('1'); // 1, 3, 6, 12, all
   const [avgRevenueBranchFilter, setAvgRevenueBranchFilter] = useState('all');
   const [avgRevenueYearFilter, setAvgRevenueYearFilter] = useState(new Date().getFullYear().toString());
@@ -554,14 +572,17 @@ const [apptCustomerSearch, setApptCustomerSearch] = useState('');
       confirmPassword: ''
   });
 
-  // --- YENİ EKLENEN: GİRİŞ VE KULLANICI FONKSİYONLARI ---
-  const handleLogin = (e) => {
+const handleLogin = (e) => {
       e.preventDefault();
       const user = systemUsers.find(u => u.username === loginData.username && u.password === loginData.password);
       if (user) {
           setCurrentUserProfile({...user, oldPassword: '', newPassword: '', confirmPassword: ''});
           setIsAuthenticated(true);
           setLoginError('');
+          // YENİ EKLENDİ: Beni Hatırla işaretliyse tarayıcıya kaydet
+          if (rememberMe) {
+              localStorage.setItem('depoevim_saved_user', JSON.stringify(user));
+          }
       } else {
           setLoginError('Kullanıcı adı veya şifre hatalı!');
       }
@@ -571,6 +592,7 @@ const [apptCustomerSearch, setApptCustomerSearch] = useState('');
       setIsAuthenticated(false);
       setLoginData({ username: '', password: '' });
       setIsProfileDropdownOpen(false);
+      localStorage.removeItem('depoevim_saved_user'); // YENİ EKLENDİ: Çıkışta temizle
   };
 
 const handleAddSystemUser = async () => {
@@ -1940,12 +1962,12 @@ const handleDeleteLedgerItem = async (txId) => {
         try {
             let updatePayload = {};
 
-            if (txId.startsWith('debt-extra-')) {
-                const debtId = parseInt(txId.replace('debt-extra-', ''));
-                updatePayload = { extraDebts: (customerToUpdate.extraDebts || []).filter(d => d.id !== debtId) };
+if (txId.startsWith('debt-extra-')) {
+                const debtId = Number(txId.replace('debt-extra-', ''));
+                updatePayload = { extraDebts: (customerToUpdate.extraDebts || []).filter(d => Number(d.id) !== debtId) };
             } else if (txId.startsWith('credit-global-')) {
-                const payId = parseInt(txId.replace('credit-global-', ''));
-                updatePayload = { payments: (customerToUpdate.payments || []).filter(p => p.id !== payId) };
+                const payId = Number(txId.replace('credit-global-', ''));
+                updatePayload = { payments: (customerToUpdate.payments || []).filter(p => Number(p.id) !== payId) };
             } else {
                 updatePayload = { 
                     ledgerOverrides: [
@@ -1970,13 +1992,21 @@ const handleSaveLedgerEdit = async () => {
         try {
             let updatePayload = {};
 
-            if (txId.startsWith('debt-extra-')) {
-                const debtId = parseInt(txId.replace('debt-extra-', ''));
-                const updatedDebts = (customerToUpdate.extraDebts || []).map(d => d.id === debtId ? { ...d, date: editDate, desc: editDesc, amount: newAmount } : d);
+if (txId.startsWith('debt-extra-')) {
+                const debtId = Number(txId.replace('debt-extra-', ''));
+                const updatedDebts = (customerToUpdate.extraDebts || []).map(d => Number(d.id) === debtId ? { ...d, date: editDate, desc: editDesc, amount: newAmount } : d);
                 updatePayload = { extraDebts: updatedDebts };
             } else if (txId.startsWith('credit-global-')) {
-                const payId = parseInt(txId.replace('credit-global-', ''));
-                const updatedPayments = (customerToUpdate.payments || []).map(p => p.id === payId ? { ...p, date: editDate, note: editDesc, amount: newAmount } : p);
+                const payId = Number(txId.replace('credit-global-', ''));
+                
+                const existingPayments = customerToUpdate.payments || [];
+                // Aynı gün kontrolü (Kendisi hariç)
+                if (existingPayments.some(p => Number(p.id) !== payId && p.date === editDate)) {
+                    alert("HATA: Bu müşterinin carisinde seçili tarihe ait zaten bir tahsilat bulunmaktadır. Aynı güne başka tahsilat kaydedilemez.");
+                    return;
+                }
+
+                const updatedPayments = existingPayments.map(p => Number(p.id) === payId ? { ...p, date: editDate, note: editDesc, amount: newAmount } : p);
                 updatePayload = { payments: updatedPayments };
             } else {
                 // Otomatik hesaplanan oda kiralarına müdahale (Override)
@@ -2023,21 +2053,29 @@ const handleManualAddDebt = async () => {
 
 const handleManualAddPayment = async () => {
     if (!newPaymentData.amount) return;
-    const newPayment = {
-        id: Date.now(),
-        amount: Number(newPaymentData.amount),
-        date: newPaymentData.date,
-        note: newPaymentData.note
-    };
-
+    
     const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
-    if (customerToUpdate && db && firebaseUser) {
-        try {
-            const existingPayments = customerToUpdate.payments || [];
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
-                payments: [...existingPayments, newPayment]
-            }, { merge: true });
-        } catch(e) { console.error("Manuel Ödeme Ekleme Hatası:", e); }
+    if (customerToUpdate) {
+        const existingPayments = customerToUpdate.payments || [];
+        if (existingPayments.some(p => p.date === newPaymentData.date)) {
+            alert(`HATA: Bu müşteriye ait aynı günde (${newPaymentData.date}) zaten bir tahsilat kaydı bulunmaktadır. Aynı güne başka tahsilat girişi yapılamaz!`);
+            return;
+        }
+        
+        const newPayment = {
+            id: Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString()), // benzersiz tam sayı ID
+            amount: Number(newPaymentData.amount),
+            date: newPaymentData.date,
+            note: newPaymentData.note
+        };
+        
+        if (db && firebaseUser) {
+            try {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
+                    payments: [...existingPayments, newPayment]
+                }, { merge: true });
+            } catch(e) { console.error("Manuel Ödeme Ekleme Hatası:", e); }
+        }
     }
 
     setIsAddPaymentModalOpen(false);
@@ -2386,7 +2424,51 @@ const handleAddInvoice = async () => {
 
   const [isEndRentModalOpen, setIsEndRentModalOpen] = useState(false);
   const [endRentData, setEndRentData] = useState({ exitDate: new Date().toISOString().split('T')[0], photo: null });
-  
+  // --- İCRA SÜRECİ STATE'LERİ ---
+  const [isLegalActionModalOpen, setIsLegalActionModalOpen] = useState(false);
+  const [legalActionData, setLegalActionData] = useState({ reason: '', type: 'start' }); // 'start' veya 'stop'
+
+  const handleLegalActionConfirm = async () => {
+      if (legalActionData.type === 'start' && !legalActionData.reason) return;
+      
+      const roomToUpdate = rooms.find(r => r.id === selectedRoomId);
+      if (!roomToUpdate || !db || !firebaseUser) return;
+
+      const d = new Date();
+      const dateStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+      
+      const newHistoryItem = {
+          id: Date.now(),
+          date: dateStr,
+          type: legalActionData.type,
+          reason: legalActionData.type === 'start' ? legalActionData.reason : 'İcra süreci kaldırıldı ve kiralama normale döndürüldü.'
+      };
+
+      const existingHistory = roomToUpdate.legalActionHistory || [];
+
+      try {
+          if (legalActionData.type === 'start') {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                  isUnderLegalAction: true,
+                  legalActionReason: legalActionData.reason,
+                  legalActionStartDate: Date.now(),
+                  legalActionHistory: [newHistoryItem, ...existingHistory]
+              }, { merge: true });
+          } else {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), {
+                  isUnderLegalAction: false,
+                  legalActionReason: null,
+                  legalActionStartDate: null,
+                  legalActionHistory: [newHistoryItem, ...existingHistory]
+              }, { merge: true });
+          }
+      } catch (e) {
+          console.error("İcra İşlemi Hatası:", e);
+      }
+
+      setIsLegalActionModalOpen(false);
+      setLegalActionData({ reason: '', type: 'start' });
+  };
   const [isApplyIncreaseModalOpen, setIsApplyIncreaseModalOpen] = useState(false);
   const [increaseModalData, setIncreaseModalData] = useState(null);
   const [increaseMode, setIncreaseMode] = useState('percentage');
@@ -2545,10 +2627,19 @@ const handleCancelReservation = async () => {
   const [isGlobalPaymentSuccess, setIsGlobalPaymentSuccess] = useState(false);
   const [paymentCustomerSearch, setPaymentCustomerSearch] = useState('');
 
-  // --- YENİ EKLENEN: TOPLU ÖDEME STATE'LERİ ---
+// --- YENİ EKLENEN: TOPLU ÖDEME STATE'LERİ ---
   const [paymentEntryMode, setPaymentEntryMode] = useState('single'); // 'single' | 'bulk'
   const [bulkProcessResult, setBulkProcessResult] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [bulkUploadHistory, setBulkUploadHistory] = useState([]);
+
+  // --- YENİ EKLENEN: TOPLU YÜKLEME DETAY MODALI ---
+  const [isBulkDetailsModalOpen, setIsBulkDetailsModalOpen] = useState(false);
+  const [bulkDetailsData, setBulkDetailsData] = useState(null);
+
+  // --- TAHSİLAT HAREKETLERİ DÜZENLEME STATE'LERİ ---
+  const [isEditCollectionModalOpen, setIsEditCollectionModalOpen] = useState(false);
+  const [editCollectionData, setEditCollectionData] = useState(null);
 
   // --- YENİ EKLENEN: TOPLU MÜŞTERİ İÇE AKTARMA STATE'LERİ ---
   const [isCustomerUploading, setIsCustomerUploading] = useState(false);
@@ -2570,7 +2661,7 @@ const handleCancelReservation = async () => {
                   const firstSheetName = workbook.SheetNames[0];
                   const worksheet = workbook.Sheets[firstSheetName];
                   const rows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                  processBulkData(rows);
+                  processBulkData(rows, file.name);
               } catch (err) {
                   console.error(err);
                   alert("Dosya okunurken bir hata oluştu. Lütfen formatı kontrol edin.");
@@ -2587,7 +2678,7 @@ const handleCancelReservation = async () => {
       e.target.value = ''; // Input'u temizle
   };
 
-  const processBulkData = async (rows) => {
+  const processBulkData = async (rows, fileName) => {
       if (!rows || rows.length <= 1) {
           alert("Dosya boş veya geçersiz format.");
           return;
@@ -2601,21 +2692,20 @@ const handleCancelReservation = async () => {
       const newPendingCollections = [...pendingCollections];
       const customersUpdates = {}; 
 
-      const addedPaymentIds = [];
+      const addedPaymentRecords = [];
       const addedPendingIds = [];
 
-      // 1. Sütun Kuralları ve Dinamik Başlık Tespiti (Excel'deki gereksiz üst boşlukları aşmak için)
+      // 1. Sütun Kuralları ve Dinamik Başlık Tespiti (Gereksiz sütunları otomatik yok sayar)
       let headerRowIndex = -1;
-      let dateColIdx = 0, descColIdx = 2, amountColIdx = 3; // Varsayılan değerler
+      let dateColIdx = 0, descColIdx = 2, amountColIdx = 3;
 
-      // Başlık satırını bul (İlk 20 satırı tara)
       for (let i = 0; i < Math.min(20, rows.length); i++) {
           if (rows[i]) {
               const rowStr = rows[i].map(c => String(c).toLowerCase()).join('|');
               if (rowStr.includes('tarih') && (rowStr.includes('tutar') || rowStr.includes('açıklama') || rowStr.includes('aciklama'))) {
                   headerRowIndex = i;
                   for (let j = 0; j < rows[i].length; j++) {
-                      const colName = String(rows[i][j] || '').toLowerCase();
+                      const colName = String(rows[i][j] || '').toLowerCase().trim();
                       if (colName.includes('tarih')) dateColIdx = j;
                       else if (colName.includes('açıklama') || colName.includes('aciklama')) descColIdx = j;
                       else if (colName.includes('tutar')) amountColIdx = j;
@@ -2637,12 +2727,15 @@ const handleCancelReservation = async () => {
 
           if (amountRaw === undefined || amountRaw === null || amountRaw === '') continue;
 
-          // Tutar Çözümleme (Formatlama)
+          // KURAL 1: Başında '-' (eksi) olan işlemleri (Giderleri/Kesintileri) tamamen yoksay
+          const amountRawStr = String(amountRaw).trim();
+          if (amountRawStr.startsWith('-')) continue;
+
           let amount = 0;
           if (typeof amountRaw === 'number') {
               amount = amountRaw;
           } else {
-              let amountStr = String(amountRaw).trim();
+              let amountStr = amountRawStr;
               if (amountStr.includes(',') && amountStr.includes('.')) {
                   if (amountStr.lastIndexOf(',') > amountStr.lastIndexOf('.')) {
                       amountStr = amountStr.replace(/\./g, '').replace(',', '.');
@@ -2655,13 +2748,13 @@ const handleCancelReservation = async () => {
               amount = parseFloat(amountStr);
           }
 
-          // Yalnızca Gelen Tahsilatları (Pozitif tutarları) işle, giden para/kesintileri atla
-          if (isNaN(amount) || amount <= 0) continue;
+          // Güvenlik amaçlı sıfır veya sıfırdan küçükleri tekrar filtrele
+          if (isNaN(amount) || amount <= 0) continue; 
 
           const descStr = String(descRaw || '').trim();
           const descUpper = descStr.toUpperCase();
           
-          // Tarih Çözümleme
+          // KURAL 2: Sadece Tahsilat Tarihini (Tarih Sütunu) baz al
           let validDate = new Date().toISOString().split('T')[0];
           if (typeof dateRaw === 'number') {
               const excelEpoch = new Date(1899, 11, 30);
@@ -2682,33 +2775,40 @@ const handleCancelReservation = async () => {
 
           let matchedCustomer = null;
 
-          // 2. Müşteri Cari Hesabını Bulma Hiyerarşisi
-          
-          // Adım 1: İsim Kontrolü (Açıklama içinde geçiyor mu?)
+          // KURAL 3: Müşteri Adı ile eşleştirme. Açıklamada birden fazla isim geçse bile veritabanındaki müşteri adını içeriyorsa eşleştirir.
           matchedCustomer = customers.find(c => c.name && descUpper.includes(c.name.toUpperCase()));
           
-          // Adım 2: Oda Numarası Kontrolü (İsim bulunamazsa)
           if (!matchedCustomer) {
+              // KURAL 4: Gelişmiş Oda Eşleştirme (E-518, E_518, E 518, E518 gibi tüm varyasyonları kapsar)
               const possibleRooms = rooms.filter(r => {
-                  const roomNameClean = r.name.replace(/[\s-]/g, '').toUpperCase();
-                  const descClean = descUpper.replace(/[\s-]/g, '');
-                  return descClean.includes(roomNameClean);
+                  // Sistemdeki odanın ve açıklamanın içindeki tüm boşlukları, tireleri ve alt çizgileri silip öyle kıyaslar
+                  const roomNameClean = r.name.replace(/[\s-_]/g, '').toUpperCase();
+                  const descClean = descUpper.replace(/[\s-_]/g, '');
+                  
+                  // Yanlış eşleşmeleri önlemek için oda adı harf/rakam birleşimi min. 2 karakterse kontrol et
+                  if (roomNameClean.length >= 2) {
+                      return descClean.includes(roomNameClean);
+                  }
+                  return false;
               });
-              if (possibleRooms.length > 0 && possibleRooms[0].customerName) {
-                  matchedCustomer = customers.find(c => c.name === possibleRooms[0].customerName);
+              
+              // Eşleşen bir oda bulursa ve o odada aktif müşteri varsa carisini bağla
+              const activeMatchedRoom = possibleRooms.find(r => r.customerName);
+              if (activeMatchedRoom) {
+                  matchedCustomer = customers.find(c => c.name === activeMatchedRoom.customerName);
               }
           }
 
-          // Adım 3: Müşteri Numarası Kontrolü (Oda da bulunamazsa)
+          // Son çare: Müşteri Numarası varsa onunla eşleştir
           if (!matchedCustomer) {
               matchedCustomer = customers.find(c => c.customerNo && descUpper.includes(c.customerNo));
           }
 
           if (matchedCustomer) {
-              // 3. Mükerrer Kayıt (Çift İşlem) Kontrolü
+              // SADECE TARIH KONTROLU - AYNI GUNE IKINCi BIR TAHSILAT EKLENMESIN
               const existingPayments = matchedCustomer.payments || [];
-              const isDuplicate = existingPayments.some(p => p.date === validDate && Number(p.amount) === amount);
-              const isDuplicateInUpdates = customersUpdates[matchedCustomer.id]?.some(p => p.date === validDate && Number(p.amount) === amount);
+              const isDuplicate = existingPayments.some(p => p.date === validDate);
+              const isDuplicateInUpdates = customersUpdates[matchedCustomer.id]?.some(p => p.date === validDate);
 
               if (!isDuplicate && !isDuplicateInUpdates) {
                   matchedCount++;
@@ -2717,24 +2817,23 @@ const handleCancelReservation = async () => {
                   if (!customersUpdates[matchedCustomer.id]) {
                       customersUpdates[matchedCustomer.id] = [];
                   }
-                  const pId = Date.now() + Math.random();
+                  const pId = Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString());
                   customersUpdates[matchedCustomer.id].push({
                       id: pId,
                       amount: amount,
                       date: validDate,
-                      note: 'Banka Tahsilatı: ' + descStr
+                      note: 'Toplu Banka Tahsilatı: ' + descStr
                   });
-                  addedPaymentIds.push(pId);
+                  addedPaymentRecords.push({ customerId: matchedCustomer.id, paymentId: pId });
               }
           } else {
-              // 4. Eşleşmeyen Kayıtlar -> Askıya Al (Eğer daha önce askıya eklenmediyse)
-              const isDuplicatePending = newPendingCollections.some(p => p.date === validDate && Number(p.amount) === amount);
+              const isDuplicatePending = newPendingCollections.some(p => p.date === validDate);
               
               if (!isDuplicatePending) {
                   unmatchedCount++;
                   totalUnmatchedAmount += amount;
                   
-                  const pId = Date.now() + Math.random();
+                  const pId = Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString());
                   newPendingCollections.push({
                       id: pId,
                       amount: amount,
@@ -2746,7 +2845,7 @@ const handleCancelReservation = async () => {
           }
       }
 
-  if (Object.keys(customersUpdates).length > 0 && db && firebaseUser) {
+      if (Object.keys(customersUpdates).length > 0 && db && firebaseUser) {
           for (const cId of Object.keys(customersUpdates)) {
               const customerToUpdate = customers.find(c => String(c.id) === String(cId));
               if (customerToUpdate) {
@@ -2757,41 +2856,75 @@ const handleCancelReservation = async () => {
           }
       }
 
-if (unmatchedCount > 0 && db && firebaseUser) {
+      if (unmatchedCount > 0 && db && firebaseUser) {
           for (const pending of newPendingCollections) {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)), pending, { merge: true });
+              if (addedPendingIds.includes(pending.id)) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)), pending, { merge: true });
+              }
           }
       }
 
-      setBulkProcessResult({
+      // YENİ EKLENEN: Yükleme işlemini Firebase'e kaydet (Tarihçe Raporu İçin)
+      const uploadRecordId = Date.now().toString();
+      const uploadRecord = {
+          id: uploadRecordId,
+          timestamp: Date.now(),
+          dateStr: new Date().toLocaleString('tr-TR'),
+          fileName: fileName || 'Bilinmeyen Dosya',
           matchedCount,
           unmatchedCount,
           totalMatchedAmount,
           totalUnmatchedAmount,
-          addedPaymentIds,
+          addedPaymentRecords,
           addedPendingIds
-      });
+      };
+      
+      if (db && firebaseUser && (matchedCount > 0 || unmatchedCount > 0)) {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bulkUploadHistory', uploadRecordId), uploadRecord);
+      }
+
+      setBulkProcessResult(uploadRecord);
+  };
+
+  const handleRevertBulkUpload = async (historyRecord) => {
+      if (!window.confirm("Bu toplu yüklemeyi ve eklediği tüm tahsilatları sistemden (carilerden ve askıdan) silip geri almak istediğinize emin misiniz?")) return;
+      
+      setIsUploading(true);
+      if (db && firebaseUser) {
+          try {
+              const customerGroups = {};
+              if (historyRecord.addedPaymentRecords) {
+                  historyRecord.addedPaymentRecords.forEach(record => {
+                      if (!customerGroups[record.customerId]) customerGroups[record.customerId] = [];
+                      customerGroups[record.customerId].push(Number(record.paymentId));
+                  });
+              }
+
+              for (const cId of Object.keys(customerGroups)) {
+                  const customer = customers.find(c => String(c.id) === String(cId));
+                  if (customer) {
+                      const idsToRemove = customerGroups[cId];
+                      const cleanedPayments = (customer.payments || []).filter(p => !idsToRemove.includes(Number(p.id)));
+                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cId)), { payments: cleanedPayments }, { merge: true });
+                  }
+              }
+
+              if (historyRecord.addedPendingIds) {
+                  for (const pId of historyRecord.addedPendingIds) {
+                      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pId)));
+                  }
+              }
+
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bulkUploadHistory', String(historyRecord.id)));
+              if (bulkProcessResult?.id === historyRecord.id) {
+                  setBulkProcessResult(null);
+              }
+          } catch (e) { console.error("Geri Alma Hatası:", e); }
+      }
+      setIsUploading(false);
   };
 
   const handleUndoBulkProcess = async () => {
-      if (!bulkProcessResult) return;
-      const { addedPaymentIds, addedPendingIds } = bulkProcessResult;
-      
-      if (addedPaymentIds && addedPaymentIds.length > 0 && db && firebaseUser) {
-          for (const c of customers) {
-              const hasAddedPayment = c.payments?.some(p => addedPaymentIds.includes(p.id));
-              if (hasAddedPayment) {
-                  const cleanedPayments = c.payments.filter(p => !addedPaymentIds.includes(p.id));
-                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(c.id)), { payments: cleanedPayments }, { merge: true });
-              }
-          }
-      }
-      
-      if (addedPendingIds && addedPendingIds.length > 0 && db && firebaseUser) {
-          for (const pId of addedPendingIds) {
-              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pId)));
-          }
-      }
       setBulkProcessResult(null);
   };
 
@@ -3058,7 +3191,7 @@ const handleRentRoom = async () => {
 const handleGlobalPayment = async () => {
     if (!globalPaymentData.customerId || !globalPaymentData.amount) return;
 
-    const paymentId = Date.now();
+    const paymentId = Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString());
     const newPayment = {
         id: paymentId,
         amount: Number(globalPaymentData.amount),
@@ -3069,26 +3202,65 @@ const handleGlobalPayment = async () => {
     if (globalPaymentData.customerId === 'askida') {
         if (db && firebaseUser) {
             try {
-                // Askıdaki ödemeleri 'pendingCollections' tablosuna kaydet
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(paymentId)), newPayment);
             } catch(e) { console.error("Askıda Ödeme Kayıt Hatası:", e); }
         }
     } else {
         const customerId = globalPaymentData.customerId;
         const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
-        if (customerToUpdate && db && firebaseUser) {
-            try {
-                const existingPayments = customerToUpdate.payments || [];
-                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
-                    payments: [...existingPayments, newPayment]
-                }, { merge: true });
-            } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
+        if (customerToUpdate) {
+            const existingPayments = customerToUpdate.payments || [];
+            if (existingPayments.some(p => p.date === globalPaymentData.date)) {
+                alert(`HATA: Bu müşteriye ait aynı günde (${globalPaymentData.date}) zaten bir tahsilat kaydı bulunmaktadır. Aynı güne başka tahsilat girişi yapılamaz!`);
+                return;
+            }
+            if (db && firebaseUser) {
+                try {
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
+                        payments: [...existingPayments, newPayment]
+                    }, { merge: true });
+                } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
+            }
         }
     }
 
     setIsGlobalPaymentSuccess(true);
     setGlobalPaymentData({ customerId: '', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
     setTimeout(() => setIsGlobalPaymentSuccess(false), 3000);
+  };
+
+  const handleDeleteCollection = async (customerId, paymentId) => {
+      if (!window.confirm("Bu tahsilatı silmek istediğinize emin misiniz? İşlem müşterinin cari hesabından silinecektir.")) return;
+      const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
+      if (customerToUpdate && db && firebaseUser) {
+          try {
+              const updatedPayments = (customerToUpdate.payments || []).filter(p => Number(p.id) !== Number(paymentId));
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { payments: updatedPayments }, { merge: true });
+          } catch(e) { console.error("Tahsilat Silme Hatası:", e); }
+      }
+  };
+
+  const handleSaveEditCollection = async () => {
+      if (!editCollectionData || !editCollectionData.amount) return;
+      const customerToUpdate = customers.find(c => String(c.id) === String(editCollectionData.customerId));
+      
+      if (customerToUpdate && db && firebaseUser) {
+          const existingPayments = customerToUpdate.payments || [];
+          if (existingPayments.some(p => Number(p.id) !== Number(editCollectionData.id) && p.date === editCollectionData.date)) {
+              alert("Bu müşterinin carisinde seçilen tarihte zaten bir tahsilat kaydı bulunmaktadır. Aynı güne birden fazla tahsilat girilemez.");
+              return;
+          }
+          try {
+              const updatedPayments = existingPayments.map(p =>
+                  Number(p.id) === Number(editCollectionData.id)
+                  ? { ...p, date: editCollectionData.date, note: editCollectionData.note, amount: Number(editCollectionData.amount) }
+                  : p
+              );
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(editCollectionData.customerId)), { payments: updatedPayments }, { merge: true });
+          } catch(e) { console.error("Tahsilat Düzenleme Hatası:", e); }
+      }
+      setIsEditCollectionModalOpen(false);
+      setEditCollectionData(null);
   };
 
 const handleSaveEditRent = async () => {
@@ -3882,23 +4054,30 @@ if (!selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !isFree) {
           // Ödeme gününü (day) sabitle, aylar eklendikçe değişmesin
           const targetDay = room.paymentDate && !room.paymentDate.includes('-') ? parseInt(room.paymentDate) : paymentAnchorD.getDate();
 
-          let loopDate = new Date(paymentAnchorD.getFullYear(), paymentAnchorD.getMonth(), 1); // Ayın başına sabitle (overflow'u engellemek için)
-          let monthCounter = 0;
-          const today = new Date();
-          today.setHours(23, 59, 59, 999);
-          
-          // Bugüne kadar olan ayları tara (Yıl ve Ay kıyası)
-          while (loopDate.getFullYear() < today.getFullYear() || (loopDate.getFullYear() === today.getFullYear() && loopDate.getMonth() <= today.getMonth())) {
-              const year = loopDate.getFullYear();
-              const month = loopDate.getMonth();
-              const key = `${year}-${month}`;
-              
-              // O ayki borcun vadesi geldi mi kontrolü (Örn: Bugün 15'i, kira 20'si ise bu ayın borcunu daha yazma)
-              let maxDayInMonth = new Date(year, month + 1, 0).getDate(); // O ayın son günü
-              let actualPayDay = Math.min(targetDay, maxDayInMonth); // Eğer hedef gün 31 ise ve ay 28 çekiyorsa 28'ine çek
-              let txDate = new Date(year, month, actualPayDay);
+          let loopDate = new Date(paymentAnchorD.getFullYear(), paymentAnchorD.getMonth(), 1); 
+  
+              let monthCounter = 0;
+              const today = new Date();
+              today.setHours(23, 59, 59, 999);
 
-              if (txDate <= today) {
+              // YENİ EKLENDİ: İcra süreci varsa hesaplamayı icranın başladığı tarihte durdur
+              let calculationEndDate = today;
+              if (room.isUnderLegalAction && room.legalActionStartDate) {
+                  calculationEndDate = new Date(room.legalActionStartDate);
+                  calculationEndDate.setHours(23, 59, 59, 999);
+              }
+              
+              // Bugüne (veya icra tarihine) kadar olan ayları tara
+              while (loopDate.getFullYear() < calculationEndDate.getFullYear() || (loopDate.getFullYear() === calculationEndDate.getFullYear() && loopDate.getMonth() <= calculationEndDate.getMonth())) {
+                  const year = loopDate.getFullYear();
+                  const month = loopDate.getMonth();
+                  const key = `${year}-${month}`;
+                  
+                  let maxDayInMonth = new Date(year, month + 1, 0).getDate(); 
+                  let actualPayDay = Math.min(targetDay, maxDayInMonth); 
+                  let txDate = new Date(year, month, actualPayDay);
+
+                  if (txDate <= calculationEndDate) {
                   const isGifted = room.giftMonths && monthCounter < room.giftMonths;
                   const isFree = room.isFreeRoom;
                   const appliedMonthlyTotal = (isGifted || isFree) ? 0 : monthlyTotal;
@@ -4012,33 +4191,40 @@ if (!selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !isFree) {
       const today = new Date();
       today.setHours(23, 59, 59, 999);
 
+      // YENİ: Global faiz başlangıç tarihi ve Müşteri Özel Muafiyet Durumu
+      const activationTime = collectionRates.interestActivationDate || 0;
+      const isCustomerExempt = customer.isInterestExempt === true;
+
       const baseTransactions = [...modifiedLedger];
       // Bugüne kadar olan faizleri tetiklemek için dummy bir hareket ekliyoruz.
       baseTransactions.push({ id: 'dummy-today', date: today, debt: 0, credit: 0, isDummy: true });
 
       baseTransactions.forEach(tx => {
-          // Eğer borç varsa ve üzerinden zaman geçmişse faizi uygula (VE AYARLARDAN AKTİF EDİLDİYSE)
-          if (collectionRates.isInterestActive && runningBalance > 0 && lastInterestAppliedDate) {
+          // Eğer borç varsa ve üzerinden zaman geçmişse faizi uygula (VE AYARLARDAN AKTİF EDİLDİYSE VE MÜŞTERİ MUAF DEĞİLSE)
+          if (collectionRates.isInterestActive && !isCustomerExempt && runningBalance > 0 && lastInterestAppliedDate) {
               let nextInterestDate = addDays(lastInterestAppliedDate, 30);
               
               while (nextInterestDate <= tx.date) {
-                  const interestAmount = runningBalance * interestRate;
-                  const totalInterest = interestAmount * 1.20; // + %20 KDV
-                  
-                  runningBalance += totalInterest;
-                  
-                  finalLedger.push({
-                      id: `interest-${nextInterestDate.getTime()}`,
-                      date: new Date(nextInterestDate),
-                      dateStr: `${nextInterestDate.getDate().toString().padStart(2, '0')}.${(nextInterestDate.getMonth() + 1).toString().padStart(2, '0')}.${nextInterestDate.getFullYear()}`,
-                      desc: `1 Aylık Gecikme Faiz Ücreti`,
-                      debt: totalInterest,
-                      baseDebt: interestAmount,
-                      kdvDebt: interestAmount * 0.20,
-                      credit: 0,
-                      balance: runningBalance,
-                      isInterest: true
-                  });
+                  // YENİ: Sadece global faiz aktif edildiği tarihten sonrasına faiz ekle
+                  if (nextInterestDate.getTime() >= activationTime) {
+                      const interestAmount = runningBalance * interestRate;
+                      const totalInterest = interestAmount * 1.20; // + %20 KDV
+                      
+                      runningBalance += totalInterest;
+                      
+                      finalLedger.push({
+                          id: `interest-${nextInterestDate.getTime()}`,
+                          date: new Date(nextInterestDate),
+                          dateStr: `${nextInterestDate.getDate().toString().padStart(2, '0')}.${(nextInterestDate.getMonth() + 1).toString().padStart(2, '0')}.${nextInterestDate.getFullYear()}`,
+                          desc: `1 Aylık Gecikme Faiz Ücreti`,
+                          debt: totalInterest,
+                          baseDebt: interestAmount,
+                          kdvDebt: interestAmount * 0.20,
+                          credit: 0,
+                          balance: runningBalance,
+                          isInterest: true
+                      });
+                  }
                   
                   lastInterestAppliedDate = new Date(nextInterestDate);
                   nextInterestDate = addDays(lastInterestAppliedDate, 30);
@@ -4178,6 +4364,15 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <input type="password" value={loginData.password} onChange={(e) => setLoginData({...loginData, password: e.target.value})} placeholder="••••••••" className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-50 transition-all font-semibold text-slate-700" required />
                           </div>
                       </div>
+
+                      {/* YENİ EKLENDİ: Beni Hatırla Kutucuğu */}
+                      <div className="flex items-center justify-between mt-1 px-1">
+                          <label className="flex items-center gap-2 cursor-pointer group">
+                              <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 transition-all" />
+                              <span className="text-xs font-bold text-gray-600 group-hover:text-blue-600 transition-colors">Beni Hatırla</span>
+                          </label>
+                      </div>
+
                       <button type="submit" className="mt-2 bg-blue-600 hover:bg-blue-700 text-white w-full py-3.5 rounded-xl font-bold text-base shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-0.5">
                           Sisteme Giriş Yap
                       </button>
@@ -5080,6 +5275,20 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                  </select>
                              </div>
                              <div className="flex flex-wrap items-center gap-2">
+                                 {/* YENİ EKLENEN: Kişiye Özel Faiz Pasife Alma / Aktif Etme Butonu */}
+                                 <button onClick={async () => {
+                                     const newExemptStatus = !customer.isInterestExempt;
+                                     if (db && firebaseUser) {
+                                         try {
+                                             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customer.id)), {
+                                                 isInterestExempt: newExemptStatus
+                                             }, { merge: true });
+                                         } catch(e) { console.error("Faiz Güncelleme Hatası:", e); }
+                                     }
+                                 }} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border ${customer.isInterestExempt ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}>
+                                     <TrendingUp size={14}/> {customer.isInterestExempt ? 'Faizi Aktif Et' : 'Faizi Pasife Al'}
+                                 </button>
+                                 
                                  <button onClick={() => setIsEditLedgerListModalOpen(true)} className="bg-orange-50 hover:bg-orange-100 text-orange-600 border border-orange-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm">
                                      <Settings size={14}/> Cari Düzenleme
                                  </button>
@@ -5310,6 +5519,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       </div>
                                   </div>
                                   <div className="mt-4 flex justify-end gap-3">
+                                      <button onClick={() => { setBulkDetailsData(bulkProcessResult); setIsBulkDetailsModalOpen(true); }} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-5 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm border border-indigo-100 flex items-center gap-2">
+                                          <Search size={16} /> Detayları Gör
+                                      </button>
                                       <button onClick={handleUndoBulkProcess} className="bg-red-50 hover:bg-red-100 text-red-600 px-5 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 shadow-sm border border-red-100">
                                           <RefreshCcw size={16} /> Geri Al
                                       </button>
@@ -5320,6 +5532,48 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               </div>
                           </div>
                       )}
+
+                      <div className="mt-8 border-t border-gray-200 pt-8">
+                          <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><History size={20} className="text-[#1bc5bd]"/> Geçmiş Toplu Yüklemeler</h3>
+                          <div className="overflow-x-auto border border-gray-200 rounded-xl">
+                              <table className="w-full text-left text-sm text-gray-600">
+                                  <thead className="bg-slate-50 border-b border-gray-200 font-bold text-gray-700 text-xs uppercase">
+                                      <tr>
+                                          <th className="p-4">Yükleme Tarihi</th>
+                                          <th className="p-4">Dosya Adı</th>
+                                          <th className="p-4 text-center">İşlenen (Cari)</th>
+                                          <th className="p-4 text-center">Askıya Alınan</th>
+                                          <th className="p-4 text-right">Toplam Tutar</th>
+                                          <th className="p-4 text-center">İşlem</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100 bg-white">
+                                      {bulkUploadHistory.length > 0 ? bulkUploadHistory.map(history => (
+                                          <tr key={history.id} className="hover:bg-gray-50">
+                                              <td className="p-4 font-bold text-gray-800">{history.dateStr}</td>
+                                              <td className="p-4 font-medium text-gray-600">{history.fileName}</td>
+                                              <td className="p-4 text-center font-bold text-emerald-600">{history.matchedCount} Kayıt</td>
+                                              <td className="p-4 text-center font-bold text-orange-500">{history.unmatchedCount} Kayıt</td>
+                                              <td className="p-4 text-right font-black text-[#1bc5bd]">{(history.totalMatchedAmount + history.totalUnmatchedAmount).toLocaleString('tr-TR')} TL</td>
+                                              <td className="p-4 text-center">
+                                                  <div className="flex items-center justify-center gap-2">
+                                                      <button onClick={() => { setBulkDetailsData(history); setIsBulkDetailsModalOpen(true); }} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border border-indigo-100 whitespace-nowrap">
+                                                          <Search size={14}/> Detay
+                                                      </button>
+                                                      <button onClick={() => handleRevertBulkUpload(history)} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border border-red-100 whitespace-nowrap">
+                                                          <Trash2 size={14}/> Geri Al / Sil
+                                                      </button>
+                                                  </div>
+                                              </td>
+                                          </tr>
+                                      )) : (
+                                          <tr><td colSpan="6" className="p-8 text-center text-gray-500 font-medium">Henüz kayıtlı toplu yükleme geçmişi bulunmuyor.</td></tr>
+                                      )}
+                                  </tbody>
+                              </table>
+                          </div>
+                      </div>
+
                   </div>
               )}
             </div>
@@ -5353,28 +5607,33 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           const customerRooms = rooms.filter(r => r.customerName === customer.name);
                           const { ledger, balance: finalBalance } = getCustomerLedger(customer);
 
-                          let highestRent = 0;
+                          // YENİ EKLENDİ: En yüksek kira yerine müşterinin "Toplam Aylık Kirası" baz alınır
+                          let totalMonthlyRent = 0;
             
                           customerRooms.forEach(room => {
                               const baseAmt = Number(room.monthlyFee || 0);
                               const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
                               const monthlyTotal = hasKdv ? baseAmt * 1.20 : baseAmt;
-                              if (monthlyTotal > highestRent) highestRent = monthlyTotal;
+                              totalMonthlyRent += monthlyTotal;
                           });
             
+                          // YENİ EKLENDİ: Kalan borç, toplam aylık kiraya bölünür. 
+                          // Math.ceil (yukarı yuvarlama) kullanılarak 1 TL borç kalsa bile o ay gecikmiş sayılır.
+                          // Cari bakiye değiştikçe bu sayı anında otomatik güncellenir.
                           let monthsOwed = 0;
                           if (finalBalance > 0) {
-                              if (highestRent > 0) {
-                                  monthsOwed = Math.floor(finalBalance / highestRent);
+                              if (totalMonthlyRent > 0) {
+                                  monthsOwed = Math.ceil(finalBalance / totalMonthlyRent);
                               } else {
-                                  monthsOwed = 1;
+                                  // Müşterinin aktif odası yok ama geçmişten kalan borcu varsa
+                                  monthsOwed = 1; 
                               }
                           }
             
                           return {
                               ...customer,
                               totalDebt: finalBalance,
-                              highestRent,
+                              totalMonthlyRent,
                               roomsCount: customerRooms.length,
                               monthsOwed
                           };
@@ -5534,19 +5793,18 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       }
                   });
                   
-                  // Tarihe göre yeniden eskiye sırala
-                  allCollections.sort((a, b) => new Date(b.date) - new Date(a.date));
+// İşlem sırasına (sisteme eklenme zamanı ID'sine) göre yeniden eskiye sırala
+                  allCollections.sort((a, b) => b.id - a.id);
 
                   // Filtreleri uygula
                   const today = new Date();
                   today.setHours(0, 0, 0, 0);
-
                   const filteredCollections = allCollections.filter(item => {
                       // İsim araması
                       if (collectionSearchTerm && !item.customerName.toLowerCase().includes(collectionSearchTerm.toLowerCase()) && !item.customerNo.includes(collectionSearchTerm)) {
                           return false;
                       }
-                      
+       
                       // Tarih filtresi
                       if (collectionFilter === 'all') return true;
                       
@@ -5564,6 +5822,16 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       if (collectionFilter === 'month') {
                           return itemDate.getMonth() === today.getMonth() && itemDate.getFullYear() === today.getFullYear();
                       }
+                      if (collectionFilter === 'lastMonth') {
+                          let lastMonth = today.getMonth() - 1;
+                          let year = today.getFullYear();
+                          // Eğer şu an Ocak ayıysa, geçen ay geçen yılın Aralık ayıdır
+                          if (lastMonth < 0) {
+                              lastMonth = 11;
+                              year--;
+                          }
+                          return itemDate.getMonth() === lastMonth && itemDate.getFullYear() === year;
+                      }
                       if (collectionFilter === 'year') {
                           return itemDate.getFullYear() === today.getFullYear();
                       }
@@ -5580,14 +5848,14 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search size={16} className="text-gray-400" /></div>
                                   <input type="text" placeholder="Müşteri Adı veya No..." value={collectionSearchTerm} onChange={(e) => setCollectionSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-green-400 focus:ring-2 focus:ring-green-50 shadow-sm font-medium" />
                               </div>
-                              <div className="flex bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm w-full sm:w-auto overflow-x-auto">
+<div className="flex bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm w-full sm:w-auto overflow-x-auto">
                                   <button onClick={() => setCollectionFilter('today')} className={`px-4 py-2.5 text-sm font-bold transition-colors whitespace-nowrap ${collectionFilter === 'today' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Günlük</button>
                                   <button onClick={() => setCollectionFilter('week')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'week' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Haftalık</button>
                                   <button onClick={() => setCollectionFilter('month')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'month' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Ay</button>
+                                  <button onClick={() => setCollectionFilter('lastMonth')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'lastMonth' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Geçen Ay</button>
                                   <button onClick={() => setCollectionFilter('year')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'year' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Yıl</button>
                                   <button onClick={() => setCollectionFilter('all')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'all' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Tümü</button>
                               </div>
-                          </div>
 
                           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex-1 flex flex-col">
                               <div className="overflow-x-auto flex-1">
@@ -5625,10 +5893,16 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                                       <FileTextIcon size={14}/> E-Fatura Kes
                                                                   </button>
                                                               )}
-                                                              <button onClick={() => handlePrintInvoice(tx)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm" title="Tahsilat Makbuzu Yazdır">
+                       <button onClick={() => handlePrintInvoice(tx)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm" title="Tahsilat Makbuzu Yazdır">
                                                                   <Download size={14}/>
                                                               </button>
-                                                              <button onClick={() => setSelectedCustomerId(tx.customerId)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm">
+                                                              <button onClick={() => { setEditCollectionData({...tx}); setIsEditCollectionModalOpen(true); }} className="bg-orange-50 hover:bg-orange-100 text-orange-600 px-2 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm" title="Düzenle">
+                                                                  <Edit size={14}/>
+                                                              </button>
+                                                              <button onClick={() => handleDeleteCollection(tx.customerId, tx.id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm" title="Sil">
+                                                                  <Trash2 size={14}/>
+                                                              </button>
+                                                              <button onClick={() => setSelectedCustomerId(tx.customerId)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm whitespace-nowrap">
                                                                   Cariyi Gör
                                                               </button>
                                                           </div>
@@ -5739,11 +6013,26 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                     const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
                                     const monthlyTotal = hasKdv ? baseAmount * 1.20 : baseAmount;
 
+                                    // YENİ EKLENDİ: Müşterinin borç kontrolü
+                                    let hasDebt = false;
+                                    if (customer) {
+                                        const { balance } = getCustomerLedger(customer);
+                                        hasDebt = balance > 0;
+                                    }
+
                                     return (
                                         <tr key={room.id} className="hover:bg-indigo-50/30 transition-colors">
                                             <td className="px-6 py-4 font-bold text-gray-400">{index + 1}</td>
                                             <td className="px-6 py-4">
-                                                <div className="font-bold text-indigo-700 cursor-pointer hover:underline text-base" onClick={() => customer && setSelectedCustomerId(customer.id)}>{room.customerName}</div>
+                                                <div className="font-bold text-indigo-700 cursor-pointer hover:underline text-base flex items-center gap-2" onClick={() => customer && setSelectedCustomerId(customer.id)}>
+                                                    {room.customerName}
+                                                    {/* YENİ EKLENDİ: Borç Bildirim Rozeti */}
+                                                    {hasDebt ? (
+                                                        <span className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[9px] border border-red-200 uppercase tracking-wider whitespace-nowrap shadow-sm" title="Müşterinin ödenmemiş cari borcu bulunuyor">Borcu Var</span>
+                                                    ) : (
+                                                        <span className="bg-teal-100 text-teal-600 px-1.5 py-0.5 rounded text-[9px] border border-teal-200 uppercase tracking-wider whitespace-nowrap shadow-sm" title="Müşterinin güncel borcu yoktur">Borcu Yok</span>
+                                                    )}
+                                                </div>
                                                 <div className="text-[10px] text-gray-500 mt-0.5 font-medium flex items-center gap-1"><Phone size={10}/> {customer?.phone || room.phone || '-'}</div>
                                             </td>
                                             <td className="px-6 py-4">
@@ -5871,6 +6160,49 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                     
                                     const hasBeenIncreased = room.priceHistory?.some(ph => ph.anniversaryYear === parseInt(anniversaryYear));
 
+                                    // YENİ EKLENDİ: WhatsApp Zam Bilgilendirme Otomasyonu
+                                    const sendIncreaseNotification = () => {
+                                        const entryD = parseDateLocal(room.entryDate);
+                                        const monthsStr = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+                                        const entryDay = entryD.getDate();
+                                        const entryMonth = monthsStr[entryD.getMonth()];
+
+                                        const increaseRate = Number(collectionRates.roomIncreaseRate || 50);
+                                        
+                                        // Yeni kira hesaplamaları
+                                        const newBaseAmount = Math.round(baseAmount + (baseAmount * increaseRate / 100));
+                                        const newTotalAmount = hasKdv ? Math.round(newBaseAmount * 1.20) : newBaseAmount;
+
+                                        // Mesaj Şablonu
+                                        let message = `Merhabalar Sayın ${customer?.name || room.customerName},\n\n`;
+                                        message += `*${entryDay} ${entryMonth}* tarihinde depolama senemiz dolmaktadır.\n`;
+                                        message += `Açıklanan enflasyon / sözleşme oranı *%${increaseRate}* olup, bu oranda zam yapılmıştır.\n\n`;
+
+                                        if (hasKdv) {
+                                             message += `Eski KDV Dahil Kiraniz: ${monthlyTotal.toLocaleString('tr-TR')} TL\n`;
+                                             message += `Yeni depo kiranız *${newBaseAmount.toLocaleString('tr-TR')} TL + KDV*'dir. KDV dahil aylık kiranız *${newTotalAmount.toLocaleString('tr-TR')} TL* olmuştur.\n\n`;
+                                        } else {
+                                             message += `Eski Kiraniz: ${monthlyTotal.toLocaleString('tr-TR')} TL\n`;
+                                             message += `Yeni aylık kiranız *${newTotalAmount.toLocaleString('tr-TR')} TL* olmuştur.\n\n`;
+                                        }
+
+                                        message += `Dilerseniz bitmeden eşyalarınızı alabilirsiniz.\n`;
+                                        message += `Ya da otomatik olarak yeni kiradan deponuz güncellenecektir. Bilginize sunarız.`;
+
+                                        // WhatsApp Yönlendirmesi
+                                        const encodedText = encodeURIComponent(message);
+                                        let waPhone = (customer?.phone || room.phone || '').replace(/\D/g, '');
+                                        
+                                        if (waPhone.length === 10) waPhone = '90' + waPhone;
+                                        else if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = '90' + waPhone.substring(1);
+
+                                        if(waPhone) {
+                                            window.open(`https://wa.me/${waPhone}?text=${encodedText}`, '_blank');
+                                        } else {
+                                            alert("Bu müşteriye ait geçerli bir telefon numarası bulunamadı.");
+                                        }
+                                    };
+
                                     return (
                                         <tr key={room.id} className="hover:bg-indigo-50/30 transition-colors">
                                             <td className="px-6 py-4">
@@ -5897,11 +6229,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                 {hasBeenIncreased ? (
                                                     <div className="flex items-center justify-center gap-2">
                                                         <span className="bg-green-100 text-green-700 px-3 py-2 rounded-xl text-xs font-bold border border-green-200 flex items-center gap-1.5"><Check size={14}/> Zam Yapıldı</span>
+                                                        <button onClick={sendIncreaseNotification} className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm border border-blue-200 flex items-center gap-1" title="Zammı WhatsApp'tan Bildir"><MessageCircle size={14}/> Bildir</button>
                                                         <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(warehouseInfo?.id); setSelectedBlockId(room.blockId); setSelectedRoomId(room.id); setSelectedCustomerId(null); }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm">Odaya Git</button>
                                                     </div>
                                                 ) : (
                                                     <div className="flex items-center justify-center gap-2">
                                                         <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(warehouseInfo?.id); setSelectedBlockId(room.blockId); setSelectedRoomId(room.id); setSelectedCustomerId(null); }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm">Odaya Git</button>
+                                                        <button onClick={sendIncreaseNotification} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm shadow-blue-500/30 flex items-center gap-1.5" title="Zam oranını müşteriye WhatsApp'tan bildir"><MessageCircle size={14}/> Bilgilendir</button>
                                                         <button onClick={() => handleOpenApplyIncreaseModal(room, anniversaryYear)} className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm shadow-indigo-500/30">Zam Yap</button>
                                                     </div>
                                                 )}
@@ -6280,7 +6614,39 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     </div>
                     {selectedRoomDetail?.customerName && (<button onClick={() => setIsRoomHistoryModalOpen(true)} className="bg-[#f64e60] hover:bg-red-600 text-white px-4 py-2 rounded text-sm font-semibold transition-colors shadow-sm">Depo Geçmişi</button>)}
                   </div>
-
+{(() => {
+                      const roomsUnderLegalAction = customerRooms?.filter(r => r.isUnderLegalAction) || [];
+                      const roomsWithPastLegalAction = customerRooms?.filter(r => !r.isUnderLegalAction && r.legalActionHistory?.some(h => h.type === 'stop')) || [];
+                      
+                      return (
+                          <>
+                              {roomsUnderLegalAction.length > 0 && (
+                                  <div className="mb-6 p-4 rounded-xl border flex flex-col gap-2 shadow-sm bg-red-100 border-red-400 text-red-800 animate-pulse">
+                                      <div className="flex items-center gap-2">
+                                          <AlertCircle size={20} />
+                                          <h4 className="font-bold text-sm">DİKKAT: Müşterinin İcra (Yasal Takip) Sürecinde Olan Odaları Var!</h4>
+                                      </div>
+                                      <ul className="text-xs font-medium opacity-90 ml-7 list-disc">
+                                          {roomsUnderLegalAction.map(r => (
+                                              <li key={r.id}><strong>{r.name} Odası:</strong> {r.legalActionReason} <span className="font-bold border-b border-red-500">(Bu odalar için yeni kira borçlanması durdurulmuştur)</span></li>
+                                          ))}
+                                      </ul>
+                                  </div>
+                              )}
+                              {roomsWithPastLegalAction.length > 0 && roomsUnderLegalAction.length === 0 && (
+                                  <div className="mb-6 p-4 rounded-xl border flex items-start gap-3 shadow-sm bg-gray-50 border-gray-200 text-gray-600">
+                                      <div className="mt-0.5"><Info size={20} /></div>
+                                      <div>
+                                          <h4 className="font-bold text-sm mb-1">Bilgi Notu: Geçmiş İcra İşlemi</h4>
+                                          <p className="text-xs font-medium opacity-90 leading-relaxed">
+                                              Bu müşterinin bazı odaları ({roomsWithPastLegalAction.map(r=>r.name).join(', ')}) için daha önce icra işlemi başlatılmış ve sonrasında kaldırılmıştır.
+                                          </p>
+                                      </div>
+                                  </div>
+                              )}
+                          </>
+                      );
+                  })()}
                   {selectedRoomDetail?.customerName && (
                      <div className={`mb-6 p-4 rounded-xl border flex items-start gap-3 shadow-sm ${customerTotalBalance > 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-teal-50 border-teal-200 text-teal-700'}`}>
                         <div className="mt-0.5">
@@ -6435,7 +6801,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              }} className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><Edit size={14}/> Giriş Bilgilerini Düzenleme</button>
                              <button onClick={() => setIsChangeRoomModalOpen(true)} className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><RefreshCcw size={14}/> Oda Değiştir</button>
                              <button onClick={() => { setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null }); setIsEndRentModalOpen(true); }} className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><LogOut size={14}/> Depodan Çıkış Yap</button>
-                             
+                             {selectedRoomDetail?.isUnderLegalAction ? (
+                                <button onClick={() => { setLegalActionData({ reason: '', type: 'stop' }); setIsLegalActionModalOpen(true); }} className="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><Shield size={14}/> İcrayı Kaldır</button>
+                             ) : (
+                                <button onClick={() => { setLegalActionData({ reason: '', type: 'start' }); setIsLegalActionModalOpen(true); }} className="bg-red-900 hover:bg-red-950 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm border border-red-700"><Shield size={14}/> Müşteri İcra</button>
+                             )}
                              {/* TUTANAK GÖNDER AÇILIR MENÜSÜ */}
                              <div className="relative">
                                 <button onClick={() => setIsTutanakDropdownOpen(!isTutanakDropdownOpen)} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors">
@@ -6707,11 +7077,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                          <div className="flex justify-between items-center">
                              <label className="text-sm font-bold text-gray-700">Cari Aylık Faiz Oranı (%)</label>
                              <div className="flex items-center gap-2 bg-gray-100 p-1 rounded-lg border border-gray-200">
-                                 <button onClick={() => setCollectionRates({...collectionRates, isInterestActive: true})} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${collectionRates.isInterestActive ? 'bg-[#1bc5bd] text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Aktif</button>
-                                 <button onClick={() => setCollectionRates({...collectionRates, isInterestActive: false})} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${!collectionRates.isInterestActive ? 'bg-red-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Pasif</button>
+                                 <button onClick={() => setCollectionRates({...collectionRates, isInterestActive: true, interestActivationDate: collectionRates.interestActivationDate || Date.now()})} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${collectionRates.isInterestActive ? 'bg-[#1bc5bd] text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Aktif</button>
+                                 <button onClick={() => setCollectionRates({...collectionRates, isInterestActive: false, interestActivationDate: null})} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${!collectionRates.isInterestActive ? 'bg-red-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Pasif</button>
                              </div>
                          </div>
-                         <p className="text-[11px] text-gray-500 mb-2 leading-relaxed">Borcu 1 aydan fazla geciken müşteriler için aylık bazda uygulanacak gecikme faizi oranı. Pasife alındığında daha önceden yansıtılmış tüm faizler cari ekranlarından ve borç bakiyesinden otomatik olarak düşülür.</p>
+                         <p className="text-[11px] text-gray-500 mb-2 leading-relaxed">Borcu 1 aydan fazla geciken müşteriler için aylık bazda uygulanacak gecikme faizi oranı. <strong className="text-red-500">ÖNEMLİ:</strong> Aktif edildiği andan itibaren geçmişe dönük faiz işlemez, sadece butona tıklanan günden sonraki gecikmelere faiz uygular. Pasife alındığında ise daha önceden yansıtılmış tüm faizler cari ekranlardan otomatik düşülür.</p>
                          <div className="relative md:w-1/2 pr-4 mt-2">
                              <input type="number" disabled={!collectionRates.isInterestActive} value={collectionRates.interestRate} onChange={(e) => setCollectionRates({...collectionRates, interestRate: e.target.value})} className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[#1bc5bd] focus:ring-1 focus:ring-[#1bc5bd] font-bold text-slate-700 disabled:bg-gray-100 disabled:opacity-60" />
                              <span className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 font-bold">%</span>
@@ -6768,13 +7138,23 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                    <p className="text-sm text-gray-500 mt-1">Sistemdeki tüm tahsilatların, bekleyen borçların ve depo doluluk oranlarının özeti.</p>
                  </div>
                  
-                 <div className="flex flex-wrap bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm w-full sm:w-auto">
-                     <button onClick={() => setFinansReportFilter('today')} className={`px-4 py-2.5 text-sm font-bold transition-colors flex-1 sm:flex-none ${finansReportFilter === 'today' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Günlük</button>
-                     <button onClick={() => setFinansReportFilter('week')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'week' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Haftalık</button>
-                     <button onClick={() => setFinansReportFilter('month')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'month' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Aylık</button>
-                     <button onClick={() => setFinansReportFilter('year')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'year' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Sene</button>
-                     <button onClick={() => setFinansReportFilter('lastYear')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'lastYear' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Geçen Yıl</button>
-                     <button onClick={() => setFinansReportFilter('all')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'all' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Tüm Zamanlar</button>
+                 <div className="flex flex-col items-end gap-2 w-full sm:w-auto">
+                     <div className="flex flex-wrap bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm w-full sm:w-auto">
+                         <button onClick={() => setFinansReportFilter('today')} className={`px-4 py-2.5 text-sm font-bold transition-colors flex-1 sm:flex-none ${finansReportFilter === 'today' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Günlük</button>
+                         <button onClick={() => setFinansReportFilter('week')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'week' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Haftalık</button>
+                         <button onClick={() => setFinansReportFilter('month')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'month' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Aylık</button>
+                         <button onClick={() => setFinansReportFilter('year')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'year' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Sene</button>
+                         <button onClick={() => setFinansReportFilter('lastYear')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'lastYear' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Geçen Yıl</button>
+                         <button onClick={() => setFinansReportFilter('all')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'all' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Tümü</button>
+                         <button onClick={() => setFinansReportFilter('custom')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'custom' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Özel Tarih</button>
+                     </div>
+                     {finansReportFilter === 'custom' && (
+                         <div className="flex items-center gap-2 bg-white p-1.5 rounded-lg border border-gray-200 shadow-sm animate-in fade-in">
+                             <input type="date" value={customStartDate} onChange={(e) => setCustomStartDate(e.target.value)} className="border-none bg-gray-50 rounded px-2 py-1 text-xs font-bold text-gray-700 outline-none cursor-pointer" title="Başlangıç Tarihi" />
+                             <span className="text-gray-400 font-bold">-</span>
+                             <input type="date" value={customEndDate} onChange={(e) => setCustomEndDate(e.target.value)} className="border-none bg-gray-50 rounded px-2 py-1 text-xs font-bold text-gray-700 outline-none cursor-pointer" title="Bitiş Tarihi" />
+                         </div>
+                     )}
                  </div>
                </div>
 
@@ -6795,11 +7175,17 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                    } else if (finansReportFilter === 'lastYear') {
                        startD = new Date(startD.getFullYear() - 1, 0, 1);
                        endD = new Date(endD.getFullYear() - 1, 11, 31, 23, 59, 59);
+                   } else if (finansReportFilter === 'custom') {
+                       startD = new Date(customStartDate);
+                       startD.setHours(0, 0, 0, 0);
+                       endD = new Date(customEndDate);
+                       endD.setHours(23, 59, 59, 999);
                    } else if (finansReportFilter === 'all') {
                        startD = new Date(2000, 0, 1);
                    }
 
                    let totalTahsilEdilen = 0;
+                   let totalNakliyeTahsilati = 0; // YENİ: Nakliye için ayrı sayaç
                    let totalTahakkuk = 0;
 
                    customers.forEach(customer => {
@@ -6808,8 +7194,18 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                            if (tx.isDummy) return; 
                            const txDate = new Date(tx.date);
                            if (txDate >= startD && txDate <= endD) {
-                               if (tx.credit) totalTahsilEdilen += tx.credit;
-                               if (tx.debt) totalTahakkuk += tx.debt;
+                               if (tx.credit) {
+                                   const descLower = String(tx.desc || '').toLowerCase();
+                                   // Eğer açıklama veya notta nakliye/taşıma geçiyorsa nakliye sayacına ekle
+                                   if (descLower.includes('nakliye') || descLower.includes('taşıma')) {
+                                       totalNakliyeTahsilati += tx.credit;
+                                   } else {
+                                       totalTahsilEdilen += tx.credit;
+                                   }
+                               }
+                               if (tx.debt) {
+                                   totalTahakkuk += tx.debt;
+                               }
                            }
                        });
                    });
@@ -6824,10 +7220,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                            if (balance > 0) exactBalance += balance;
                        });
                        totalBekleyen = exactBalance;
-                       toplamTahsilat = totalTahsilEdilen + totalBekleyen;
+                       toplamTahsilat = totalTahsilEdilen + totalNakliyeTahsilati + totalBekleyen;
                    } else {
-                       totalBekleyen = Math.max(0, totalTahakkuk - totalTahsilEdilen);
-                       toplamTahsilat = totalTahsilEdilen + totalBekleyen;
+                       totalBekleyen = Math.max(0, totalTahakkuk - (totalTahsilEdilen + totalNakliyeTahsilati));
+                       toplamTahsilat = totalTahsilEdilen + totalNakliyeTahsilati + totalBekleyen;
                    }
 
                    let totalAskida = 0;
@@ -6972,24 +7368,29 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                        <div className="flex flex-col gap-6 pb-10">
                            
                            {/* ÖZET KARTLARI */}
-                           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
-                                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Tahsil Edilen</h3>
+                                   <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Kira Tahsilatı</h3>
                                    <div className="text-3xl font-extrabold text-[#1bc5bd]">{totalTahsilEdilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
-                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Müşterilere girdiğimiz ödemeler</p>
+                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Nakliye hariç net kira tahsilatı</p>
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
-                                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Bekleyen Tahsilat</h3>
+                                   <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Nakliye Geliri</h3>
+                                   <div className="text-3xl font-extrabold text-teal-600">{totalNakliyeTahsilati.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
+                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Nakliye/Taşıma tahsilatları</p>
+                               </div>
+                               <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
+                                   <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Bekleyen Tahsilat</h3>
                                    <div className="text-3xl font-extrabold text-orange-500">{totalBekleyen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2">Müşterilerin borcu olan kısım</p>
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
-                                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Toplam (Tahsil + Bekleyen)</h3>
-                                   <div className="text-3xl font-extrabold text-indigo-500">{toplamTahsilat.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
-                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Toplam beklenen ve alınan</p>
+                                   <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Toplam Tahsilat</h3>
+                                   <div className="text-3xl font-extrabold text-indigo-500">{(totalTahsilEdilen + totalNakliyeTahsilati).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
+                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Kira ve nakliye dahil alınan</p>
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
-                                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Askıda Ödemeler</h3>
+                                   <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Askıda Ödemeler</h3>
                                    <div className="text-3xl font-extrabold text-gray-700">{totalAskida.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2">{askidaCount} kayıt eşleşmeyi bekliyor</p>
                                </div>
@@ -7510,7 +7911,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       <td className="px-6 py-4">
                                           <div className="flex items-center gap-3">
                                               <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0 overflow-hidden">
-                                                  {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover"/> : user.name.charAt(0)}
+                                                  {user.avatar ? <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover"/> : user.name.charAt(0)}
                                               </div>
                                               <div>
                                                   <div className="font-bold text-gray-800 text-[15px]">{user.name}</div>
@@ -8208,6 +8609,44 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <div className="mx-auto bg-red-50 text-red-500 w-12 h-12 flex items-center justify-center rounded-full mb-4"><RefreshCcw size={24} /></div>
                 <p className="text-gray-600 mb-6 text-sm">Tüm odalardaki müşteriler boşaltılacak ve depo ile bloklara ait doluluk sayaçları tamamen sıfırlanacaktır. Bu işlem geri alınamaz. Onaylıyor musunuz?</p>
                 <div className="flex justify-center gap-3"><button onClick={() => setIsResetModalOpen(false)} className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2 rounded font-medium transition-colors text-sm">İptal</button><button onClick={handleResetAll} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded font-medium transition-colors flex items-center gap-2 text-sm"><RefreshCcw size={16} /> Evet, Sıfırla</button></div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* İCRA SÜRECİ MODALI */}
+      {isLegalActionModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
+             <div className={`p-5 border-b border-gray-100 flex justify-between items-center rounded-t-2xl ${legalActionData.type === 'start' ? 'bg-red-50' : 'bg-gray-50'}`}>
+                 <h3 className={`text-lg font-bold flex items-center gap-2 ${legalActionData.type === 'start' ? 'text-red-700' : 'text-gray-800'}`}>
+                     <Shield size={18} /> {legalActionData.type === 'start' ? 'İcra (Yasal Takip) Başlat' : 'İcra Sürecini Kaldır'}
+                 </h3>
+                 <button onClick={() => setIsLegalActionModalOpen(false)}><X size={20} className="text-gray-500 hover:text-red-600"/></button>
+             </div>
+             <div className="p-6">
+                {legalActionData.type === 'start' ? (
+                    <>
+                        <p className="text-sm text-red-600 mb-5 font-medium text-center">Bu işlem müşterinin ve odanın statüsünü icralık olarak değiştirecektir. <strong>Sistem bu oda için aylık kira borçlanmasını an itibariyle durduracaktır!</strong></p>
+                        <div className="flex flex-col gap-2">
+                            <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">İcra Nedeni / Açıklama (Zorunlu)</label>
+                            <textarea rows="3" value={legalActionData.reason} onChange={(e) => setLegalActionData({...legalActionData, reason: e.target.value})} placeholder="Örn: 5 aydır ödeme alınamadığı için avukata verildi..." className="w-full border-2 border-red-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-500 resize-none font-medium text-gray-700 bg-red-50/30"></textarea>
+                        </div>
+                    </>
+                ) : (
+                    <div className="text-center">
+                        <div className="mx-auto bg-gray-100 text-gray-600 w-16 h-16 flex items-center justify-center rounded-full mb-4"><RefreshCcw size={32} /></div>
+                        <p className="text-sm text-gray-600 font-medium mb-2">İcra sürecini kaldırıp müşteriyi normal kiralama statüsüne döndürmek üzeresiniz.</p>
+                        <p className="text-xs text-gray-400 bg-gray-50 border border-gray-200 p-2 rounded-lg">Bu işlemden sonra sistem <strong>eksik kalan ayları tekrar hesaplayıp carisine borç yazarak</strong> normale dönecektir.</p>
+                    </div>
+                )}
+                
+                <div className="mt-8 flex justify-end gap-3 pt-4 border-t border-gray-100">
+                  <button onClick={() => setIsLegalActionModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl text-sm font-bold transition-colors">İptal</button>
+                  <button onClick={handleLegalActionConfirm} disabled={legalActionData.type === 'start' && !legalActionData.reason} className={`disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg transition-colors flex items-center gap-2 ${legalActionData.type === 'start' ? 'bg-red-600 hover:bg-red-700 shadow-red-500/30' : 'bg-gray-800 hover:bg-gray-900 shadow-gray-500/30'}`}>
+                      {legalActionData.type === 'start' ? <><Shield size={18}/> İcrayı Başlat</> : <><RefreshCcw size={18}/> İcrayı Kaldır ve Normale Dön</>}
+                  </button>
+                </div>
              </div>
           </div>
         </div>
@@ -9338,7 +9777,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             </select>
                         </div>
                     </div>
-                    <div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-6">
+<div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-6">
                         <button onClick={() => setIsEditApptModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl font-bold transition-colors text-sm">İptal</button>
                         <button onClick={handleSaveEditAppointment} className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-2.5 rounded-xl font-bold text-sm transition-colors flex items-center gap-2 shadow-lg shadow-indigo-500/30"><Check size={18}/> Değişiklikleri Kaydet</button>
                     </div>
@@ -9346,6 +9785,155 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
             </div>
         </div>
       )}
+
+      {/* TAHSİLAT HAREKETİ DÜZENLEME MODALI */}
+      {isEditCollectionModalOpen && editCollectionData && (
+        <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in zoom-in">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-orange-50 rounded-t-xl">
+                 <h3 className="text-lg font-bold text-orange-700 flex items-center gap-2"><Edit size={18} /> Tahsilatı Düzenle</h3>
+                 <button onClick={() => setIsEditCollectionModalOpen(false)}><X size={20} className="text-orange-500 hover:text-orange-700"/></button>
+             </div>
+             <div className="p-6">
+                <div className="flex flex-col gap-4">
+                  <div className="bg-orange-50/50 border border-orange-100 rounded-lg p-3 text-center mb-2">
+                     <span className="text-xs font-bold text-gray-500 block mb-1">Müşteri</span>
+                     <span className="text-sm font-bold text-gray-800">{editCollectionData.customerName}</span>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-gray-600">Ödenen Tutar (TL)</label>
+                    <input type="number" value={editCollectionData.amount} onChange={(e) => setEditCollectionData({...editCollectionData, amount: e.target.value})} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 font-bold text-lg text-slate-800" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-gray-600">Ödeme Tarihi</label>
+                    <input type="date" value={editCollectionData.date} onChange={(e) => setEditCollectionData({...editCollectionData, date: e.target.value})} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-gray-600">Açıklama / Dekont Notu</label>
+                    <textarea value={editCollectionData.note} onChange={(e) => setEditCollectionData({...editCollectionData, note: e.target.value})} rows="3" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 resize-none"></textarea>
+                  </div>
+                </div>
+                <div className="mt-6 flex justify-end gap-3">
+                  <button onClick={() => setIsEditCollectionModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold">İptal</button>
+                  <button onClick={handleSaveEditCollection} disabled={!editCollectionData.amount || !editCollectionData.date} className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white px-6 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"><Check size={16} strokeWidth={3}/> Kaydet</button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOPLU YÜKLEME DETAYLARI MODALI */}
+      {isBulkDetailsModalOpen && bulkDetailsData && (
+        <div className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center p-4">
+           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in">
+               <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-indigo-50 rounded-t-2xl shrink-0">
+                   <div className="flex flex-col gap-1">
+                       <h3 className="text-lg font-bold text-indigo-800 flex items-center gap-2">
+                           <FileTextIcon size={20} /> Excel Yükleme Detayları
+                       </h3>
+                       <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">{bulkDetailsData.dateStr || 'Güncel Yükleme Sonucu'} | {bulkDetailsData.fileName}</span>
+                   </div>
+                   <button onClick={() => setIsBulkDetailsModalOpen(false)} className="bg-white p-1.5 rounded-full shadow-sm text-indigo-400 hover:text-red-500 transition-colors"><X size={20} /></button>
+               </div>
+               
+               <div className="p-6 overflow-y-auto flex-1 bg-slate-50 flex flex-col gap-6">
+                  
+                  {/* EŞLEŞEN İŞLEMLER */}
+                  <div>
+                      <h4 className="font-bold text-emerald-700 flex items-center gap-2 mb-3"><Check size={18} /> Cariye İşlenen Tahsilatlar ({bulkDetailsData.matchedCount})</h4>
+                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                          <table className="w-full text-left text-sm text-gray-600">
+                              <thead className="bg-emerald-50/50 border-b border-gray-200 text-xs uppercase text-gray-500 font-bold">
+                                  <tr>
+                                      <th className="px-4 py-3 w-10">#</th>
+                                      <th className="px-4 py-3">Müşteri</th>
+                                      <th className="px-4 py-3 text-center">Tarih</th>
+                                      <th className="px-4 py-3">Açıklama (Dekont)</th>
+                                      <th className="px-4 py-3 text-right">Tutar</th>
+                                      <th className="px-4 py-3 text-center w-32">İşlem</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                  {bulkDetailsData.addedPaymentRecords && bulkDetailsData.addedPaymentRecords.length > 0 ? (
+                                      bulkDetailsData.addedPaymentRecords.map((record, idx) => {
+                                          const cust = customers.find(c => String(c.id) === String(record.customerId));
+                                          const payment = cust?.payments?.find(p => String(p.id) === String(record.paymentId));
+                                          return (
+                                              <tr key={idx} className="hover:bg-gray-50">
+                                                  <td className="px-4 py-3 text-gray-400 font-bold">{idx + 1}</td>
+                                                  <td className="px-4 py-3 font-bold text-gray-800">{cust ? cust.name : <span className="text-red-400">Silinmiş Müşteri</span>}</td>
+                                                  <td className="px-4 py-3 text-center">{payment ? new Date(payment.date).toLocaleDateString('tr-TR') : '-'}</td>
+                                                  <td className="px-4 py-3 text-xs opacity-80 truncate max-w-[200px]" title={payment?.note}>{payment ? payment.note : '-'}</td>
+                                                  <td className="px-4 py-3 text-right font-black text-emerald-600">{payment ? payment.amount.toLocaleString('tr-TR') + ' TL' : 'Kayıt Bulunamadı'}</td>
+                                                  <td className="px-4 py-3 text-center">
+                                                      {cust && (
+                                                          <button onClick={() => {
+                                                              setSelectedCustomerId(cust.id);
+                                                              setIsBulkDetailsModalOpen(false);
+                                                              setActiveMenu('tum-musteriler');
+                                                          }} className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-bold transition-colors w-full">Cariyi Gör</button>
+                                                      )}
+                                                  </td>
+                                              </tr>
+                                          );
+                                      })
+                                  ) : (
+                                      <tr><td colSpan="6" className="px-4 py-6 text-center text-gray-500 font-medium">Bu yüklemede cariyle eşleşen bir işlem bulunmuyor.</td></tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  </div>
+
+                  {/* ASKIDA KALAN İŞLEMLER */}
+                  <div>
+                      <h4 className="font-bold text-orange-700 flex items-center gap-2 mb-3"><AlertCircle size={18} /> Eşleşmeyen (Askıda Kalan) İşlemler ({bulkDetailsData.unmatchedCount})</h4>
+                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                          <table className="w-full text-left text-sm text-gray-600">
+                              <thead className="bg-orange-50/50 border-b border-gray-200 text-xs uppercase text-gray-500 font-bold">
+                                  <tr>
+                                      <th className="px-4 py-3 w-10">#</th>
+                                      <th className="px-4 py-3 text-center">Tarih</th>
+                                      <th className="px-4 py-3">Açıklama (Dekont)</th>
+                                      <th className="px-4 py-3 text-right">Tutar</th>
+                                      <th className="px-4 py-3 text-center w-32">İşlem</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                  {bulkDetailsData.addedPendingIds && bulkDetailsData.addedPendingIds.length > 0 ? (
+                                      bulkDetailsData.addedPendingIds.map((pId, idx) => {
+                                          const pending = pendingCollections.find(p => String(p.id) === String(pId));
+                                          return (
+                                              <tr key={idx} className="hover:bg-gray-50">
+                                                  <td className="px-4 py-3 text-gray-400 font-bold">{idx + 1}</td>
+                                                  <td className="px-4 py-3 text-center">{pending ? new Date(pending.date).toLocaleDateString('tr-TR') : '-'}</td>
+                                                  <td className="px-4 py-3 text-xs opacity-80">{pending ? pending.note : <span className="text-gray-400">Sistemden silinmiş veya sonradan bir cariye işlenmiş.</span>}</td>
+                                                  <td className="px-4 py-3 text-right font-black text-orange-600">{pending ? pending.amount.toLocaleString('tr-TR') + ' TL' : '-'}</td>
+                                                  <td className="px-4 py-3 text-center">
+                                                      {pending && (
+                                                          <button onClick={() => {
+                                                              setAssignData({ paymentId: pending.id, customerId: '' });
+                                                              setIsAssignModalOpen(true);
+                                                              setIsBulkDetailsModalOpen(false);
+                                                          }} className="text-[10px] bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-sm transition-colors flex items-center justify-center gap-1 w-full"><Wallet size={12}/> Cariye İşle</button>
+                                                      )}
+                                                  </td>
+                                              </tr>
+                                          );
+                                      })
+                                  ) : (
+                                      <tr><td colSpan="5" className="px-4 py-6 text-center text-gray-500 font-medium">Bu yüklemede eşleşmeyip askıya düşen bir kayıt bulunmuyor.</td></tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  </div>
+
+               </div>
+           </div>
+        </div>
+      )}
+
     </div>
   );
 }
