@@ -5856,6 +5856,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   <button onClick={() => setCollectionFilter('year')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'year' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Yıl</button>
                                   <button onClick={() => setCollectionFilter('all')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'all' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Tümü</button>
                               </div>
+                          </div>
 
                           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex-1 flex flex-col">
                               <div className="overflow-x-auto flex-1">
