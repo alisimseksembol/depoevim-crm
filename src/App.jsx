@@ -6617,6 +6617,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     {selectedRoomDetail?.customerName && (<button onClick={() => setIsRoomHistoryModalOpen(true)} className="bg-[#f64e60] hover:bg-red-600 text-white px-4 py-2 rounded text-sm font-semibold transition-colors shadow-sm">Depo Geçmişi</button>)}
                   </div>
 {(() => {
+                      const customerRooms = rooms.filter(r => r.customerName === selectedRoomDetail?.customerName); // EKLENDİ: eksikti, beyaz ekran hatasına sebep oluyordu
                       const roomsUnderLegalAction = customerRooms?.filter(r => r.isUnderLegalAction) || [];
                       const roomsWithPastLegalAction = customerRooms?.filter(r => !r.isUnderLegalAction && r.legalActionHistory?.some(h => h.type === 'stop')) || [];
                       
