@@ -49,12 +49,12 @@ import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, delet
 // 🗄️ FIREBASE ENTEGRASYON HAZIRLIĞI VE YAPILANDIRMASI
 // ============================================================================
 const firebaseConfig = {
-    apiKey: "AIzaSyAK-4baYcG60nDIryh_ia_bJ5bsnVdIsaA",
-    authDomain: "depoevim-crm.firebaseapp.com",
-    projectId: "depoevim-crm",
-    storageBucket: "depoevim-crm.firebasestorage.app",
-    messagingSenderId: "805423278855",
-    appId: "1:805423278855:web:e16e8131eff6dc5e1eb3a2"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);
@@ -536,6 +536,7 @@ const [apptCustomerSearch, setApptCustomerSearch] = useState('');
   const [eInvoiceModalData, setEInvoiceModalData] = useState(null);
   const [isSendingEInvoice, setIsSendingEInvoice] = useState(false);
   const [eInvoiceSuccess, setEInvoiceSuccess] = useState(false);
+  const [eInvoiceError, setEInvoiceError] = useState(null);
 
   // --- YENİ EKLENEN: DEPO ÖDEMELERİ GÜNCELLEME STATE'LERİ ---
   const [isUpdateAllModalOpen, setIsUpdateAllModalOpen] = useState(false);
@@ -650,23 +651,56 @@ const handleUpdateSystemUser = async () => {
       setEditUserData(null);
   };
 
-const handleSendEInvoice = () => {
+const handleSendEInvoice = async () => {
+      if (!eInvoiceModalData) return;
+      const customerToUpdate = customers.find(c => c.id === eInvoiceModalData.customerId);
+      if (!customerToUpdate) return;
+
       setIsSendingEInvoice(true);
-      setTimeout(async () => {
+      setEInvoiceError(null);
+
+      const totalAmount = eInvoiceModalData.amount;
+      const netAmount = (totalAmount / 1.20).toFixed(2);
+
+      try {
+          const response = await fetch('/api/parasut/create-invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  customerName: customerToUpdate.name,
+                  taxNumber: customerToUpdate.tc,
+                  address: customerToUpdate.address,
+                  email: customerToUpdate.email,
+                  phone: customerToUpdate.phone,
+                  netAmount,
+                  vatRate: 20,
+                  description: eInvoiceModalData.note || 'Depolama Hizmet Bedeli'
+              })
+          });
+
+          const result = await response.json();
+          if (!response.ok || !result.success) {
+              throw new Error(result.error || 'Paraşüt faturası oluşturulamadı.');
+          }
+
           setIsSendingEInvoice(false);
           setEInvoiceSuccess(true);
-          
-          const customerToUpdate = customers.find(c => c.id === eInvoiceModalData.customerId);
-          if (customerToUpdate && db && firebaseUser) {
-              const updatedPayments = (customerToUpdate.payments || []).map(p => 
-                  p.id === eInvoiceModalData.id 
-                  ? { ...p, hasEInvoice: true, eInvoiceNo: 'MBT' + Math.floor(100000000 + Math.random() * 900000000) } 
+
+          if (db && firebaseUser) {
+              const updatedPayments = (customerToUpdate.payments || []).map(p =>
+                  p.id === eInvoiceModalData.id
+                  ? { ...p, hasEInvoice: true, eInvoiceNo: result.invoiceNo || `PRS-${result.invoiceId}` }
                   : p
               );
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), { payments: updatedPayments }, { merge: true });
           }
+
           setTimeout(() => { setEInvoiceSuccess(false); setEInvoiceModalData(null); }, 3000);
-      }, 2000);
+      } catch (error) {
+          console.error('E-Fatura oluşturma hatası:', error);
+          setIsSendingEInvoice(false);
+          setEInvoiceError(error.message || 'Faturanız oluşturulurken bir hata oluştu.');
+      }
   };
 
 const handleAssignPendingPayment = async () => {
@@ -5910,7 +5944,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                                       <FileTextIcon size={14}/> E-Fatura Gör
                                                                   </button>
                                                               ) : (
-                                                                  <button onClick={() => setEInvoiceModalData(tx)} className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm" title="MBT Portalına E-Fatura/E-Arşiv Gönder">
+                                                                  <button onClick={() => { setEInvoiceError(null); setEInvoiceModalData(tx); }} className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm" title="MBT Portalına E-Fatura/E-Arşiv Gönder">
                                                                       <FileTextIcon size={14}/> E-Fatura Kes
                                                                   </button>
                                                               )}
@@ -9423,6 +9457,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 <div className="mb-4 bg-red-50 border border-red-100 text-red-600 text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-2">
                                     <AlertCircle size={16} className="shrink-0" />
                                     <span>Uyarı: Müşterinin TCKN/VKN bilgisi eksik görünüyor. MBT Portalı e-fatura kesimi için 11111111111 olarak varsayılan atayacaktır.</span>
+                                </div>
+                            )}
+
+                            {eInvoiceError && (
+                                <div className="mb-4 bg-red-50 border border-red-100 text-red-600 text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-2">
+                                    <AlertCircle size={16} className="shrink-0" />
+                                    <span>{eInvoiceError}</span>
                                 </div>
                             )}
 
