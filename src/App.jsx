@@ -9404,7 +9404,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                          <h3 className="text-lg font-bold text-blue-800 flex items-center gap-2">
                              <FileTextIcon size={18} /> Otomatik E-Fatura Kes
                          </h3>
-                         <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mt-0.5">MBT E-Dönüşüm Entegrasyonu</span>
+                         <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mt-0.5">PARAŞÜT E-FATURA ENTEGRASYONU</span>
                      </div>
                      <button onClick={() => !isSendingEInvoice && setEInvoiceModalData(null)} disabled={isSendingEInvoice} className="text-blue-400 hover:text-blue-700 p-1 bg-white rounded-full shadow-sm"><X size={20} /></button>
                  </div>
