@@ -73,6 +73,42 @@ const normalizeStr = (str) => {
         .replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ç/g, 'c');
 };
 
+// YENİ EKLENEN: Depolama / lojistik işine özel günlük motivasyon sözleri.
+// Her gün, yılın gününe göre farklı bir söz gösterilir (döngüsel).
+const MOTIVASYON_SOZLERI = [
+    "Her dolu oda, birinin güvenle sakladığı bir hikâye. Bugün de o güveni büyütüyoruz.",
+    "Boş bir metrekare bile fırsattır; bugün onu değere dönüştür.",
+    "Düzenli bir depo, huzurlu bir zihin demektir. Düzeni sen kuruyorsun.",
+    "Bugün attığın küçük adım, ay sonundaki büyük tahsilatın temelidir.",
+    "Müşterinin eşyası emanet, emanete sahip çıkmak en büyük itibardır.",
+    "Her tahsilat bir söz, her söz bir güven. Bugün güveni pekiştir.",
+    "Depoyu dolduran kutular değil, kurduğun sistemdir. Sistemine güven.",
+    "Bir müşteriyle kurduğun iyi ilişki, on yeni müşteriden değerlidir.",
+    "Bugün geciken bir ödemeyi kibarca hatırlatmak, yarının sorununu bugünden çözmektir.",
+    "Kapasiteni değil, hizmet kaliteni büyüt; dolan raflar onu takip eder.",
+    "En iyi depo, en dolu depo değil; en iyi yönetilen depodur.",
+    "Küçük detaylar (mühür, tarih, fotoğraf) büyük güven inşa eder.",
+    "Bugün bir odayı daha kiraladıysan, birine 'merak etme' demişsindir.",
+    "Rakamlar yalan söylemez; her gün cariyi kontrol et, kontrolü elinde tut.",
+    "Zorlu bir müşteri, çözüldüğünde en sadık müşterin olur. Sabırla yaklaş.",
+    "Temiz ve düzenli bir depo, sözleşmeden daha güçlü bir reklamdır.",
+    "Bugün kaydını eksiksiz tut; yarın seni geçmişteki dikkatin kurtarır.",
+    "Her sabah yeni bir metrekare, yeni bir fırsat demek. Fırsatı değerlendir.",
+    "İşini büyüten şey mekân değil, verdiğin sözün arkasında durmandır.",
+    "Bir kutu taşımak kolay, güven taşımak ustalık ister. Sen ustasın.",
+    "Bugün gülümseyerek karşıladığın müşteri, yarın seni başkasına anlatır.",
+    "Doluluk oranın bir sayı, memnuniyet oranın ise geleceğindir.",
+    "Ertelediğin tahsilat büyür; bugün hallettiğin iş huzur getirir.",
+    "Her yıldönümü zammı, emeğinin karşılığını almanın hakkıdır. Takip et.",
+    "İyi bir depocu fırtınada değil, düzenli günlerde hazırlığını yapar.",
+    "Bugün bir müşterinin yükünü hafiflettin; bu, işten fazlasıdır.",
+    "Boş odaları değil, dolacak potansiyeli gör. Bardağın dolu tarafına bak.",
+    "Kaliteli hizmet pahalı değildir; kalitesiz hizmet çok daha pahalıya patlar.",
+    "Bugünün düzeni, yarının büyümesidir. Her şeyi yerli yerine koy.",
+    "Sen sadece eşya saklamıyorsun; insanlara zaman ve gönül rahatlığı satıyorsun.",
+    "Bir günün bereketi, o güne nasıl başladığınla ilgilidir. Hadi başlayalım!"
+];
+
 // Mini grafik bileşeni
 // ============================================================================
 
@@ -106,6 +142,80 @@ const uploadImageToServer = async (file) => {
         reader.readAsDataURL(file);
     });
 };
+
+// ============================================================================
+// 🆕 YENİ EKLENEN: FOTOĞRAF / VİDEO EKLEME BİLEŞENİ (Şimdi Çek / Galeriden Seç / Dosyadan Seç)
+// ============================================================================
+// Mevcut hiçbir kod değiştirilmedi; bu tamamen ek (eklenti) bir bileşendir.
+// Cihaz iOS mu Android mi otomatik algılanır, "Şimdi Çek" butonu buna göre
+// doğrudan cihazın kamerasını açar. "Galeriden Seç" fotoğraf/video kütüphanesini,
+// "Dosyadan Seç" ise cihazın dosya yöneticisini (Dosyalar/Files) açar.
+const isIOSCihaz = () => typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+const isAndroidCihaz = () => typeof navigator !== 'undefined' && /Android/.test(navigator.userAgent);
+
+// value: mevcut seçili görsel/video url'i (önizleme için)
+// onSelect: (url) => void — dosya yüklendiğinde çağrılır
+// compact: küçük modallarda (2 sütunlu grid) daha dar görünüm için
+const MediaEkleAlani = ({ value, onSelect, compact }) => {
+    const cameraRef = React.useRef(null);
+    const galleryRef = React.useRef(null);
+    const fileRef = React.useRef(null);
+    const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+
+    const handlePicked = async (e) => {
+        const file = e.target.files[0];
+        e.target.value = ''; // aynı dosyanın tekrar seçilebilmesi için sıfırla
+        if (!file) return;
+        setIsUploadingMedia(true);
+        try {
+            const url = await uploadImageToServer(file);
+            onSelect(url, file.type && file.type.startsWith('video/'));
+        } finally {
+            setIsUploadingMedia(false);
+        }
+    };
+
+    const isVideoValue = typeof value === 'string' && (value.startsWith('data:video') || /\.(mp4|mov|webm)(\?|$)/i.test(value));
+
+    return (
+        <div className="flex flex-col gap-2 w-full">
+            {value ? (
+                <div className="flex flex-col items-center gap-2 border-2 border-dashed border-[#1bc5bd] bg-[#1bc5bd]/5 rounded-xl p-3">
+                    {isVideoValue ? (
+                        <video src={value} controls className={compact ? "h-16 rounded" : "h-24 rounded"} />
+                    ) : (
+                        <img src={value} alt="Önizleme" className={compact ? "h-16 w-16 object-cover rounded" : "h-24 w-24 object-cover rounded"} />
+                    )}
+                    <span className="text-[10px] font-bold text-[#1bc5bd] flex items-center gap-1"><Check size={12}/> Eklendi — değiştirmek için aşağıdan yeniden seçin</span>
+                </div>
+            ) : null}
+
+            <div className={`grid grid-cols-3 gap-1.5`}>
+                <button type="button" disabled={isUploadingMedia} onClick={() => cameraRef.current && cameraRef.current.click()} className="flex flex-col items-center justify-center gap-1 bg-slate-50 hover:bg-slate-100 border border-gray-200 rounded-lg py-2.5 px-1 transition-colors disabled:opacity-50">
+                    <Upload size={16} className="text-indigo-600" />
+                    <span className="text-[9px] font-bold text-gray-600 leading-tight text-center">Şimdi Çek</span>
+                </button>
+                <button type="button" disabled={isUploadingMedia} onClick={() => galleryRef.current && galleryRef.current.click()} className="flex flex-col items-center justify-center gap-1 bg-slate-50 hover:bg-slate-100 border border-gray-200 rounded-lg py-2.5 px-1 transition-colors disabled:opacity-50">
+                    <FolderOpen size={16} className="text-indigo-600" />
+                    <span className="text-[9px] font-bold text-gray-600 leading-tight text-center">Galeriden Seç</span>
+                </button>
+                <button type="button" disabled={isUploadingMedia} onClick={() => fileRef.current && fileRef.current.click()} className="flex flex-col items-center justify-center gap-1 bg-slate-50 hover:bg-slate-100 border border-gray-200 rounded-lg py-2.5 px-1 transition-colors disabled:opacity-50">
+                    <FileTextIcon size={16} className="text-indigo-600" />
+                    <span className="text-[9px] font-bold text-gray-600 leading-tight text-center">Dosyadan Seç</span>
+                </button>
+            </div>
+            {isUploadingMedia && <span className="text-[10px] text-gray-400 text-center">Yükleniyor...</span>}
+
+            {/* Şimdi Çek: kamerayı doğrudan açar (iOS ve Android'de ortak çalışır) */}
+            <input ref={cameraRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handlePicked} />
+            {/* Galeriden Seç: fotoğraf/video kütüphanesini açar */}
+            <input ref={galleryRef} type="file" accept="image/*,video/*" className="hidden" onChange={handlePicked} />
+            {/* Dosyadan Seç: cihazın dosya yöneticisini (iOS'ta "Dosyalar", Android'de dosya seçici) açar */}
+            <input ref={fileRef} type="file" accept="image/*,video/*,application/pdf" className="hidden" onChange={handlePicked} />
+        </div>
+    );
+};
+// ============================================================================
 
 // Mini grafik bileşeni
 const Sparkline = ({ data, color }) => {
@@ -319,7 +429,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [rememberMe, setRememberMe] = useState(false); // YENİ EKLENDİ
-  const [isAuthenticated, setIsAuthenticated] = useState(false); // EKLENDİ: eksikti, beyaz ekran hatasına sebep oluyordu
+  const [isAuthenticated, setIsAuthenticated] = useState(false); // Canlı: giriş ekranı aktif
 
   // YENİ EKLENDİ: Sayfa yüklendiğinde beni hatırla verisi varsa otomatik giriş yap
   useEffect(() => {
@@ -498,6 +608,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
 
   // --- MESAJ GÖNDERİM STATE'İ ---
   const [messageModalData, setMessageModalData] = useState(null);
+  // YENİ EKLENEN: Müşteri Bilgilendirme (Müşteri No + IBAN) modalı için state
+  const [infoModalCustomer, setInfoModalCustomer] = useState(null);
 
   // --- RANDEVU VE TAKVİM STATE'LERİ ---
   const [appointments, setAppointments] = useState([]);
@@ -791,6 +903,40 @@ const handleSaveEditPending = async () => {
       setIsContractModalOpen(true);
   };
 
+  // YENİ EKLENEN: Sözleşme için oda dökümü.
+  // Odaları giriş tarihine göre gruplar; her grup için o gruptaki odaların
+  // KDV dahil aylık kira TOPLAMINI hesaplar. Farklı tarihlerde girilen odalar
+  // ayrı ayrı (kendi tarihiyle) listelenir.
+  const getContractRoomBreakdown = (roomList) => {
+      const groups = {};
+      (roomList || []).forEach(r => {
+          const d = r.entryDate || 'Belirtilmemiş';
+          if (!groups[d]) groups[d] = [];
+          groups[d].push(r);
+      });
+      return Object.keys(groups).sort().map(dateKey => {
+          const gr = groups[dateKey];
+          let total = 0;
+          gr.forEach(r => {
+              const base = Number(r.monthlyFee || 0);
+              const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
+              total += hasKdv ? base * 1.20 : base;
+          });
+          const dateStr = dateKey.includes('-') ? dateKey.split('-').reverse().join('.') : dateKey;
+          return { dateKey, dateStr, rooms: gr, total: Math.round(total) };
+      });
+  };
+
+  // YENİ EKLENEN: Oda dökümünün metin (PDF / {{ODA_DETAY}} placeholder) hali
+  const buildRoomDetailText = (roomList) => {
+      const groups = getContractRoomBreakdown(roomList);
+      if (groups.length === 0) return 'Oda bilgisi girilmemiş.';
+      return groups.map(g => {
+          const names = g.rooms.map(r => r.name).join(', ');
+          return `Giriş Tarihi: ${g.dateStr}\nOdalar: ${names}\nAylık Toplam Kira (KDV Dahil): ${g.total.toLocaleString('tr-TR')} TL`;
+      }).join('\n\n');
+  };
+
   const renderClauseWithData = (content) => {
       let text = content;
       const roomNames = contractRooms.map(r => r.name).join(', ') || 'Belirtilmemiş';
@@ -812,6 +958,7 @@ const handleSaveEditPending = async () => {
       text = text.replace(/{{MUSTERI_NUMARASI}}/g, contractCustomer?.customerNo || 'Belirtilmemiş');
       text = text.replace(/{{GIRIS_TARIHI}}/g, entryDates);
       text = text.replace(/{{AYLIK_UCRET}}/g, totalFee > 0 ? totalFee : 'Belirtilmemiş');
+      text = text.replace(/{{ODA_DETAY}}/g, buildRoomDetailText(contractRooms));
       text = text.replace(/{{BANKA_TAM_ADI}}/g, contractSettings.bankFullName);
       text = text.replace(/{{IBAN}}/g, contractSettings.iban);
       text = text.replace(/{{HESAP_SAHIBI}}/g, contractSettings.accountHolder);
@@ -846,6 +993,7 @@ const handleSaveEditPending = async () => {
           text = text.replace(/{{MUSTERI_NUMARASI}}/g, contractCustomer?.customerNo || 'Belirtilmemiş');
           text = text.replace(/{{GIRIS_TARIHI}}/g, entryDates);
           text = text.replace(/{{AYLIK_UCRET}}/g, totalFee > 0 ? totalFee : 'Belirtilmemiş');
+          text = text.replace(/{{ODA_DETAY}}/g, buildRoomDetailText(contractRooms));
           text = text.replace(/{{BANKA_TAM_ADI}}/g, contractSettings.bankFullName);
           text = text.replace(/{{IBAN}}/g, contractSettings.iban);
           text = text.replace(/{{HESAP_SAHIBI}}/g, contractSettings.accountHolder);
@@ -880,6 +1028,20 @@ const handleSaveEditPending = async () => {
               </div>
           `;
       }).join('');
+
+      // YENİ EKLENEN: Odaların giriş tarihine göre gruplanmış, KDV dahil aylık kira dökümü (otomatik bölüm)
+      const roomBreakdown = getContractRoomBreakdown(contractRooms);
+      const roomDetailHtml = roomBreakdown.length > 0 ? `
+          <div class="clause">
+              <h3>Depolanan Odalar ve Aylık Kira Bedelleri (KDV Dahil)</h3>
+              ${roomBreakdown.map(g => `
+                  <p><strong>Giriş Tarihi:</strong> ${g.dateStr}</p>
+                  <p><strong>Oda/Odalar:</strong> ${g.rooms.map(r => r.name).join(', ')} (${g.rooms.length} adet)</p>
+                  <p><strong>Aylık Toplam Kira (KDV Dahil):</strong> ${g.total.toLocaleString('tr-TR')} TL</p>
+                  <br/>
+              `).join('')}
+          </div>
+      ` : '';
 
       // Footer: tfoot tekniği ile her sayfada tekrar eder
 const footerHtml = `
@@ -1015,6 +1177,7 @@ tfoot.repeat-footer > tr > td {
                               <div class="page-box">
                                   <div class="doc-title">Eşya Depolama Sözleşmesi</div>
                                   ${clausesHtml}
+                                  ${roomDetailHtml}
                               </div>
                           </td>
                       </tr>
@@ -2449,6 +2612,13 @@ const handleAddInvoice = async () => {
 
   const [activeSizeFilter, setActiveSizeFilter] = useState(null);
   const [isSizeFilterDropdownOpen, setIsSizeFilterDropdownOpen] = useState(false);
+  // YENİ EKLENEN: "Depo Boyutu Bul" butonu artık Blok ve Oda Listesi'nden de açılabiliyor.
+  // Bu state, hangi depo/blokta arama yapıldığını tutar; null ise (Depo Listesi'nden açılınca)
+  // eskisi gibi TÜM depolarda arama yapılır — mevcut davranış hiç değişmedi.
+  const [sizeFilterScope, setSizeFilterScope] = useState(null); // null | { type: 'warehouse'|'block', id }
+  // YENİ EKLENEN: "Rezerve" butonu — Depo Boyutu Bul'un yanında, rezerve odaları listelemek için
+  const [isReserveFilterActive, setIsReserveFilterActive] = useState(false);
+  const [reserveFilterScope, setReserveFilterScope] = useState(null); // null | { type: 'warehouse'|'block', id }
   const sizeFilters = [
       { id: '1+0', label: '1+0 (0 - 12 m³)', min: 0, max: 12 },
       { id: '1+1', label: '1+1 (13 - 18 m³)', min: 13, max: 18 },
@@ -2509,6 +2679,8 @@ const handleAddInvoice = async () => {
   const [increaseMode, setIncreaseMode] = useState('percentage');
   const [increasePercentage, setIncreasePercentage] = useState('');
   const [newRentAmount, setNewRentAmount] = useState('');
+  // YENİ EKLENEN: Zammın geçerli olacağı tarih (varsayılan: yıldönümü). Bu tarihten bugüne kadarki aylar yeni kiraya güncellenir.
+  const [increaseEffectiveDate, setIncreaseEffectiveDate] = useState('');
   
 const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
   const [pastIncreaseData, setPastIncreaseData] = useState({ date: new Date().toISOString().split('T')[0], amount: '', isKdvIncluded: true });
@@ -3515,6 +3687,17 @@ const handleChangeRoomConfirm = async () => {
       setIncreaseMode('percentage');
       setIncreasePercentage(rate.toString());
       setNewRentAmount(defaultNew.toString());
+
+      // YENİ EKLENEN: Zammın geçerli olacağı tarihi, seçili zam yılındaki yıldönümü olarak varsay
+      // (giriş tarihinin gün/ayı + hedef yıl). Örn: giriş 26.07.2023, hedef 2024 => 2024-07-26
+      try {
+          const entryD = parseDateLocal(room.entryDate || `${year}-01-01`);
+          const anniv = new Date(parseInt(year), entryD.getMonth(), entryD.getDate());
+          setIncreaseEffectiveDate(anniv.toISOString().split('T')[0]);
+      } catch(e) {
+          setIncreaseEffectiveDate(`${year}-01-01`);
+      }
+
       setIsApplyIncreaseModalOpen(true);
   };
 
@@ -3548,13 +3731,78 @@ const handleChangeRoomConfirm = async () => {
           yearsPassed: increaseModalData.yearsPassed
       };
 
+      // YENİ EKLENEN: Geçmişe dönük güncelleme.
+      // Zam oranı ayın 3-4'ünde açıklandığı için yıldönümü (geçerlilik tarihi) ile bugün arasındaki
+      // aylar da yeni kiraya göre güncellenir. Aradaki her ayın kirası TAMAMEN yeni tutara çekilir.
+      const room = increaseModalData;
+      const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
+      const newMonthlyTotal = hasKdv ? newFee * 1.20 : newFee;
+      const monthsStr = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
+      const retroOverrides = [];
+      if (increaseEffectiveDate) {
+          const startDate = parseDateLocal(increaseEffectiveDate);
+          const targetDay = startDate.getDate();
+          const today = new Date();
+          let loopDate = new Date(startDate);
+          // Geçerlilik tarihinden bugüne kadar olan her ayı, yeni kira tutarına güncelle
+          let guard = 0;
+          while (loopDate <= today && guard < 120) {
+              const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
+              const txId = `debt-${room.id}-${key}`;
+              const mName = monthsStr[loopDate.getMonth()];
+              retroOverrides.push({
+                  txId,
+                  date: new Date(loopDate).getTime(),
+                  desc: `${room.name} Odası - ${mName} ${loopDate.getFullYear()} Kirası (Zamlı)`,
+                  debt: newMonthlyTotal,
+                  baseDebt: newFee,
+                  kdvDebt: hasKdv ? newFee * 0.20 : 0,
+                  credit: 0
+              });
+              let nMonth = loopDate.getMonth() + 1;
+              let nYear = loopDate.getFullYear();
+              if (nMonth > 11) { nMonth = 0; nYear++; }
+              const maxDayInNextMonth = new Date(nYear, nMonth + 1, 0).getDate();
+              loopDate = new Date(nYear, nMonth, Math.min(targetDay, maxDayInNextMonth));
+              guard++;
+          }
+      }
+
+      const customerToUpdate = customers.find(c => c.name === room.customerName);
+
       if (db && firebaseUser) {
           try {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(increaseModalData.id)), {
                   monthlyFee: newRentAmount,
                   priceHistory: [...(increaseModalData.priceHistory || []), historyEntry]
               }, { merge: true });
+
+              // Geçmişe dönük ay güncellemelerini cari hesaba override olarak yaz
+              if (customerToUpdate && retroOverrides.length > 0) {
+                  const existingOverrides = customerToUpdate.ledgerOverrides || [];
+                  const filtered = existingOverrides.filter(o => !retroOverrides.some(n => n.txId === o.txId));
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                      ledgerOverrides: [...filtered, ...retroOverrides]
+                  }, { merge: true });
+              }
           } catch(e) { console.error("Firebase Zam Kayıt Hatası:", e); }
+      } else {
+          // ÖNİZLEME (yerel state) MODU: Firebase yokken de çalışsın
+          setRooms(prev => prev.map(r => r.id === increaseModalData.id ? {
+              ...r,
+              monthlyFee: newRentAmount,
+              priceHistory: [...(r.priceHistory || []), historyEntry]
+          } : r));
+
+          if (customerToUpdate && retroOverrides.length > 0) {
+              setCustomers(prev => prev.map(c => {
+                  if (c.id !== customerToUpdate.id) return c;
+                  const existingOverrides = c.ledgerOverrides || [];
+                  const filtered = existingOverrides.filter(o => !retroOverrides.some(n => n.txId === o.txId));
+                  return { ...c, ledgerOverrides: [...filtered, ...retroOverrides] };
+              }));
+          }
       }
 
       setIsApplyIncreaseModalOpen(false);
@@ -3736,7 +3984,8 @@ const newAppt = {
         warehouseId: parseInt(appointmentData.warehouseId),
         date: appointmentData.date,
         time: appointmentData.time,
-        purpose: appointmentData.purpose
+        purpose: appointmentData.purpose,
+        createdBy: currentUserProfile.name // YENİ EKLENEN: randevuyu oluşturan kullanıcı takvimde küçük olarak gösterilecek
     };
 
     // FİREBASE'E KAYIT İŞLEMİ
@@ -3828,6 +4077,9 @@ const newAppt = {
       'tahliye': { label: 'Depodan Tüm Eşyaları Kendisi Çıkartıcak', color: 'bg-red-500', text: 'text-red-700', border: 'border-red-200', bgLight: 'bg-red-50' },
       'temizlik': { label: 'Depo Temizlik', color: 'bg-orange-500', text: 'text-orange-700', border: 'border-orange-200', bgLight: 'bg-orange-50' },
   };
+
+  // YENİ EKLENEN: Bugüne ait randevu sayısı — sol menüdeki Takvim öğesinde yanıp sönen rozet için
+  const todayApptCount = appointments.filter(a => a.date === new Date().toISOString().split('T')[0]).length;
 
   const menuItems = [
     { id: 'dashboard', label: 'Anasayfa', icon: LayoutDashboard },
@@ -4131,7 +4383,18 @@ if (!selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !isFree) {
                   let actualPayDay = Math.min(targetDay, maxDayInMonth); 
                   let txDate = new Date(year, month, actualPayDay);
 
-                  if (txDate <= calculationEndDate) {
+                  // YENİ EKLENDİ: Ödeme günü geldiğinde borç AYNI GÜN değil, BİR SONRAKİ GÜN cariye düşer.
+                  // (Aynı gün depodan çıkan müşteriden o ayın kirası alınmadığı için.)
+                  // Ekstrede görünen tarih yine ödeme günüdür (dateStr değişmez); yalnızca borcun
+                  // hesaba yansıma anı 1 gün ertelenir. İcra süreci varsa bu erteleme uygulanmaz.
+                  const isUnderLegal = room.isUnderLegalAction && room.legalActionStartDate;
+                  let effectiveTxDate = txDate;
+                  if (!isUnderLegal) {
+                      effectiveTxDate = new Date(txDate);
+                      effectiveTxDate.setDate(effectiveTxDate.getDate() + 1);
+                  }
+
+                  if (effectiveTxDate <= calculationEndDate) {
                   const isGifted = room.giftMonths && monthCounter < room.giftMonths;
                   const isFree = room.isFreeRoom;
                   const appliedMonthlyTotal = (isGifted || isFree) ? 0 : monthlyTotal;
@@ -4510,6 +4773,13 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                     }
                 }} className={`w-full flex items-center gap-3 px-3 py-2.5 border rounded-xl shadow-sm transition-colors text-sm font-medium ${activeMenu === item.id && !selectedCustomerId ? 'border-orange-200 bg-orange-50 text-orange-600' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
                   <item.icon size={18} className={activeMenu === item.id ? 'text-orange-500' : 'text-gray-400'} />{item.label}
+                  {/* YENİ EKLENEN: Takvim için bugünkü randevu sayısını gösteren yanıp sönen bildirim ışığı */}
+                  {item.id === 'takvim' && todayApptCount > 0 && (
+                      <span className="ml-auto relative flex items-center justify-center">
+                          <span className="absolute inline-flex h-5 w-5 rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                          <span className="relative inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-red-500 text-white text-[10px] font-black shadow-sm">{todayApptCount}</span>
+                      </span>
+                  )}
                 </button>
               )
             })}
@@ -4659,6 +4929,31 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-8 w-full block scroll-smooth relative">
           {activeMenu === 'dashboard' ? (
              <div className="max-w-7xl mx-auto">
+              {/* YENİ EKLENEN: Kullanıcıya özel selamlama + depo işine özel günlük motivasyon sözü */}
+              {(() => {
+                  const now = new Date();
+                  const hour = now.getHours();
+                  const greeting = hour < 12 ? 'Günaydın' : (hour < 18 ? 'İyi günler' : 'İyi akşamlar');
+                  const firstName = (currentUserProfile.name || '').split(' ')[0] || '';
+                  // Yılın gününe göre her gün farklı, döngüsel motivasyon sözü seç
+                  const startOfYear = new Date(now.getFullYear(), 0, 0);
+                  const dayOfYear = Math.floor((now - startOfYear) / (1000 * 60 * 60 * 24));
+                  const motivasyon = MOTIVASYON_SOZLERI[dayOfYear % MOTIVASYON_SOZLERI.length];
+                  return (
+                      <div className="mb-6 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 rounded-2xl p-6 sm:p-7 shadow-lg shadow-indigo-500/20 text-white relative overflow-hidden">
+                          <div className="absolute -right-6 -top-6 w-32 h-32 bg-white/10 rounded-full"></div>
+                          <div className="absolute -right-10 bottom-0 w-24 h-24 bg-white/5 rounded-full"></div>
+                          <div className="relative z-10">
+                              <h2 className="text-2xl sm:text-3xl font-black tracking-tight mb-1">Merhabalar, {firstName} 👋</h2>
+                              <p className="text-indigo-100 text-sm font-medium mb-4">{greeting}! {now.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' })}</p>
+                              <div className="flex items-start gap-3 bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/15 max-w-2xl">
+                                  <Gift size={20} className="shrink-0 mt-0.5 text-amber-200" />
+                                  <p className="text-sm sm:text-[15px] font-medium leading-relaxed italic">"{motivasyon}"</p>
+                              </div>
+                          </div>
+                      </div>
+                  );
+              })()}
               <div className="mb-6"><h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Özet</h1><h2 className="text-2xl font-bold text-gray-800">Gösterge Paneli</h2></div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                 {dashboardCards.map((card) => (
@@ -4933,7 +5228,10 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                      const pData = appointmentPurposes[appt.purpose];
                                      const warehouseName = warehouses.find(w => w.id === appt.warehouseId)?.name;
                                      return (
-                                         <div key={appt.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border ${pData.border} ${pData.bgLight} transition-shadow hover:shadow-md`}>
+                                         <div key={appt.id} className={`relative flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border ${pData.border} ${pData.bgLight} transition-shadow hover:shadow-md`}>
+                                             {appt.createdBy && (
+                                                 <span className="absolute top-1.5 right-2 text-[9px] font-semibold text-gray-400 italic">{appt.createdBy} oluşturdu</span>
+                                             )}
                                              <div className="flex items-start gap-4 mb-3 sm:mb-0">
                                                  <div className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-white ${pData.color} shadow-sm`}>
                                                      <Clock size={20} />
@@ -4944,7 +5242,13 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                          {appt.customerType === 'unregistered' && <span className="bg-gray-200 text-gray-600 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">Kayıtsız Müşteri</span>}
                                                      </div>
                                                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-medium text-gray-600">
-                                                         <span className="flex items-center gap-1 text-gray-500"><Phone size={12}/> {appt.customerPhone}</span>
+                                                         {/* Numaraya tıklayınca doğrudan arama yapılır, yanında küçük WhatsApp butonu vardır */}
+                                                         <span className="flex items-center gap-1.5">
+                                                             <a href={`tel:+90${(appt.customerPhone || '').replace(/\D/g, '')}`} className="flex items-center gap-1 text-gray-500 hover:text-indigo-600 transition-colors" title="Ara"><Phone size={12}/> {appt.customerPhone}</a>
+                                                             {appt.customerPhone && (
+                                                                 <a href={`https://wa.me/90${(appt.customerPhone || '').replace(/\D/g, '')}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="bg-emerald-500 hover:bg-emerald-600 text-white p-1 rounded-md transition-colors shadow-sm" title="WhatsApp ile mesaj at"><MessageCircle size={11}/></a>
+                                                             )}
+                                                         </span>
                                                          <span className="flex items-center gap-1 text-gray-500"><Home size={12}/> {warehouseName}</span>
                                                      </div>
                                                  </div>
@@ -5206,6 +5510,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <a href={`tel:+90${customer.phone}`} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"><Phone size={14}/> Ara</a>
                               <a href={`https://wa.me/90${customer.phone}`} target="_blank" rel="noreferrer" className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-teal-500/30"><MessageCircle size={14}/> WhatsApp</a>
                               <button onClick={() => handleOpenContract(customer)} className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-indigo-500/30"><Download size={14}/> Sözleşme İndir</button>
+                              <button onClick={() => setInfoModalCustomer(customer)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-emerald-500/30"><Info size={14}/> Bilgilendirme</button>
                               <button onClick={() => setIsInvoiceModalOpen(true)} className="bg-cyan-500 hover:bg-cyan-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-cyan-500/30"><FileTextIcon size={14}/> Faturalar</button>
                               <button onClick={() => { setCustomerToDeleteId(customer.id); setIsDeleteCustomerModalOpen(true); }} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border border-red-100"><Trash2 size={14}/> Kalıcı Sil</button>
                            </div>
@@ -5729,7 +6034,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               </div>
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                                  {filteredDebtors.sort((a, b) => b.totalDebt - a.totalDebt).map((customer) => {
+                                  {/* YENİ EKLENEN: Sıralama artık odanın en son zamlanmış (güncel) kirasına göre
+                                  hesaplanan gecikme ayı sayısına (monthsOwed) göre yapılıyor — en çok ay geciken
+                                  en üstte. Eşit ay gecikmesi olanlar arasında ise borç tutarına göre sıralanır. */}
+                              {filteredDebtors.sort((a, b) => b.monthsOwed - a.monthsOwed || b.totalDebt - a.totalDebt).map((customer) => {
                                       let delayColor = 'bg-gray-100 text-gray-600 border-gray-200';
                                       if (customer.monthsOwed >= 5) delayColor = 'bg-red-500 text-white border-red-600';
                                       
@@ -6381,8 +6689,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <div className="animate-in fade-in duration-300">
                     <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-purple-200 bg-purple-50/30">
                         <div>
-                            <button onClick={() => setActiveSizeFilter(null)} className="text-xs font-bold text-gray-500 hover:text-purple-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
+                            <button onClick={() => { setActiveSizeFilter(null); setSizeFilterScope(null); }} className="text-xs font-bold text-gray-500 hover:text-purple-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
                             <h2 className="text-2xl font-bold text-purple-900">Boş Depo Arama: {sizeFilters.find(f => f.id === activeSizeFilter)?.label}</h2>
+                            {sizeFilterScope && (
+                                <p className="text-xs font-bold text-purple-500 mt-1">
+                                    {sizeFilterScope.type === 'warehouse' ? `Sadece "${warehouses.find(w => w.id === sizeFilterScope.id)?.name}" deposu içinde aranıyor` : `Sadece "${blocks.find(b => b.id === sizeFilterScope.id)?.name}" bloğu içinde aranıyor`}
+                                </p>
+                            )}
                         </div>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-6 pb-8">
@@ -6391,7 +6704,17 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             const filteredEmptyRooms = rooms.filter(r => {
                                 const isEmpty = !r.customerName && (!r.isReserved || r.reserveExpiryTimestamp < Date.now());
                                 const m3 = Number(r.m3 || 0);
-                                return isEmpty && m3 >= filterOpt.min && m3 <= filterOpt.max;
+                                const sizeOk = isEmpty && m3 >= filterOpt.min && m3 <= filterOpt.max;
+                                if (!sizeOk) return false;
+                                // YENİ EKLENEN: Bulunduğu depo/blok kapsamına göre filtreleme
+                                if (sizeFilterScope?.type === 'warehouse') {
+                                    const block = blocks.find(b => b.id === r.blockId);
+                                    return block?.warehouseId === sizeFilterScope.id;
+                                }
+                                if (sizeFilterScope?.type === 'block') {
+                                    return r.blockId === sizeFilterScope.id;
+                                }
+                                return true;
                             });
 
                             if (filteredEmptyRooms.length === 0) {
@@ -6414,6 +6737,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                         setSelectedBlockId(block?.id);
                                         setSelectedRoomId(oda.id);
                                         setActiveSizeFilter(null);
+                                        setSizeFilterScope(null);
                                     }} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
                                         <div className="px-4 py-3 flex justify-between items-center bg-[#1bc5bd] text-white shadow-md z-10">
                                             <div className="flex flex-col min-w-0 mr-2">
@@ -6437,13 +6761,84 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         })()}
                     </div>
                  </div>
+              ) : isReserveFilterActive ? (
+                 <div className="animate-in fade-in duration-300">
+                    <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-orange-200 bg-orange-50/30">
+                        <div>
+                            <button onClick={() => { setIsReserveFilterActive(false); setReserveFilterScope(null); }} className="text-xs font-bold text-gray-500 hover:text-orange-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
+                            <h2 className="text-2xl font-bold text-orange-900">Rezerve Odalar</h2>
+                            {reserveFilterScope && (
+                                <p className="text-xs font-bold text-orange-500 mt-1">
+                                    {reserveFilterScope.type === 'warehouse' ? `Sadece "${warehouses.find(w => w.id === reserveFilterScope.id)?.name}" deposu içinde gösteriliyor` : `Sadece "${blocks.find(b => b.id === reserveFilterScope.id)?.name}" bloğu içinde gösteriliyor`}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-6 pb-8">
+                        {(() => {
+                            const reservedRooms = rooms.filter(r => {
+                                const isValidReservation = r.isReserved && !r.customerName && (!r.reserveExpiryTimestamp || r.reserveExpiryTimestamp > Date.now());
+                                if (!isValidReservation) return false;
+                                if (reserveFilterScope?.type === 'warehouse') {
+                                    const block = blocks.find(b => b.id === r.blockId);
+                                    return block?.warehouseId === reserveFilterScope.id;
+                                }
+                                if (reserveFilterScope?.type === 'block') {
+                                    return r.blockId === reserveFilterScope.id;
+                                }
+                                return true;
+                            });
+
+                            if (reservedRooms.length === 0) {
+                                return (
+                                    <div className="col-span-full py-16 text-center bg-white rounded-xl border border-dashed border-gray-300 shadow-sm">
+                                        <Calendar size={40} className="mx-auto text-gray-300 mb-4" />
+                                        <h3 className="text-lg font-bold text-gray-700">Rezerve Edilmiş Oda Bulunamadı</h3>
+                                        <p className="text-sm text-gray-500 mt-1">Bu kapsamda şu anda geçerli bir rezervasyon yok.</p>
+                                    </div>
+                                );
+                            }
+
+                            return reservedRooms.map((oda) => {
+                                const block = blocks.find(b => b.id === oda.blockId);
+                                const warehouse = warehouses.find(w => w.id === block?.warehouseId);
+
+                                return (
+                                    <div key={oda.id} onClick={() => {
+                                        setSelectedWarehouseId(warehouse?.id);
+                                        setSelectedBlockId(block?.id);
+                                        setSelectedRoomId(oda.id);
+                                        setIsReserveFilterActive(false);
+                                        setReserveFilterScope(null);
+                                    }} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
+                                        <div className="px-4 py-3 flex justify-between items-center bg-orange-500 text-white shadow-md z-10">
+                                            <div className="flex flex-col min-w-0 mr-2">
+                                                <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
+                                                <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
+                                            </div>
+                                            <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner shrink-0">{oda.m3} m³</span>
+                                        </div>
+                                        <div className="flex-1 relative flex flex-col justify-center items-center min-h-[140px] gap-1 p-3"
+                                            style={{ backgroundImage: 'repeating-linear-gradient(to bottom, #fff7ed, #fff7ed 12px, #fed7aa 12px, #fed7aa 14px)' }}>
+                                            <div className="px-3 py-2 rounded-lg border-2 shadow-sm font-bold uppercase text-[11px] text-center max-w-[90%] truncate bg-white text-orange-600 border-orange-200">
+                                                REZERVELİ
+                                            </div>
+                                            <span className="text-[11px] font-bold text-orange-800 text-center truncate max-w-full">{oda.reservedName}</span>
+                                            <span className="text-[9px] text-orange-600 text-center">Son Geçerlilik: {oda.reserveExpiry}</span>
+                                        </div>
+                                    </div>
+                                );
+                            });
+                        })()}
+                    </div>
+                 </div>
               ) : !selectedWarehouseId ? (
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-col sm:flex-row gap-4 sm:gap-0">
                     <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
                     <div className="flex flex-wrap items-center gap-3">
                         <div className="relative">
-                            <button onClick={() => setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen)} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
+                            <button onClick={() => { setSizeFilterScope(null); setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen); }} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
                                 <Search size={16} /> Depo Boyutu Bul
                             </button>
                             {isSizeFilterDropdownOpen && (
@@ -6463,6 +6858,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 </>
                             )}
                         </div>
+                        <button onClick={() => { setReserveFilterScope(null); setIsReserveFilterActive(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-orange-500/30">
+                            <Calendar size={16} /> Rezerve
+                        </button>
                         <button onClick={() => setIsAddWarehouseModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors shadow-sm">Depo Ekle <Plus size={16} /></button>
                     </div>
                   </div>
@@ -6544,7 +6942,33 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <div><button onClick={() => setSelectedWarehouseId(null)} className="text-xs font-bold text-gray-400 hover:text-[#1bc5bd] tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> {warehouses.find(w => w.id === selectedWarehouseId)?.name}</button><h2 className="text-2xl font-bold text-slate-800">Blok Listesi</h2></div>
-                    <button onClick={() => setIsAddBlockModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Blok Ekle <Plus size={16} /></button>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="relative">
+                            <button onClick={() => { setSizeFilterScope({ type: 'warehouse', id: selectedWarehouseId }); setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen); }} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
+                                <Search size={16} /> Depo Boyutu Bul
+                            </button>
+                            {isSizeFilterDropdownOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsSizeFilterDropdownOpen(false)}></div>
+                                    <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-100 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                                        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase flex items-center justify-between">
+                                            <span>Bu Depodaki Boş Odalar</span>
+                                            <button onClick={() => setIsSizeFilterDropdownOpen(false)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
+                                        </div>
+                                        {sizeFilters.map(f => (
+                                            <button key={f.id} onClick={() => { setActiveSizeFilter(f.id); setIsSizeFilterDropdownOpen(false); }} className="w-full text-left px-4 py-3 text-sm font-bold text-gray-700 hover:bg-purple-50 hover:text-purple-700 border-b border-gray-50 last:border-0 transition-colors flex items-center justify-between group">
+                                                <div className="flex items-center gap-2"><Box size={16} className="text-purple-400 group-hover:text-purple-600 transition-colors" /> {f.label}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <button onClick={() => { setReserveFilterScope({ type: 'warehouse', id: selectedWarehouseId }); setIsReserveFilterActive(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-orange-500/30">
+                            <Calendar size={16} /> Rezerve
+                        </button>
+                        <button onClick={() => setIsAddBlockModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Blok Ekle <Plus size={16} /></button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6 pb-8">
                   {blocks.filter(b => b.warehouseId === selectedWarehouseId).map((blok, index, arr) => {
@@ -6598,7 +7022,33 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <div><button onClick={() => setSelectedBlockId(null)} className="text-xs font-bold text-gray-400 hover:text-[#1bc5bd] tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> {blocks.find(b => b.id === selectedBlockId)?.name}</button><h2 className="text-2xl font-bold text-slate-800">Oda Listesi</h2></div>
-                    <button onClick={() => setIsAddRoomModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Oda Ekle <Plus size={16} /></button>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="relative">
+                            <button onClick={() => { setSizeFilterScope({ type: 'block', id: selectedBlockId }); setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen); }} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
+                                <Search size={16} /> Depo Boyutu Bul
+                            </button>
+                            {isSizeFilterDropdownOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsSizeFilterDropdownOpen(false)}></div>
+                                    <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-100 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                                        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase flex items-center justify-between">
+                                            <span>Bu Bloktaki Boş Odalar</span>
+                                            <button onClick={() => setIsSizeFilterDropdownOpen(false)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
+                                        </div>
+                                        {sizeFilters.map(f => (
+                                            <button key={f.id} onClick={() => { setActiveSizeFilter(f.id); setIsSizeFilterDropdownOpen(false); }} className="w-full text-left px-4 py-3 text-sm font-bold text-gray-700 hover:bg-purple-50 hover:text-purple-700 border-b border-gray-50 last:border-0 transition-colors flex items-center justify-between group">
+                                                <div className="flex items-center gap-2"><Box size={16} className="text-purple-400 group-hover:text-purple-600 transition-colors" /> {f.label}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <button onClick={() => { setReserveFilterScope({ type: 'block', id: selectedBlockId }); setIsReserveFilterActive(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-orange-500/30">
+                            <Calendar size={16} /> Rezerve
+                        </button>
+                        <button onClick={() => setIsAddRoomModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Oda Ekle <Plus size={16} /></button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-6 pb-8">
                     {rooms.filter(r => r.blockId === selectedBlockId).map((oda, index, arr) => {
@@ -8160,6 +8610,20 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                     })}
                                 </div>
                             ))}
+
+                            {/* YENİ EKLENEN: Odaların giriş tarihine göre gruplanmış KDV dahil kira dökümü */}
+                            {getContractRoomBreakdown(contractRooms).length > 0 && (
+                                <div style={{ marginBottom: '16px' }}>
+                                    <h3 style={{ fontSize: '10.5pt', fontWeight: 'bold', color: '#111', margin: '0 0 5px 0' }}>Depolanan Odalar ve Aylık Kira Bedelleri (KDV Dahil)</h3>
+                                    {getContractRoomBreakdown(contractRooms).map((g, gi) => (
+                                        <div key={gi} style={{ marginBottom: '8px' }}>
+                                            <p style={{ margin: '0 0 3px 0', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}><strong>Giriş Tarihi:</strong> {g.dateStr}</p>
+                                            <p style={{ margin: '0 0 3px 0', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}><strong>Oda/Odalar:</strong> {g.rooms.map(r => r.name).join(', ')} ({g.rooms.length} adet)</p>
+                                            <p style={{ margin: '0 0 3px 0', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}><strong>Aylık Toplam Kira (KDV Dahil):</strong> {g.total.toLocaleString('tr-TR')} TL</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -8276,15 +8740,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                </div>
 
                <div className="mb-4">
-                 <div className="flex items-center gap-2 mb-4"><div className="w-6 h-6 rounded-full bg-[#1bc5bd] text-white flex items-center justify-center text-xs font-bold">4</div><h4 className="font-bold text-gray-800">Giriş Görseli Ekle (İsteğe Bağlı)</h4></div>
+                 <div className="flex items-center gap-2 mb-4"><div className="w-6 h-6 rounded-full bg-[#1bc5bd] text-white flex items-center justify-center text-xs font-bold">4</div><h4 className="font-bold text-gray-800">Giriş Görseli / Videosu Ekle (İsteğe Bağlı)</h4></div>
                  <div className="bg-slate-50 p-5 rounded-xl border border-gray-200">
-                    <label className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-white hover:border-[#1bc5bd] transition-colors cursor-pointer group bg-white/50">
-                     {rentData.entryPhoto ? (
-                       <div className="text-[#1bc5bd] font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Görsel Eklendi</span><img src={rentData.entryPhoto} alt="Önizleme" className="h-16 w-16 object-cover rounded mt-2 border border-gray-200"/></div>
-                     ) : (
-                       <><Upload size={20} className="text-gray-400 mb-2 group-hover:text-[#1bc5bd] transition-colors" /><span className="text-xs text-gray-500 font-medium">Depoya yerleşim yapıldıktan sonraki fotoğrafı yükleyin</span><span className="text-[10px] text-gray-400 mt-1">PNG, JPG formatlarında</span></>
-                     )}
-<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url}); } }}/>                   </label>
+                    <MediaEkleAlani value={rentData.entryPhoto} onSelect={(url) => setRentData({...rentData, entryPhoto: url})} />
                  </div>
                </div>
                
@@ -8422,10 +8880,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                <div className="flex flex-col gap-4 mb-6">
                  <div className="flex flex-col gap-2"><label className="text-xs font-semibold text-gray-600">Çıkış Tarihi</label><input type="date" value={endRentData.exitDate} onChange={(e) => setEndRentData({...endRentData, exitDate: e.target.value})} className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-cyan-500" /></div>
                  <div className="flex flex-col gap-2 mt-2">
-                   <label className="text-xs font-semibold text-gray-600">Boş Depo Görseli (İsteğe Bağlı)</label>
-                   <label className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 transition-colors cursor-pointer group">
-                     {endRentData.photo ? (<div className="text-green-500 font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Fotoğraf Eklendi</span></div>) : (<><Upload size={20} className="text-gray-400 mb-2 group-hover:text-cyan-500 transition-colors" /><span className="text-xs text-gray-500">Çıkış yapılan boş deponun fotoğrafını yükle</span></>)}
-<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEndRentData({...endRentData, photo: url}); } }}/>                   </label>
+                   <label className="text-xs font-semibold text-gray-600">Boş Depo Görseli / Videosu (İsteğe Bağlı)</label>
+                   <MediaEkleAlani value={endRentData.photo} onSelect={(url) => setEndRentData({...endRentData, photo: url})} />
                  </div>
                </div>
                <div className="flex justify-end gap-3"><button onClick={() => setIsEndRentModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded text-sm font-medium">İptal</button><button onClick={handleEndRentConfirm} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded text-sm font-medium flex items-center gap-2"><LogOut size={16} /> Çıkışı Onayla</button></div>
@@ -8470,6 +8926,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                          <input type="number" disabled={increaseMode !== 'manual'} value={newRentAmount} onChange={(e) => handleAmountInput(e.target.value)} className={`w-full border-2 rounded-xl px-4 py-3 text-lg font-bold focus:outline-none transition-colors ${increaseMode === 'manual' ? 'border-indigo-300 focus:border-indigo-500 bg-white text-indigo-900' : 'border-gray-200 bg-gray-50 text-gray-400'}`} />
                          <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-gray-400">TL</span>
                      </div>
+                 </div>
+
+                 {/* YENİ EKLENEN: Zammın geçerli olacağı tarih (varsayılan yıldönümü). Bu tarihten bugüne kadarki aylar yeni kiraya güncellenir. */}
+                 <div className="flex flex-col gap-2 bg-amber-50 border border-amber-200 rounded-xl p-4">
+                     <label className="text-xs font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1"><Calendar size={14}/> Zammın Geçerlilik Tarihi</label>
+                     <input type="date" value={increaseEffectiveDate} onChange={(e) => setIncreaseEffectiveDate(e.target.value)} className="w-full border-2 border-amber-300 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-amber-500 bg-white text-amber-900" />
+                     <p className="text-[11px] text-amber-600 leading-relaxed">Zam oranı ayın 3-4'ünde açıklandığı için, bu tarih (yıldönümü) ile bugün arasındaki tüm ayların kirası <strong>{newRentAmount || 0} TL</strong> olarak geçmişe dönük güncellenecektir.</p>
                  </div>
                </div>
                
@@ -8766,7 +9229,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                <div className="flex flex-col gap-4">
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Müşteri Ad Soyad</label><input type="text" value={reserveData.name} onChange={(e) => setReserveData({...reserveData, name: e.target.value.toUpperCase()})} placeholder="Örn: AHMET YILMAZ" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Telefon Numarası</label><input type="text" value={reserveData.phone} onChange={(e) => setReserveData({...reserveData, phone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700" /></div>
-                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Rezerve Süresi (Maks 10 Gün)</label><input type="number" min="1" max="10" value={reserveData.days} onChange={(e) => setReserveData({...reserveData, days: e.target.value > 10 ? 10 : e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700" /><p className="text-[10px] text-gray-400 mt-1">Sistem, belirtilen gün dolduğunda odayı otomatik olarak tekrar boş konuma düşürür.</p></div>
+                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Rezerve Süresi (Gün)</label><input type="number" min="1" value={reserveData.days} onChange={(e) => setReserveData({...reserveData, days: e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700" /><p className="text-[10px] text-gray-400 mt-1">Sistem, belirtilen gün dolduğunda odayı otomatik olarak tekrar boş konuma düşürür.</p></div>
                </div>
                <div className="mt-8 flex justify-end gap-3"><button onClick={() => setIsReserveRoomModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl font-bold transition-colors text-sm">İptal</button><button onClick={handleReserveRoom} disabled={!reserveData.name || !reserveData.phone || !reserveData.days} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-orange-500/30 flex items-center gap-2"><Check size={18} /> Rezerveyi Kaydet</button></div>
              </div>
@@ -8826,15 +9289,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Giriş-Çıkış Tutanağı</label>
-                      <label className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24">
-                        {entryExitData.protocolPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500">Tutanak Yükle</span></>)}
-<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEntryExitData({...entryExitData, protocolPhoto: url}); } }}/>                      </label>
+                      <MediaEkleAlani compact value={entryExitData.protocolPhoto} onSelect={(url) => setEntryExitData({...entryExitData, protocolPhoto: url})} />
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Depo Son Hali</label>
-                      <label className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24">
-                        {entryExitData.finalPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500">Son Halini Yükle</span></>)}
-<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setEntryExitData({...entryExitData, finalPhoto: url}); } }}/>                      </label>
+                      <MediaEkleAlani compact value={entryExitData.finalPhoto} onSelect={(url) => setEntryExitData({...entryExitData, finalPhoto: url})} />
                     </div>
                   </div>
                 </div>
@@ -9137,6 +9596,57 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
           </div>
         </div>
       )}
+
+      {/* YENİ EKLENEN: MÜŞTERİ BİLGİLENDİRME MODALI (Müşteri No + IBAN) */}
+      {infoModalCustomer && (() => {
+          // Müşteriye iletilecek bilgilendirme metni (kopyalanabilir / WhatsApp ile gönderilebilir)
+          const infoText = `Sayın ${infoModalCustomer.name},\n\nÖdeme bilgileriniz aşağıda yer almaktadır. Ödeme yaparken açıklama kısmına mutlaka Müşteri Numaranızı yazmanız gerekmektedir.\n\n🔢 Müşteri Numarası: ${infoModalCustomer.customerNo}\n\n🏦 Banka: ${contractSettings.bankFullName}\n👤 Alıcı: ${contractSettings.accountHolder}\n💳 IBAN: ${contractSettings.iban}\n\n⚠️ ÖNEMLİ: Ödemenizin doğru hesabınıza işlenebilmesi için açıklama kısmına ${infoModalCustomer.customerNo} numaralı Müşteri Numaranızı yazmayı unutmayınız.\n\nİyi günler dileriz.`;
+          return (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
+                 <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-emerald-50 rounded-t-2xl">
+                     <h3 className="text-lg font-bold text-emerald-700 flex items-center gap-2"><Info size={20} /> Müşteri Bilgilendirme</h3>
+                     <button onClick={() => setInfoModalCustomer(null)} className="text-emerald-400 hover:text-emerald-600 bg-white p-1 rounded shadow-sm"><X size={20} /></button>
+                 </div>
+                 <div className="p-6">
+                    <p className="text-sm text-gray-500 mb-4">Aşağıdaki bilgileri müşteriye iletebilirsiniz. Müşterinin ödeme açıklamasına <strong>Müşteri Numarasını</strong> yazması gerekmektedir.</p>
+
+                    <div className="flex flex-col gap-3 mb-5">
+                        <div className="bg-slate-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between">
+                            <div>
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Müşteri Numarası</div>
+                                <div className="text-xl font-black text-slate-800 tracking-wide">{infoModalCustomer.customerNo}</div>
+                            </div>
+                            <button onClick={() => { try { navigator.clipboard.writeText(infoModalCustomer.customerNo); } catch(e){} }} className="text-xs bg-white border border-gray-200 hover:bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg font-bold shadow-sm">Kopyala</button>
+                        </div>
+                        <div className="bg-slate-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">IBAN ({contractSettings.bankShortName})</div>
+                                <div className="text-sm font-black text-slate-800 tracking-wide break-all">{contractSettings.iban}</div>
+                                <div className="text-[11px] text-gray-500 mt-0.5">{contractSettings.accountHolder}</div>
+                            </div>
+                            <button onClick={() => { try { navigator.clipboard.writeText(contractSettings.iban); } catch(e){} }} className="text-xs bg-white border border-gray-200 hover:bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg font-bold shadow-sm shrink-0">Kopyala</button>
+                        </div>
+                    </div>
+
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-6 flex items-start gap-2">
+                        <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                        <p className="text-[12px] text-amber-700 font-medium leading-relaxed">Müşteriye hatırlatın: Ödeme yaparken açıklama kısmına <strong>{infoModalCustomer.customerNo}</strong> numaralı Müşteri Numarasını yazmalıdır.</p>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                        <a href={`https://wa.me/90${infoModalCustomer.phone}?text=${encodeURIComponent(infoText)}`} target="_blank" rel="noreferrer" onClick={() => setInfoModalCustomer(null)} className="bg-emerald-500 hover:bg-emerald-600 text-white w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors shadow-sm shadow-emerald-500/30">
+                            <MessageCircle size={20} /> WhatsApp İle Gönder
+                        </a>
+                        <button onClick={() => { try { navigator.clipboard.writeText(infoText); } catch(e){} }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
+                            <FileTextIcon size={18} /> Tüm Metni Kopyala
+                        </button>
+                    </div>
+                 </div>
+              </div>
+            </div>
+          );
+      })()}
 
       {/* MESAJ GÖNDERİM TERCİHİ MODALI */}
       {messageModalData && (
