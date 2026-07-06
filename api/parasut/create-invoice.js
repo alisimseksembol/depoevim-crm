@@ -17,17 +17,19 @@ async function getAccessToken() {
         throw new Error('Parasut kimlik bilgileri eksik: PARASUT_CLIENT_ID, PARASUT_CLIENT_SECRET, PARASUT_USERNAME, PARASUT_PASSWORD .env icinde tanimlanmali.');
     }
 
+    const body = new URLSearchParams({
+        grant_type: 'password',
+        username: PARASUT_USERNAME,
+        password: PARASUT_PASSWORD,
+        client_id: PARASUT_CLIENT_ID,
+        client_secret: PARASUT_CLIENT_SECRET,
+        redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
+    });
+
     const response = await fetch(`${PARASUT_BASE_URL}/oauth/token`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            grant_type: 'password',
-            client_id: PARASUT_CLIENT_ID,
-            client_secret: PARASUT_CLIENT_SECRET,
-            username: PARASUT_USERNAME,
-            password: PARASUT_PASSWORD,
-            redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
-        })
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString()
     });
 
     const data = await response.json();
