@@ -11,18 +11,19 @@ async function getAccessToken() {
         return cachedToken.accessToken;
     }
 
-    const { PARASUT_CLIENT_ID, PARASUT_CLIENT_SECRET, PARASUT_USERNAME, PARASUT_PASSWORD } = process.env;
+    const { PARASUT_USERNAME, PARASUT_PASSWORD } = process.env;
 
-    if (!PARASUT_CLIENT_ID || !PARASUT_CLIENT_SECRET || !PARASUT_USERNAME || !PARASUT_PASSWORD) {
-        throw new Error('Parasut kimlik bilgileri eksik: PARASUT_CLIENT_ID, PARASUT_CLIENT_SECRET, PARASUT_USERNAME, PARASUT_PASSWORD .env icinde tanimlanmali.');
+    if (!PARASUT_USERNAME || !PARASUT_PASSWORD) {
+        throw new Error('Parasut kimlik bilgileri eksik: PARASUT_USERNAME, PARASUT_PASSWORD .env icinde tanimlanmali.');
     }
 
+    // GECICI: .env okuma sorununu izole etmek icin client_id/secret hardcode edildi. Test sonrasi geri al.
     const body = new URLSearchParams({
         grant_type: 'password',
         username: PARASUT_USERNAME,
         password: PARASUT_PASSWORD,
-        client_id: PARASUT_CLIENT_ID,
-        client_secret: PARASUT_CLIENT_SECRET,
+        client_id: '50vdTAC79y6kjfrMt7Ol9vV3pdN6SAWGAmKUMgXm1oA',
+        client_secret: 'BGm02XfcnmMabJCkjqTIr627CFC5VM1ijEX0lajlNsM',
         redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
     });
 
