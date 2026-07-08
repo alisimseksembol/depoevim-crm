@@ -220,7 +220,7 @@ export default async function handler(req, res) {
                     attributes: {
                         item_type: 'invoice',
                         description: invoiceDescription,
-                        note: buildInvoiceNote(customerNo),
+                        invoice_note: buildInvoiceNote(customerNo),
                         issue_date: today,
                         due_date: dueDate || today,
                         currency: 'TRL'
