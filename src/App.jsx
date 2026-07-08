@@ -418,9 +418,15 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           setBulkUploadHistory(fetchedData);
       }, (error) => console.error("Toplu Yükleme Hatası:", error));
 
-      return () => { 
-          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); 
-          unsubSettings(); unsubBulkUploadHistory();
+      // YENİ EKLENEN: MÜŞTERİ EXCEL AKTARIM GEÇMİŞİ FİREBASE DİNLEYİCİSİ
+      const unsubCustomerImportHistory = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customerImportHistory'), (snapshot) => {
+          const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.timestamp - a.timestamp);
+          setCustomerImportHistory(fetchedData);
+      }, (error) => console.error("Müşteri Aktarım Geçmişi Hatası:", error));
+
+      return () => {
+          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments();
+          unsubSettings(); unsubBulkUploadHistory(); unsubCustomerImportHistory();
       };
   }, [firebaseUser]);
   // ============================================================================
@@ -780,6 +786,7 @@ const handleSendEInvoice = async () => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                   customerName: customerToUpdate.name,
+                  customerNo: customerToUpdate.customerNo,
                   taxNumber: customerToUpdate.tc,
                   address: customerToUpdate.address,
                   email: customerToUpdate.email,
@@ -2851,6 +2858,8 @@ const handleCancelReservation = async () => {
   // --- YENİ EKLENEN: TOPLU MÜŞTERİ İÇE AKTARMA STATE'LERİ ---
   const [isCustomerUploading, setIsCustomerUploading] = useState(false);
   const [customerImportResult, setCustomerImportResult] = useState(null);
+  const [customerImportHistory, setCustomerImportHistory] = useState([]);
+  const [isCustomerImportHistoryOpen, setIsCustomerImportHistoryOpen] = useState(false);
 
   const handleBulkFileUpload = async (e) => {
       const file = e.target.files[0];
@@ -3289,7 +3298,24 @@ const reader = new FileReader();
                       }
                   }
 
-                  setCustomerImportResult({ importedCustomerCount, updatedRoomCount });
+                  // YENİ EKLENEN: Aktarım işlemini Firebase'e kaydet (Tarihçe Raporu İçin)
+                  const importRecordId = Date.now().toString();
+                  const importRecord = {
+                      id: importRecordId,
+                      timestamp: Date.now(),
+                      dateStr: new Date().toLocaleString('tr-TR'),
+                      fileName: file.name || 'Bilinmeyen Dosya',
+                      importedCustomerCount,
+                      updatedRoomCount,
+                      addedCustomerIds: newCustomers.map(c => String(c.id)),
+                      updatedRoomNames: Object.keys(roomUpdates)
+                  };
+
+                  if (db && firebaseUser && (importedCustomerCount > 0 || updatedRoomCount > 0)) {
+                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerImportHistory', importRecordId), importRecord);
+                  }
+
+                  setCustomerImportResult(importRecord);
 
               } catch (err) {
                   console.error(err);
@@ -3304,6 +3330,38 @@ const reader = new FileReader();
           setIsCustomerUploading(false);
       }
       e.target.value = '';
+  };
+
+  const handleRevertCustomerImport = async (historyRecord) => {
+      if (!window.confirm("Bu müşteri aktarımını ve eklediği tüm kayıtları geri almak istediğinize emin misiniz?")) return;
+
+      setIsCustomerUploading(true);
+      if (db && firebaseUser) {
+          try {
+              if (historyRecord.addedCustomerIds) {
+                  for (const cId of historyRecord.addedCustomerIds) {
+                      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cId)));
+                  }
+              }
+
+              if (historyRecord.updatedRoomNames) {
+                  for (const rName of historyRecord.updatedRoomNames) {
+                      const roomToRevert = rooms.find(r => r.name === rName);
+                      if (roomToRevert) {
+                          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomToRevert.id)), {
+                              customerName: '', entryDate: '', paymentDate: '', monthlyFee: 0, hasKdv: false, paidMonths: [], rentedBy: ''
+                          }, { merge: true });
+                      }
+                  }
+              }
+
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerImportHistory', String(historyRecord.id)));
+              if (customerImportResult?.id === historyRecord.id) {
+                  setCustomerImportResult(null);
+              }
+          } catch (e) { console.error("Müşteri Aktarımı Geri Alma Hatası:", e); }
+      }
+      setIsCustomerUploading(false);
   };
 
 const handleRentRoom = async () => {
@@ -5387,6 +5445,10 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
               <div className="flex justify-between items-center mb-6">
                 <div><h2 className="text-2xl font-bold text-slate-800">{activeMenu === 'mevcut-musteriler' ? 'Mevcut Müşteriler' : 'Tüm Müşteriler'}</h2><p className="text-sm text-gray-500 mt-1">{activeMenu === 'mevcut-musteriler' ? 'Şu anda depolarda aktif odası bulunan müşteriler.' : 'Sisteme kayıtlı geçmiş ve mevcut tüm müşteriler.'}</p></div>
                 <div className="flex gap-2">
+                    <button onClick={() => setIsCustomerImportHistoryOpen(true)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-colors flex items-center gap-2" title="Geçmiş Toplu Yüklemeler">
+                        <History size={16} />
+                        <span className="hidden sm:inline">Aktarım Geçmişi</span>
+                    </button>
                     <label className={`bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-colors cursor-pointer flex items-center gap-2 ${isCustomerUploading ? 'opacity-50 pointer-events-none' : ''}`} title="Otomatik Taramalı Excel Aktarımı">
                         {isCustomerUploading ? <RefreshCcw size={16} className="animate-spin" /> : <Upload size={16} />}
                         <span className="hidden sm:inline">Excel'den Müşteri Aktar</span>
@@ -10524,6 +10586,49 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       </div>
                   </div>
 
+               </div>
+           </div>
+        </div>
+      )}
+
+      {isCustomerImportHistoryOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center p-4">
+           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in">
+               <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl shrink-0">
+                   <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><History size={20} className="text-[#1bc5bd]"/> Geçmiş Toplu Yüklemeler (Müşteri Aktarımı)</h3>
+                   <button onClick={() => setIsCustomerImportHistoryOpen(false)} className="bg-white p-1.5 rounded-full shadow-sm text-slate-400 hover:text-red-500 transition-colors"><X size={20} /></button>
+               </div>
+               <div className="p-6 overflow-y-auto flex-1 bg-slate-50">
+                  <div className="overflow-x-auto border border-gray-200 rounded-xl bg-white">
+                      <table className="w-full text-left text-sm text-gray-600">
+                          <thead className="bg-slate-50 border-b border-gray-200 font-bold text-gray-700 text-xs uppercase">
+                              <tr>
+                                  <th className="p-4">Yükleme Tarihi</th>
+                                  <th className="p-4">Dosya Adı</th>
+                                  <th className="p-4 text-center">Eklenen Müşteri</th>
+                                  <th className="p-4 text-center">Kiralanan Oda</th>
+                                  <th className="p-4 text-center">İşlem</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                              {customerImportHistory.length > 0 ? customerImportHistory.map(history => (
+                                  <tr key={history.id} className="hover:bg-gray-50">
+                                      <td className="p-4 font-bold text-gray-800">{history.dateStr}</td>
+                                      <td className="p-4 font-medium text-gray-600">{history.fileName}</td>
+                                      <td className="p-4 text-center font-bold text-emerald-600">{history.importedCustomerCount}</td>
+                                      <td className="p-4 text-center font-bold text-indigo-600">{history.updatedRoomCount}</td>
+                                      <td className="p-4 text-center">
+                                          <button onClick={() => handleRevertCustomerImport(history)} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border border-red-100 whitespace-nowrap mx-auto">
+                                              <Trash2 size={14}/> Geri Al / Sil
+                                          </button>
+                                      </td>
+                                  </tr>
+                              )) : (
+                                  <tr><td colSpan="5" className="p-8 text-center text-gray-500 font-medium">Henüz kayıtlı bir müşteri aktarımı geçmişi bulunmuyor.</td></tr>
+                              )}
+                          </tbody>
+                      </table>
+                  </div>
                </div>
            </div>
         </div>
