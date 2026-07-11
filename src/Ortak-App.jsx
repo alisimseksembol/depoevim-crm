@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  LayoutDashboard,
-  Users,
+import { 
+  LayoutDashboard, 
+  Users, 
   Eye,
   CreditCard,
-  Calendar,
+  Calendar, 
   Clock, 
   AlertCircle, 
   Box, 
@@ -45,28 +45,32 @@ import {
   Mail
 } from 'lucide-react';
 
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc } from 'firebase/firestore';
-
 // ============================================================================
-// 🗄️ FIREBASE ENTEGRASYON HAZIRLIĞI VE YAPILANDIRMASI
+// 🗄️ FIREBASE ENTEGRASYONU — ÖNİZLEME İÇİN DEVRE DIŞI
 // ============================================================================
-const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID
-};
+// NOT: Canlı ortamda (kendi geliştirme ortamınızda / Vercel'de) Firebase SDK
+// paketleri kurulup buraya import edilecek, firebaseConfig .env üzerinden
+// okunacak ve initializeApp / getAuth / getFirestore ile başlatılacaktır.
+// Bu önizleme sandbox'ında dış paket kurulumu desteklenmediği için o kısım
+// tamamen çıkarılmış, "auth" ve "db" bilerek null bırakılmıştır.
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Önizleme modunda Firebase bağlantısı devre dışı — tüm veriler aşağıda tanımlı
+// sahte (mock/dummy) verilerle geliyor. "db" ve "auth" null bırakıldığı için
+// koddaki "if (db && firebaseUser)" korumalı tüm yazma/okuma blokları otomatik
+// olarak atlanır ve arayüz sadece mock veriler üzerinden çalışır.
+const auth = null;
+const db = null;
 
 // appId Canvas / Önizleme ortamına uygun şekilde dinamik hale getirildi.
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'depoevim-crm';
+const appId = 'depoevim-crm';
+
+// ============================================================================
+// 🧠 ÖNİZLEME İÇİN BELLEK-İÇİ (IN-MEMORY) SAKLAMA
+// ============================================================================
+// Artifact/önizleme ortamında localStorage desteklenmediği için "Beni Hatırla"
+// özelliği burada basit bir bellek-içi obje ile simüle edilmiştir. Canlı ortamda
+// (gerçek tarayıcıda) bu kısım tekrar localStorage ile değiştirilebilir.
+const mockSessionStore = {};
 // ============================================================================
 
 // --- YARDIMCI FONKSİYONLAR ---
@@ -76,42 +80,6 @@ const normalizeStr = (str) => {
         .replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's')
         .replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ç/g, 'c');
 };
-
-// YENİ EKLENEN: Depolama / lojistik işine özel günlük motivasyon sözleri.
-// Her gün, yılın gününe göre farklı bir söz gösterilir (döngüsel).
-const MOTIVASYON_SOZLERI = [
-    "Her dolu oda, birinin güvenle sakladığı bir hikâye. Bugün de o güveni büyütüyoruz.",
-    "Boş bir metrekare bile fırsattır; bugün onu değere dönüştür.",
-    "Düzenli bir depo, huzurlu bir zihin demektir. Düzeni sen kuruyorsun.",
-    "Bugün attığın küçük adım, ay sonundaki büyük tahsilatın temelidir.",
-    "Müşterinin eşyası emanet, emanete sahip çıkmak en büyük itibardır.",
-    "Her tahsilat bir söz, her söz bir güven. Bugün güveni pekiştir.",
-    "Depoyu dolduran kutular değil, kurduğun sistemdir. Sistemine güven.",
-    "Bir müşteriyle kurduğun iyi ilişki, on yeni müşteriden değerlidir.",
-    "Bugün geciken bir ödemeyi kibarca hatırlatmak, yarının sorununu bugünden çözmektir.",
-    "Kapasiteni değil, hizmet kaliteni büyüt; dolan raflar onu takip eder.",
-    "En iyi depo, en dolu depo değil; en iyi yönetilen depodur.",
-    "Küçük detaylar (mühür, tarih, fotoğraf) büyük güven inşa eder.",
-    "Bugün bir odayı daha kiraladıysan, birine 'merak etme' demişsindir.",
-    "Rakamlar yalan söylemez; her gün cariyi kontrol et, kontrolü elinde tut.",
-    "Zorlu bir müşteri, çözüldüğünde en sadık müşterin olur. Sabırla yaklaş.",
-    "Temiz ve düzenli bir depo, sözleşmeden daha güçlü bir reklamdır.",
-    "Bugün kaydını eksiksiz tut; yarın seni geçmişteki dikkatin kurtarır.",
-    "Her sabah yeni bir metrekare, yeni bir fırsat demek. Fırsatı değerlendir.",
-    "İşini büyüten şey mekân değil, verdiğin sözün arkasında durmandır.",
-    "Bir kutu taşımak kolay, güven taşımak ustalık ister. Sen ustasın.",
-    "Bugün gülümseyerek karşıladığın müşteri, yarın seni başkasına anlatır.",
-    "Doluluk oranın bir sayı, memnuniyet oranın ise geleceğindir.",
-    "Ertelediğin tahsilat büyür; bugün hallettiğin iş huzur getirir.",
-    "Her yıldönümü zammı, emeğinin karşılığını almanın hakkıdır. Takip et.",
-    "İyi bir depocu fırtınada değil, düzenli günlerde hazırlığını yapar.",
-    "Bugün bir müşterinin yükünü hafiflettin; bu, işten fazlasıdır.",
-    "Boş odaları değil, dolacak potansiyeli gör. Bardağın dolu tarafına bak.",
-    "Kaliteli hizmet pahalı değildir; kalitesiz hizmet çok daha pahalıya patlar.",
-    "Bugünün düzeni, yarının büyümesidir. Her şeyi yerli yerine koy.",
-    "Sen sadece eşya saklamıyorsun; insanlara zaman ve gönül rahatlığı satıyorsun.",
-    "Bir günün bereketi, o güne nasıl başladığınla ilgilidir. Hadi başlayalım!"
-];
 
 // Mini grafik bileşeni
 // ============================================================================
@@ -146,80 +114,6 @@ const uploadImageToServer = async (file) => {
         reader.readAsDataURL(file);
     });
 };
-
-// ============================================================================
-// 🆕 YENİ EKLENEN: FOTOĞRAF / VİDEO EKLEME BİLEŞENİ (Şimdi Çek / Galeriden Seç / Dosyadan Seç)
-// ============================================================================
-// Mevcut hiçbir kod değiştirilmedi; bu tamamen ek (eklenti) bir bileşendir.
-// Cihaz iOS mu Android mi otomatik algılanır, "Şimdi Çek" butonu buna göre
-// doğrudan cihazın kamerasını açar. "Galeriden Seç" fotoğraf/video kütüphanesini,
-// "Dosyadan Seç" ise cihazın dosya yöneticisini (Dosyalar/Files) açar.
-const isIOSCihaz = () => typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-const isAndroidCihaz = () => typeof navigator !== 'undefined' && /Android/.test(navigator.userAgent);
-
-// value: mevcut seçili görsel/video url'i (önizleme için)
-// onSelect: (url) => void — dosya yüklendiğinde çağrılır
-// compact: küçük modallarda (2 sütunlu grid) daha dar görünüm için
-const MediaEkleAlani = ({ value, onSelect, compact }) => {
-    const cameraRef = React.useRef(null);
-    const galleryRef = React.useRef(null);
-    const fileRef = React.useRef(null);
-    const [isUploadingMedia, setIsUploadingMedia] = useState(false);
-
-    const handlePicked = async (e) => {
-        const file = e.target.files[0];
-        e.target.value = ''; // aynı dosyanın tekrar seçilebilmesi için sıfırla
-        if (!file) return;
-        setIsUploadingMedia(true);
-        try {
-            const url = await uploadImageToServer(file);
-            onSelect(url, file.type && file.type.startsWith('video/'));
-        } finally {
-            setIsUploadingMedia(false);
-        }
-    };
-
-    const isVideoValue = typeof value === 'string' && (value.startsWith('data:video') || /\.(mp4|mov|webm)(\?|$)/i.test(value));
-
-    return (
-        <div className="flex flex-col gap-2 w-full">
-            {value ? (
-                <div className="flex flex-col items-center gap-2 border-2 border-dashed border-[#1bc5bd] bg-[#1bc5bd]/5 rounded-xl p-3">
-                    {isVideoValue ? (
-                        <video src={value} controls className={compact ? "h-16 rounded" : "h-24 rounded"} />
-                    ) : (
-                        <img src={value} alt="Önizleme" className={compact ? "h-16 w-16 object-cover rounded" : "h-24 w-24 object-cover rounded"} />
-                    )}
-                    <span className="text-[10px] font-bold text-[#1bc5bd] flex items-center gap-1"><Check size={12}/> Eklendi — değiştirmek için aşağıdan yeniden seçin</span>
-                </div>
-            ) : null}
-
-            <div className={`grid grid-cols-3 gap-1.5`}>
-                <button type="button" disabled={isUploadingMedia} onClick={() => cameraRef.current && cameraRef.current.click()} className="flex flex-col items-center justify-center gap-1 bg-slate-50 hover:bg-slate-100 border border-gray-200 rounded-lg py-2.5 px-1 transition-colors disabled:opacity-50">
-                    <Upload size={16} className="text-indigo-600" />
-                    <span className="text-[9px] font-bold text-gray-600 leading-tight text-center">Şimdi Çek</span>
-                </button>
-                <button type="button" disabled={isUploadingMedia} onClick={() => galleryRef.current && galleryRef.current.click()} className="flex flex-col items-center justify-center gap-1 bg-slate-50 hover:bg-slate-100 border border-gray-200 rounded-lg py-2.5 px-1 transition-colors disabled:opacity-50">
-                    <FolderOpen size={16} className="text-indigo-600" />
-                    <span className="text-[9px] font-bold text-gray-600 leading-tight text-center">Galeriden Seç</span>
-                </button>
-                <button type="button" disabled={isUploadingMedia} onClick={() => fileRef.current && fileRef.current.click()} className="flex flex-col items-center justify-center gap-1 bg-slate-50 hover:bg-slate-100 border border-gray-200 rounded-lg py-2.5 px-1 transition-colors disabled:opacity-50">
-                    <FileTextIcon size={16} className="text-indigo-600" />
-                    <span className="text-[9px] font-bold text-gray-600 leading-tight text-center">Dosyadan Seç</span>
-                </button>
-            </div>
-            {isUploadingMedia && <span className="text-[10px] text-gray-400 text-center">Yükleniyor...</span>}
-
-            {/* Şimdi Çek: kamerayı doğrudan açar (iOS ve Android'de ortak çalışır) */}
-            <input ref={cameraRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handlePicked} />
-            {/* Galeriden Seç: fotoğraf/video kütüphanesini açar */}
-            <input ref={galleryRef} type="file" accept="image/*,video/*" className="hidden" onChange={handlePicked} />
-            {/* Dosyadan Seç: cihazın dosya yöneticisini (iOS'ta "Dosyalar", Android'de dosya seçici) açar */}
-            <input ref={fileRef} type="file" accept="image/*,video/*,application/pdf" className="hidden" onChange={handlePicked} />
-        </div>
-    );
-};
-// ============================================================================
 
 // Mini grafik bileşeni
 const Sparkline = ({ data, color }) => {
@@ -344,7 +238,7 @@ export default function App() {
   // Tüm cari borç ve oda borçlandırma hesapları (getCustomerLedger) her render'da bugünün tarihine göre
   // yeniden hesaplanır. Bu tick her dakika artarak bileşeni periyodik yeniden render eder; böylece
   // gün/ay değişimleri ve yeni borçlandırmalar herhangi bir butona basmadan otomatik güncel kalır.
-  const [, setAutoRefreshTick] = useState(0);
+  const [autoRefreshTick, setAutoRefreshTick] = useState(0);
   useEffect(() => {
       const interval = setInterval(() => {
           setAutoRefreshTick(t => t + 1);
@@ -431,7 +325,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
       // YENİ EKLENEN: ROL İZİNLERİ FİREBASE DİNLEYİCİSİ (kaydedilen yetkiler geri yüklenir)
       const unsubUserRoles = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'userRoles'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setUserRoles(fetchedData); }, (error) => console.error("Rol Çekme Hatası:", error));
-
+      
 // 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
       const unsubSettings = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'settings'), (snapshot) => {
           snapshot.docs.forEach(doc => {
@@ -446,15 +340,9 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           setBulkUploadHistory(fetchedData);
       }, (error) => console.error("Toplu Yükleme Hatası:", error));
 
-      // YENİ EKLENEN: MÜŞTERİ EXCEL AKTARIM GEÇMİŞİ FİREBASE DİNLEYİCİSİ
-      const unsubCustomerImportHistory = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customerImportHistory'), (snapshot) => {
-          const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.timestamp - a.timestamp);
-          setCustomerImportHistory(fetchedData);
-      }, (error) => console.error("Müşteri Aktarım Geçmişi Hatası:", error));
-
-      return () => {
-          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments();
-          unsubSettings(); unsubBulkUploadHistory(); unsubCustomerImportHistory(); unsubUserRoles();
+      return () => { 
+          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); 
+          unsubSettings(); unsubBulkUploadHistory(); unsubUserRoles();
       };
   }, [firebaseUser]);
   // ============================================================================
@@ -463,18 +351,18 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [rememberMe, setRememberMe] = useState(false); // YENİ EKLENDİ
-  const [isAuthenticated, setIsAuthenticated] = useState(false); // Canlı: giriş ekranı aktif
+  const [isAuthenticated, setIsAuthenticated] = useState(false); // EKLENDİ: eksikti, beyaz ekran hatasına sebep oluyordu
 
   // YENİ EKLENDİ: Sayfa yüklendiğinde beni hatırla verisi varsa otomatik giriş yap
   useEffect(() => {
-      const savedUser = localStorage.getItem('depoevim_saved_user');
+      const savedUser = mockSessionStore['depoevim_saved_user'];
       if (savedUser) {
           try {
               const userObj = JSON.parse(savedUser);
               setCurrentUserProfile({...userObj, oldPassword: '', newPassword: '', confirmPassword: ''});
               setIsAuthenticated(true);
           } catch (e) {
-              localStorage.removeItem('depoevim_saved_user');
+              delete mockSessionStore['depoevim_saved_user'];
           }
       }
   }, []);
@@ -514,8 +402,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           { id: 'page-panel-kullanicilari', label: 'Panel Kullanıcıları' },
           { id: 'page-kullanici-rolleri', label: 'Kullanıcı Rolleri' },
           { id: 'page-pdf-sozlesme', label: 'PDF & Sözleşme Ayarları' },
-          { id: 'page-tahsilat-oranlari', label: 'Tahsilat Oranları' },
-          { id: 'page-sistem-yedekleme', label: 'Sistem Yedekleme' }
+          { id: 'page-tahsilat-oranlari', label: 'Tahsilat Oranları' }
       ],
       actions: [
           { id: 'action-yeni-musteri', label: 'Yeni Müşteri Ekleme' },
@@ -577,11 +464,11 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       setUserRoles(userRoles.map(role => {
           if (role.id === roleId) {
               const currentPerms = role.permissions[type] || [];
-              const alreadyHasPerm = currentPerms.includes(permId);
-              const newPermsList = alreadyHasPerm
+              const hasPerm = currentPerms.includes(permId);
+              const newPermsList = hasPerm 
                   ? currentPerms.filter(p => p !== permId)
                   : [...currentPerms, permId];
-
+              
               return {
                   ...role,
                   permissions: { ...role.permissions, [type]: newPermsList }
@@ -600,6 +487,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'userRoles', String(role.id)), role, { merge: true });
           } catch (e) { console.error('Rol İzni Kaydetme Hatası:', e); alert('Kaydetme sırasında hata oluştu.'); return; }
       }
+      // Bu role sahip giriş yapmış kullanıcı varsa, aktif izinleri anında yenile
       alert(`"${role.name}" rolünün izinleri kaydedildi.`);
   };
 
@@ -617,7 +505,6 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   // --- MÜŞTERİ YÖNETİMİ STATE'LERİ ---
   const [openSubMenus, setOpenSubMenus] = useState({'musteri-listesi': true});
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
-  const [customerType, setCustomerType] = useState('bireysel');
   // YENİ EKLENEN: Türkiye'nin 81 ili (İl seçim kutusu için) — İstanbul listenin başında
   const turkiyeIlleri = [
       'İstanbul','Adana','Adıyaman','Afyonkarahisar','Ağrı','Amasya','Ankara','Antalya','Artvin','Aydın','Balıkesir',
@@ -630,6 +517,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       'Kırıkkale','Batman','Şırnak','Bartın','Ardahan','Iğdır','Yalova','Karabük','Kilis','Osmaniye','Düzce'
   ];
 
+  const [customerType, setCustomerType] = useState('bireysel'); 
+  
   const [newCustomer, setNewCustomer] = useState({
       name: '', tc: '', phone: '', altPhone: '', address: '', city: 'İstanbul', district: '', taxOffice: '', notes: '',
       hasProxy: false, proxyName: '', proxyTc: '', proxyPhone: '', proxyAltPhone: '', proxyAddress: '', proxyDocumentPhoto: null,
@@ -647,6 +536,9 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [archiveTab, setArchiveTab] = useState('faturalar');
   // YENİ EKLENEN: Oda Listesi kartındaki göz ikonu ile açılan oda fotoğrafı önizleme/yükleme penceresi
   const [roomPhotoViewer, setRoomPhotoViewer] = useState(null); // oda id'si
+  // YENİ EKLENEN: Oda detayından "Randevu Oluştur" modalı
+  const [roomAppointmentModal, setRoomAppointmentModal] = useState(false);
+  const [roomAppointmentData, setRoomAppointmentData] = useState({ date: new Date().toISOString().split('T')[0], time: '10:00 - 11:00', purpose: 'giris-cikis' });
   // YENİ EKLENEN: Depo (şube) ve blok kartlarında fotoğraf görüntüleme/yükleme penceresi
   const [entityPhotoViewer, setEntityPhotoViewer] = useState(null); // { type: 'warehouse' | 'block', id }
   const [isDeleteCustomerModalOpen, setIsDeleteCustomerModalOpen] = useState(false);
@@ -666,20 +558,25 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [newPaymentData, setNewPaymentData] = useState({ amount: '', date: new Date().toISOString().split('T')[0], note: '', isCreditCard: false, netAmount: '' });
 
   const [debtMonthFilter, setDebtMonthFilter] = useState('all');
-  // YENİ EKLENEN: Borç tutarı (TL aralığı) filtresi — mevcut "X Ay Gecikenler" filtresinin YANINA eklendi
-  const [debtAmountFilter, setDebtAmountFilter] = useState('all');
-  // YENİ EKLENEN: "Kaç aydır tahsilat yok / Yeni Eklenen" filtresi (mevcut ay-gecikme filtresiyle birlikte kullanılabilir)
-  const [debtPaymentFilter, setDebtPaymentFilter] = useState('all');
+  // YENİ EKLENEN: "Kaç aydır tahsilat yok / Yeni Eklenen" filtresi (varsayılan: yeni eklenen)
+  const [debtPaymentFilter, setDebtPaymentFilter] = useState('new');
   const [debtSearchTerm, setDebtSearchTerm] = useState('');
   const [ledgerFilterYear, setLedgerFilterYear] = useState(new Date().getFullYear().toString());
 
   // --- TAHSİLAT HAREKETLERİ STATE'LERİ ---
-  const [collectionFilter, setCollectionFilter] = useState('all');
+  const [collectionFilter, setCollectionFilter] = useState('recent'); // Varsayılan: Son gelenler (son 2 ay)
   const [collectionSearchTerm, setCollectionSearchTerm] = useState('');
   // YENİ EKLENEN: KDVsiz Cariler sayfası için arama state'i
   const [kdvsizSearchTerm, setKdvsizSearchTerm] = useState('');
   // YENİ EKLENEN: E-Fatura/IBAN geçiş bilgilendirme mesaj menüsü (cari profildeki müşteri id'si)
   const [kdvInfoMenuFor, setKdvInfoMenuFor] = useState(null);
+  // YENİ EKLENEN: Paraşüt'e fatura aktarıldıktan sonra çıkan bilgilendirme penceresi
+  const [eInvoiceStartedInfo, setEInvoiceStartedInfo] = useState(null);
+  // YENİ EKLENEN: "Faturayı Yükle" — Paraşüt'te kesilen faturayı elle müşterinin cari faturalarına yükleme
+  const [uploadInvoiceData, setUploadInvoiceData] = useState(null);
+  const [isUploadingInvoiceFile, setIsUploadingInvoiceFile] = useState(false);
+  // YENİ EKLENEN: "Faturayı Paylaş" — yüklenmiş faturayı müşteriye WhatsApp / Gmail / SMS ile paylaşma penceresi
+  const [shareInvoiceData, setShareInvoiceData] = useState(null);
 
   // --- SENESİ DOLAN ODALAR STATE'LERİ ---
   const [anniversaryMonth, setAnniversaryMonth] = useState((new Date().getMonth() + 1).toString());
@@ -695,11 +592,12 @@ const [firebaseUser, setFirebaseUser] = useState(null);
 
   // --- MESAJ GÖNDERİM STATE'İ ---
   const [messageModalData, setMessageModalData] = useState(null);
-  // YENİ EKLENEN: Müşteri Bilgilendirme (Müşteri No + IBAN) modalı için state
-  const [infoModalCustomer, setInfoModalCustomer] = useState(null);
 
   // --- RANDEVU VE TAKVİM STATE'LERİ ---
-  const [appointments, setAppointments] = useState([]);
+  const [appointments, setAppointments] = useState([
+      { id: 9001, customerType: 'registered', customerId: 'cust_1', customerName: 'AHMET YILMAZ', customerPhone: '5321112233', warehouseId: 1, date: new Date().toISOString().split('T')[0], time: '11:00 - 12:00', purpose: 'giris-cikis', createdBy: 'Sistem Yöneticisi' },
+      { id: 9002, customerType: 'unregistered', customerId: null, customerName: 'BURAK ÖZTÜRK', customerPhone: '5354445566', warehouseId: 2, date: new Date().toISOString().split('T')[0], time: '14:00 - 15:00', purpose: 'ziyaret', createdBy: 'Sistem Yöneticisi' }
+  ]); // NOT: Örnek/sahte randevu verileri — Firebase bağlıyken canlı veriyle değiştirilecektir.
   const [appointmentData, setAppointmentData] = useState({
     customerType: 'registered',
     customerId: '',
@@ -722,7 +620,9 @@ const [apptCustomerSearch, setApptCustomerSearch] = useState('');
   // --- ASKIDA KALAN TAHSİLATLAR STATE'LERİ ---
 
   // --- ASKIDA KALAN TAHSİLATLAR STATE'LERİ ---
-  const [pendingCollections, setPendingCollections] = useState([]);
+  const [pendingCollections, setPendingCollections] = useState([
+      { id: 8001, amount: 6600, date: new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0], note: 'Belirsiz Banka Tahsilatı: HAVALE GELEN - AÇIKLAMA YOK' }
+  ]); // NOT: Örnek/sahte askıda kalan tahsilat verisi
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignData, setAssignData] = useState({ paymentId: null, customerId: '' });
   const [pendingSearchTerm, setPendingSearchTerm] = useState('');
@@ -736,13 +636,6 @@ const [apptCustomerSearch, setApptCustomerSearch] = useState('');
   const [isSendingEInvoice, setIsSendingEInvoice] = useState(false);
   const [eInvoiceSuccess, setEInvoiceSuccess] = useState(false);
   const [eInvoiceError, setEInvoiceError] = useState(null);
-  // YENİ EKLENEN: Paraşüt'e fatura aktarıldıktan sonra çıkan bilgilendirme penceresi
-  const [eInvoiceStartedInfo, setEInvoiceStartedInfo] = useState(null);
-  // YENİ EKLENEN: "Faturayı Yükle" — Paraşüt'te kesilen faturayı elle müşterinin cari faturalarına yükleme
-  const [uploadInvoiceData, setUploadInvoiceData] = useState(null);
-  const [isUploadingInvoiceFile, setIsUploadingInvoiceFile] = useState(false);
-  // YENİ EKLENEN: "Faturayı Paylaş" — yüklenmiş faturayı müşteriye WhatsApp / Gmail / SMS ile paylaşma penceresi
-  const [shareInvoiceData, setShareInvoiceData] = useState(null);
 
   // --- YENİ EKLENEN: DEPO ÖDEMELERİ GÜNCELLEME STATE'LERİ ---
   const [isUpdateAllModalOpen, setIsUpdateAllModalOpen] = useState(false);
@@ -787,9 +680,11 @@ const handleLogin = (e) => {
           setCurrentUserProfile({...user, oldPassword: '', newPassword: '', confirmPassword: ''});
           setIsAuthenticated(true);
           setLoginError('');
+          // YENİ: Giriş anında güncel cari borçların yeniden hesaplanmasını tetikle
+          setAutoRefreshTick(t => t + 1);
           // YENİ EKLENDİ: Beni Hatırla işaretliyse tarayıcıya kaydet
           if (rememberMe) {
-              localStorage.setItem('depoevim_saved_user', JSON.stringify(user));
+              mockSessionStore['depoevim_saved_user'] = JSON.stringify(user);
           }
       } else {
           setLoginError('Kullanıcı adı veya şifre hatalı!');
@@ -800,7 +695,7 @@ const handleLogin = (e) => {
       setIsAuthenticated(false);
       setLoginData({ username: '', password: '' });
       setIsProfileDropdownOpen(false);
-      localStorage.removeItem('depoevim_saved_user'); // YENİ EKLENDİ: Çıkışta temizle
+      delete mockSessionStore['depoevim_saved_user']; // Çıkışta temizle
   };
 
 const handleAddSystemUser = async () => {
@@ -868,13 +763,30 @@ const handleSendEInvoice = async () => {
       const totalAmount = eInvoiceModalData.amount;
       const netAmount = (totalAmount / 1.20).toFixed(2);
 
+      // ÖNİZLEME MODU: Firebase/backend yokken Paraşüt aktarımını simüle et.
+      // Canlı ortamda aşağıdaki "if (!db)" bloğu kaldırılıp gerçek fetch çağrısı kullanılacaktır.
+      if (!db) {
+          setTimeout(() => {
+              setIsSendingEInvoice(false);
+              // Cariye e-fatura bilgisini işaretle (yerel state)
+              const simInvoiceNo = 'PRS-' + Math.floor(100000 + Math.random() * 900000);
+              setCustomers(prev => prev.map(c => c.id === customerToUpdate.id
+                  ? { ...c, payments: (c.payments || []).map(p => p.id === eInvoiceModalData.id ? { ...p, hasEInvoice: true, eInvoiceNo: simInvoiceNo } : p) }
+                  : c
+              ));
+              // Paraşüt'e aktarıldı bilgilendirme penceresini aç
+              setEInvoiceStartedInfo({ ...eInvoiceModalData, invoiceNo: simInvoiceNo });
+              setEInvoiceModalData(null);
+          }, 1800);
+          return;
+      }
+
       try {
           const response = await fetch('/api/parasut/create-invoice', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                   customerName: customerToUpdate.name,
-                  customerNo: customerToUpdate.customerNo,
                   taxNumber: customerToUpdate.tc,
                   address: customerToUpdate.address,
                   email: customerToUpdate.email,
@@ -891,7 +803,6 @@ const handleSendEInvoice = async () => {
           }
 
           setIsSendingEInvoice(false);
-          setEInvoiceSuccess(true);
 
           if (db && firebaseUser) {
               const updatedPayments = (customerToUpdate.payments || []).map(p =>
@@ -902,10 +813,9 @@ const handleSendEInvoice = async () => {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), { payments: updatedPayments }, { merge: true });
           }
 
-          // YENİ EKLENEN: Aktarım tamamlandı bilgilendirmesi (mevcut kısa "başarılı" bildiriminin YANI SIRA gösterilir)
+          // YENİ: Aktarım tamamlandı — Paraşüt bilgilendirme penceresini aç
           setEInvoiceStartedInfo({ ...eInvoiceModalData, invoiceNo: result.invoiceNo || `PRS-${result.invoiceId}` });
-
-          setTimeout(() => { setEInvoiceSuccess(false); setEInvoiceModalData(null); }, 3000);
+          setEInvoiceModalData(null);
       } catch (error) {
           console.error('E-Fatura oluşturma hatası:', error);
           setIsSendingEInvoice(false);
@@ -936,6 +846,9 @@ const handleSendEInvoice = async () => {
 
           if (db && firebaseUser) {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), { invoices: updatedInvoices }, { merge: true });
+          } else {
+              // Önizleme modu: yerel state güncelle
+              setCustomers(prev => prev.map(c => c.id === customerToUpdate.id ? { ...c, invoices: updatedInvoices } : c));
           }
       } catch (err) {
           console.error('Fatura Yükleme Hatası:', err);
@@ -956,33 +869,17 @@ const handleSendEInvoice = async () => {
       const encoded = encodeURIComponent(bodyText);
 
       if (platform === 'whatsapp') {
-          let rawPhone = String(customer.phone || '').replace(/\D/g, '');
-          if (rawPhone.startsWith('90')) rawPhone = rawPhone.slice(2);
-          if (rawPhone.startsWith('0')) rawPhone = rawPhone.slice(1);
-          window.open(`https://wa.me/90${rawPhone}?text=${encoded}`, '_blank');
+          window.open(`https://wa.me/90${customer.phone}?text=${encoded}`, '_blank');
       } else if (platform === 'gmail') {
           const subject = encodeURIComponent(`DepoEvim - Faturanız (${amountStr} TL)`);
           // Gmail web compose penceresini aç (fatura bağlantısı gövdede yer alır)
           window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${customer.email || ''}&su=${subject}&body=${encoded}`, '_blank');
       } else if (platform === 'sms') {
-          let rawPhone = String(customer.phone || '').replace(/\D/g, '');
-          if (rawPhone.startsWith('90')) rawPhone = rawPhone.slice(2);
-          if (rawPhone.startsWith('0')) rawPhone = rawPhone.slice(1);
           const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
           const separator = isIOS ? '&' : '?';
-          window.open(`sms:+90${rawPhone}${separator}body=${encoded}`, '_self');
+          window.open(`sms:+90${customer.phone}${separator}body=${encoded}`, '_self');
       }
       setShareInvoiceData(null);
-  };
-
-  // YENİ EKLENEN: Cari profildeki Faturalar sekmesinden fatura silme
-  const handleDeleteInvoiceFromArchive = async (customerId, invId) => {
-      const customerToUpdate = customers.find(c => c.id === customerId);
-      if (!customerToUpdate || !db || !firebaseUser) return;
-      const updatedInvoices = (customerToUpdate.invoices || []).filter(i => i.id !== invId);
-      try {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { invoices: updatedInvoices }, { merge: true });
-      } catch (e) { console.error("Fatura Silme Hatası:", e); }
   };
 
 const handleAssignPendingPayment = async () => {
@@ -1073,66 +970,9 @@ const handleSaveEditPending = async () => {
       setIsContractModalOpen(true);
   };
 
-  // YENİ EKLENEN: Sözleşme için oda dökümü.
-  // Odaları giriş tarihine göre gruplar; her grup için o gruptaki odaların
-  // KDV dahil aylık kira TOPLAMINI hesaplar. Farklı tarihlerde girilen odalar
-  // ayrı ayrı (kendi tarihiyle) listelenir.
-  const getContractRoomBreakdown = (roomList) => {
-      const groups = {};
-      (roomList || []).forEach(r => {
-          const d = r.entryDate || 'Belirtilmemiş';
-          if (!groups[d]) groups[d] = [];
-          groups[d].push(r);
-      });
-      return Object.keys(groups).sort().map(dateKey => {
-          const gr = groups[dateKey];
-          let total = 0;
-          gr.forEach(r => {
-              const base = Number(r.monthlyFee || 0);
-              const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
-              total += hasKdv ? base * 1.20 : base;
-          });
-          const dateStr = dateKey.includes('-') ? dateKey.split('-').reverse().join('.') : dateKey;
-          return { dateKey, dateStr, rooms: gr, total: Math.round(total) };
-      });
-  };
-
-  // YENİ EKLENEN: Oda dökümünün metin (PDF / {{ODA_DETAY}} placeholder) hali
-  const buildRoomDetailText = (roomList) => {
-      const groups = getContractRoomBreakdown(roomList);
-      if (groups.length === 0) return 'Oda bilgisi girilmemiş.';
-      return groups.map(g => {
-          const names = g.rooms.map(r => r.name).join(', ');
-          return `Giriş Tarihi: ${g.dateStr}\nOdalar: ${names}\nAylık Toplam Kira (KDV Dahil): ${g.total.toLocaleString('tr-TR')} TL`;
-      }).join('\n\n');
-  };
-
-  // YENİ EKLENEN: Her odayı ayrı satırda "Oda - Giriş Tarihi - KDV dahil aylık ücret" olarak döken YENİ ve EK
-  // bir placeholder ({{AYLIK_UCRET_DETAY}}). Mevcut {{AYLIK_UCRET}} (toplam sayı) ve {{ODA_DETAY}}
-  // (tarihe göre gruplanmış döküm) placeholder'ları DEĞİŞTİRİLMEDİ; bu yalnızca ek bir seçenektir.
-  const buildPerRoomFeeBreakdownText = (roomList) => {
-      const rl = roomList || [];
-      if (rl.length === 0) return 'Belirtilmemiş';
-      const lines = rl.map(r => {
-          const base = Number(r.monthlyFee || 0);
-          const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
-          const kdvInclFee = Math.round(hasKdv ? base * 1.20 : base);
-          const dateStr = r.entryDate ? new Date(r.entryDate).toLocaleDateString('tr-TR') : 'Belirtilmemiş';
-          return `${r.name} Odası - Giriş Tarihi: ${dateStr} - Aylık Ücret (KDV Dahil): ${kdvInclFee.toLocaleString('tr-TR')} TL`;
-      });
-      let total = 0;
-      rl.forEach(r => {
-          const base = Number(r.monthlyFee || 0);
-          const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
-          total += hasKdv ? base * 1.20 : base;
-      });
-      return lines.join('\n') + `\n\nToplam Aylık Kira (KDV Dahil): ${Math.round(total).toLocaleString('tr-TR')} TL`;
-  };
-
   const renderClauseWithData = (content) => {
       let text = content;
       const roomNames = contractRooms.map(r => r.name).join(', ') || 'Belirtilmemiş';
-      const entryDates = contractRooms.map(r => r.entryDate).join(', ') || 'Belirtilmemiş';
 
       let totalFee = 0;
       contractRooms.forEach(r => {
@@ -1140,6 +980,23 @@ const handleSaveEditPending = async () => {
           const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
           totalFee += hasKdv ? base * 1.20 : base;
       });
+
+      // YENİ EKLENEN: Her odayı ayrı satırda "Oda - Giriş Tarihi - KDV dahil aylık ücret" olarak dök.
+      // Farklı tarihlerde girilen odalar ayrı ayrı görünür; en sonda KDV dahil toplam yazılır.
+      const roomBreakdownLines = contractRooms.map(r => {
+          const base = Number(r.monthlyFee || 0);
+          const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
+          const kdvInclFee = Math.round(hasKdv ? base * 1.20 : base);
+          const dateStr = r.entryDate ? new Date(r.entryDate).toLocaleDateString('tr-TR') : 'Belirtilmemiş';
+          return `${r.name} Odası - Giriş Tarihi: ${dateStr} - Aylık Ücret (KDV Dahil): ${kdvInclFee.toLocaleString('tr-TR')} TL`;
+      });
+      const roomBreakdownText = roomBreakdownLines.length > 0
+          ? roomBreakdownLines.join('\n') + `\n\nToplam Aylık Kira (KDV Dahil): ${Math.round(totalFee).toLocaleString('tr-TR')} TL`
+          : 'Belirtilmemiş';
+      // Yalnızca giriş tarihlerinin listesi (GIRIS_TARIHI yer tutucusu için)
+      const entryDates = contractRooms.length > 0
+          ? contractRooms.map(r => `${r.name}: ${r.entryDate ? new Date(r.entryDate).toLocaleDateString('tr-TR') : 'Belirtilmemiş'}`).join(' | ')
+          : 'Belirtilmemiş';
 
       text = text.replace(/{{MUSTERI_AD}}/g, contractCustomer?.name || '');
       text = text.replace(/{{MUSTERI_TC}}/g, contractCustomer?.tc || 'Belirtilmemiş');
@@ -1149,10 +1006,8 @@ const handleSaveEditPending = async () => {
       text = text.replace(/{{ODA_NUMARASI}}/g, roomNames);
       text = text.replace(/{{MUSTERI_NUMARASI}}/g, contractCustomer?.customerNo || 'Belirtilmemiş');
       text = text.replace(/{{GIRIS_TARIHI}}/g, entryDates);
-      text = text.replace(/{{AYLIK_UCRET}}/g, totalFee > 0 ? totalFee : 'Belirtilmemiş');
-      text = text.replace(/{{ODA_DETAY}}/g, buildRoomDetailText(contractRooms));
-      // YENİ EKLENEN: Ek placeholder — oda oda (satır satır) KDV dahil ücret dökümü
-      text = text.replace(/{{AYLIK_UCRET_DETAY}}/g, buildPerRoomFeeBreakdownText(contractRooms));
+      // YENİ: Aylık ücret artık oda oda dökümlü (KDV dahil) + toplam olarak yazılır
+      text = text.replace(/{{AYLIK_UCRET}}/g, roomBreakdownText);
       text = text.replace(/{{BANKA_TAM_ADI}}/g, contractSettings.bankFullName);
       text = text.replace(/{{IBAN}}/g, contractSettings.iban);
       text = text.replace(/{{HESAP_SAHIBI}}/g, contractSettings.accountHolder);
@@ -1167,14 +1022,28 @@ const handleSaveEditPending = async () => {
       document.body.appendChild(iframe);
       
       const roomNames = contractRooms.map(r => r.name).join(', ') || 'Belirtilmemiş';
-      const entryDates = contractRooms.map(r => r.entryDate).join(', ') || 'Belirtilmemiş';
-      
+
       let totalFee = 0;
       contractRooms.forEach(r => {
           const base = Number(r.monthlyFee || 0);
           const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
           totalFee += hasKdv ? base * 1.20 : base;
       });
+
+      // YENİ EKLENEN: Her odayı ayrı satırda "Oda - Giriş Tarihi - KDV dahil aylık ücret" olarak dök (PDF/yazdırma)
+      const roomBreakdownLines = contractRooms.map(r => {
+          const base = Number(r.monthlyFee || 0);
+          const hasKdv = r.hasKdv !== undefined ? r.hasKdv : true;
+          const kdvInclFee = Math.round(hasKdv ? base * 1.20 : base);
+          const dateStr = r.entryDate ? new Date(r.entryDate).toLocaleDateString('tr-TR') : 'Belirtilmemiş';
+          return `${r.name} Odası - Giriş Tarihi: ${dateStr} - Aylık Ücret (KDV Dahil): ${kdvInclFee.toLocaleString('tr-TR')} TL`;
+      });
+      const roomBreakdownText = roomBreakdownLines.length > 0
+          ? roomBreakdownLines.join('\n') + `\n\nToplam Aylık Kira (KDV Dahil): ${Math.round(totalFee).toLocaleString('tr-TR')} TL`
+          : 'Belirtilmemiş';
+      const entryDates = contractRooms.length > 0
+          ? contractRooms.map(r => `${r.name}: ${r.entryDate ? new Date(r.entryDate).toLocaleDateString('tr-TR') : 'Belirtilmemiş'}`).join(' | ')
+          : 'Belirtilmemiş';
 
       const processedClauses = contractSettings.clauses.map(clause => {
           let text = clause.content;
@@ -1186,10 +1055,7 @@ const handleSaveEditPending = async () => {
           text = text.replace(/{{ODA_NUMARASI}}/g, roomNames);
           text = text.replace(/{{MUSTERI_NUMARASI}}/g, contractCustomer?.customerNo || 'Belirtilmemiş');
           text = text.replace(/{{GIRIS_TARIHI}}/g, entryDates);
-          text = text.replace(/{{AYLIK_UCRET}}/g, totalFee > 0 ? totalFee : 'Belirtilmemiş');
-          text = text.replace(/{{ODA_DETAY}}/g, buildRoomDetailText(contractRooms));
-          // YENİ EKLENEN: Ek placeholder — oda oda (satır satır) KDV dahil ücret dökümü
-          text = text.replace(/{{AYLIK_UCRET_DETAY}}/g, buildPerRoomFeeBreakdownText(contractRooms));
+          text = text.replace(/{{AYLIK_UCRET}}/g, roomBreakdownText);
           text = text.replace(/{{BANKA_TAM_ADI}}/g, contractSettings.bankFullName);
           text = text.replace(/{{IBAN}}/g, contractSettings.iban);
           text = text.replace(/{{HESAP_SAHIBI}}/g, contractSettings.accountHolder);
@@ -1224,20 +1090,6 @@ const handleSaveEditPending = async () => {
               </div>
           `;
       }).join('');
-
-      // YENİ EKLENEN: Odaların giriş tarihine göre gruplanmış, KDV dahil aylık kira dökümü (otomatik bölüm)
-      const roomBreakdown = getContractRoomBreakdown(contractRooms);
-      const roomDetailHtml = roomBreakdown.length > 0 ? `
-          <div class="clause">
-              <h3>Depolanan Odalar ve Aylık Kira Bedelleri (KDV Dahil)</h3>
-              ${roomBreakdown.map(g => `
-                  <p><strong>Giriş Tarihi:</strong> ${g.dateStr}</p>
-                  <p><strong>Oda/Odalar:</strong> ${g.rooms.map(r => r.name).join(', ')} (${g.rooms.length} adet)</p>
-                  <p><strong>Aylık Toplam Kira (KDV Dahil):</strong> ${g.total.toLocaleString('tr-TR')} TL</p>
-                  <br/>
-              `).join('')}
-          </div>
-      ` : '';
 
       // Footer: tfoot tekniği ile her sayfada tekrar eder
 const footerHtml = `
@@ -1373,7 +1225,6 @@ tfoot.repeat-footer > tr > td {
                               <div class="page-box">
                                   <div class="doc-title">Eşya Depolama Sözleşmesi</div>
                                   ${clausesHtml}
-                                  ${roomDetailHtml}
                               </div>
                           </td>
                       </tr>
@@ -1548,12 +1399,13 @@ setTimeout(() => {
 
   // YENİ EKLENEN: Üç DepoEvim bilgilendirmesinin başlık ve içeriğini oda bilgilerine göre üretir.
   // type: 'self' (müşteri kendi alma) | 'exit' (başka nakliyeci ile çıkış) | 'entry' (başka nakliyeci ile giriş)
-  // NOT: Bu, mevcut "handleCustomerSelfPickupNotification" / Tutanak menüsünün YERİNE geçmez;
-  // "Müşteri Bilgilendirme" adıyla AYRI, ek bir giriş noktası olarak eklenmiştir.
   const getInfoNotifyContent = (type) => {
       const room = selectedRoomDetail;
+      const customer = customers.find(c => c.name === room?.customerName);
+      const custName = customer?.name || room?.customerName || '.....................';
       const roomName = room?.name || '..........';
       const m3 = room?.m3 ? `${room.m3} m³` : '';
+      const companyName = contractSettings.accountHolder || 'Sembol Nakliyat Depoculuk Tic. Ltd. Şti';
 
       // Kalıcı ambalaj ücreti odanın m³'üne göre
       let ambalaj = '';
@@ -1623,7 +1475,7 @@ setTimeout(() => {
       const today = new Date().toLocaleDateString('tr-TR');
       const companyName = contractSettings.accountHolder || 'Sembol Nakliyat Depoculuk Tic. Ltd. Şti';
       const c = getInfoNotifyContent(type);
-      const rulesHtml = c.rules.map((r) => `<li>${r}</li>`).join('');
+      const rulesHtml = c.rules.map((r, i) => `<li>${r}</li>`).join('');
 
       return `<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><title>DepoEvim Bilgilendirme</title><style>
         @page { size:A4; margin:18mm; } * { box-sizing:border-box; font-family:'Segoe UI',Arial,sans-serif; }
@@ -2329,14 +2181,20 @@ setTimeout(() => {
       const { customer, balance, type } = messageModalData;
       const text = generateMessageText(customer, balance, type);
       const encodedText = encodeURIComponent(text);
-      
+
+      // YENİ EKLENEN: Telefon numarasını normalize et — boşluk/tire/parantez temizlenir,
+      // baştaki 0 veya 90 kaldırılır, böylece WhatsApp doğru numaraya (90XXXXXXXXXX) yönlenir.
+      let rawPhone = String(customer.phone || '').replace(/\D/g, '');
+      if (rawPhone.startsWith('90')) rawPhone = rawPhone.slice(2);
+      if (rawPhone.startsWith('0')) rawPhone = rawPhone.slice(1);
+
       if (platform === 'whatsapp') {
-          window.open(`https://wa.me/90${customer.phone}?text=${encodedText}`, '_blank');
+          window.open(`https://wa.me/90${rawPhone}?text=${encodedText}`, '_blank');
       } else if (platform === 'sms') {
           // iOS ve Android cihazlar için SMS ayırıcı farklılıkları
           const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
           const separator = isIOS ? '&' : '?';
-          window.open(`sms:+90${customer.phone}${separator}body=${encodedText}`, '_self');
+          window.open(`sms:+90${rawPhone}${separator}body=${encodedText}`, '_self');
       }
       setMessageModalData(null);
   };
@@ -2365,11 +2223,29 @@ const handleAddExtraDocument = async (e, customerId) => {
 
   const handleDeleteExtraDocument = async (customerId, docId) => {
       const customerToUpdate = customers.find(c => c.id === customerId);
-      if (!customerToUpdate || !db || !firebaseUser) return;
+      if (!customerToUpdate) return;
       const updatedDocs = (customerToUpdate.extraDocuments || []).filter(d => d.id !== docId);
-      try {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { extraDocuments: updatedDocs }, { merge: true });
-      } catch (err) { console.error(err); }
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { extraDocuments: updatedDocs }, { merge: true });
+          } catch (err) { console.error(err); }
+      } else {
+          setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, extraDocuments: updatedDocs } : c));
+      }
+  };
+
+  // YENİ EKLENEN: Cari profildeki Faturalar sekmesinden fatura silme (önizleme + canlı)
+  const handleDeleteInvoiceFromArchive = async (customerId, invId) => {
+      const customerToUpdate = customers.find(c => c.id === customerId);
+      if (!customerToUpdate) return;
+      const updatedInvoices = (customerToUpdate.invoices || []).filter(i => i.id !== invId);
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { invoices: updatedInvoices }, { merge: true });
+          } catch (e) { console.error("Fatura Silme Hatası:", e); }
+      } else {
+          setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, invoices: updatedInvoices } : c));
+      }
   };
 
   // YENİ EKLENEN: Bir müşterinin tüm oda fotoğraflarını (giriş görseli + giriş/çıkış arşivi) toplar
@@ -2385,10 +2261,10 @@ const handleAddExtraDocument = async (e, customerId) => {
       return photos;
   };
 
-  // Oda fotoğrafını odadan kaldır (Firestore)
+  // Oda fotoğrafını odadan kaldır (önizleme + canlı)
   const handleDeleteRoomPhoto = async (photo) => {
       const room = rooms.find(r => r.id === photo.roomId);
-      if (!room || !db || !firebaseUser) return;
+      if (!room) return;
       let update = {};
       if (photo.kind === 'entryPhoto') {
           update = { entryPhoto: null };
@@ -2396,38 +2272,48 @@ const handleAddExtraDocument = async (e, customerId) => {
           const newHist = (room.entryExitHistory || []).map(h => h.id === photo.histId ? { ...h, [photo.field]: null } : h);
           update = { entryExitHistory: newHist };
       }
-      try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(room.id)), update, { merge: true }); } catch(e){ console.error(e); }
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(room.id)), update, { merge: true }); } catch(e){ console.error(e); }
+      } else {
+          setRooms(prev => prev.map(r => r.id === room.id ? { ...r, ...update } : r));
+      }
   };
 
-  // YENİ EKLENEN: Oda Listesi kartındaki oda fotoğrafını (roomListPhoto) ekle/değiştir
-  const handleSetRoomListPhoto = async (roomId, file) => {
-      if (!file || !db || !firebaseUser) return;
-      try {
-          const url = await uploadImageToServer(file);
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomId)), { roomListPhoto: url }, { merge: true });
-      } catch (e) { console.error('Oda Fotoğrafı Yükleme Hatası:', e); }
-  };
-  const handleRemoveRoomListPhoto = async (roomId) => {
-      if (!db || !firebaseUser) return;
-      try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomId)), { roomListPhoto: null }, { merge: true }); } catch(e){ console.error(e); }
-  };
-
-  // YENİ EKLENEN: Depo (şube) / blok kartı fotoğrafını (listPhoto) ekle-değiştir / sil
-  const handleSetEntityPhoto = async (type, id, file) => {
-      if (!file || !db || !firebaseUser) return;
-      const coll = type === 'warehouse' ? 'warehouses' : 'blocks';
-      try {
-          const url = await uploadImageToServer(file);
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', coll, String(id)), { listPhoto: url }, { merge: true });
-      } catch (e) { console.error('Fotoğraf Yükleme Hatası:', e); }
-  };
-  const handleRemoveEntityPhoto = async (type, id) => {
-      if (!db || !firebaseUser) return;
-      const coll = type === 'warehouse' ? 'warehouses' : 'blocks';
-      try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', coll, String(id)), { listPhoto: null }, { merge: true }); } catch(e){ console.error(e); }
-  };
-
-  const [customers, setCustomers] = useState([]);
+  const [customers, setCustomers] = useState([
+      {
+          id: 'cust_1', customerNo: '10234', name: 'AHMET YILMAZ', tc: '12345678901', phone: '5321112233', altPhone: '',
+          address: 'Bahçelievler Mah. Gül Sk. No:14 Pendik/İstanbul', notes: 'Uzun süreli kiracı, düzenli ödeme yapar.',
+          hasProxy: false, type: 'bireysel', createdAt: '10.03.2025', createdBy: 'Sistem Yöneticisi',
+          invoices: [], documentPhoto: null, documentPhotoFront: null, documentPhotoBack: null,
+          payments: [
+              { id: 501, amount: 7920, date: '2026-05-11', note: 'Mayıs 2026 Kirası' },
+              { id: 502, amount: 7920, date: '2026-06-11', note: 'Haziran 2026 Kirası' }
+          ],
+          extraDebts: [], ledgerOverrides: []
+      },
+      {
+          id: 'cust_2', customerNo: '55621', name: 'ELİF KAYA', tc: '23456789012', phone: '5439998877', altPhone: '05052223344',
+          address: 'Kartal Sanayi Sitesi B Blok No:7 Kartal/İstanbul', notes: '',
+          hasProxy: true, proxyName: 'MURAT KAYA', proxyTc: '34567890123', proxyPhone: '5462223311', proxyAltPhone: '', proxyAddress: 'Aynı adres', proxyDocumentPhoto: null,
+          type: 'bireysel', createdAt: '01.06.2024', createdBy: 'Sistem Yöneticisi',
+          invoices: [], documentPhoto: null, documentPhotoFront: null, documentPhotoBack: null,
+          payments: [
+              { id: 601, amount: 9840, date: '2026-04-01', note: 'Nisan 2026 Kirası' }
+          ],
+          extraDebts: [
+              { id: 602, type: 'manual_debt', date: '2026-06-15', amount: 200, hasKdv: false, desc: 'Mühür Yenileme Ücreti' }
+          ],
+          ledgerOverrides: []
+      },
+      {
+          id: 'cust_3', customerNo: '99012', name: 'CANAN ŞAHİN', tc: '34567890123', phone: '5051239900', altPhone: '',
+          address: 'Sapanbağları Mah. Düzova Sk. No:9', notes: 'Depo çıkışı öncesi bilgilendirilecek.',
+          hasProxy: false, type: 'bireysel', createdAt: '15.01.2023', createdBy: 'Sistem Yöneticisi',
+          invoices: [], documentPhoto: null, documentPhotoFront: null, documentPhotoBack: null,
+          payments: [],
+          extraDebts: [], ledgerOverrides: []
+      }
+  ]); // NOT: Örnek/sahte müşteri verileri — Firebase bağlandığında canlı veriyle senkronize olacaktır.
 
 const handleSaveCustomer = async () => {
       if (!newCustomer.name || !newCustomer.tc || !newCustomer.phone) return;
@@ -2646,7 +2532,7 @@ const handleManualAddPayment = async () => {
             alert(`HATA: Bu müşteriye ait aynı günde (${newPaymentData.date}) zaten bir tahsilat kaydı bulunmaktadır. Aynı güne başka tahsilat girişi yapılamaz!`);
             return;
         }
-        
+
         // YENİ EKLENEN: Kredi kartıyla tahsilat — cariye BRÜT (müşteriden alınan) tutar işlenir,
         // net (kesintili) tutar rapor için ayrıca saklanır; açıklamaya "Kredi Kartıyla Ödeme" eklenir.
         const isCC = newPaymentData.isCreditCard;
@@ -2655,7 +2541,7 @@ const handleManualAddPayment = async () => {
         const ccNote = isCC ? `Kredi Kartıyla Ödeme${newPaymentData.note ? ' - ' + newPaymentData.note : ''}` : newPaymentData.note;
 
         const newPayment = {
-            id: Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString()), // benzersiz tam sayı ID
+            id: Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString()),
             amount: gross,
             date: newPaymentData.date,
             note: ccNote,
@@ -2663,13 +2549,15 @@ const handleManualAddPayment = async () => {
             grossAmount: gross,
             netAmount: net
         };
-
+        
         if (db && firebaseUser) {
             try {
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
                     payments: [...existingPayments, newPayment]
                 }, { merge: true });
             } catch(e) { console.error("Manuel Ödeme Ekleme Hatası:", e); }
+        } else {
+            setCustomers(prev => prev.map(c => c.id === selectedCustomerId ? { ...c, payments: [...existingPayments, newPayment] } : c));
         }
     }
 
@@ -2745,15 +2633,19 @@ const handleAddInvoice = async () => {
       }
   };
 
-  // YENİ EKLENEN: Herhangi bir müşterinin carisine sözleşme/tutanak belgesi kaydeder (Firestore).
+  // YENİ EKLENEN: Herhangi bir müşterinin carisine sözleşme/tutanak belgesi kaydeder (önizleme + canlı).
   // record: { id, label, date, file, note }
   const saveContractToCustomer = async (customerId, record) => {
       const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
-      if (!customerToUpdate || !db || !firebaseUser) return;
+      if (!customerToUpdate) return;
       const updated = [...(customerToUpdate.contracts || []), record];
-      try {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { contracts: updated }, { merge: true });
-      } catch (e) { console.error("Sözleşme Kaydetme Hatası:", e); }
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { contracts: updated }, { merge: true });
+          } catch (e) { console.error("Sözleşme Kaydetme Hatası:", e); }
+      } else {
+          setCustomers(prev => prev.map(c => String(c.id) === String(customerId) ? { ...c, contracts: updated } : c));
+      }
   };
 
   // Cari profildeki "Sözleşmeler" modalından manuel belge ekleme
@@ -2766,11 +2658,15 @@ const handleAddInvoice = async () => {
 
   const handleDeleteContract = async (contractId) => {
       const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
-      if (!customerToUpdate || !db || !firebaseUser) return;
+      if (!customerToUpdate) return;
       const updated = (customerToUpdate.contracts || []).filter(c => c.id !== contractId);
-      try {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), { contracts: updated }, { merge: true });
-      } catch (e) { console.error("Sözleşme Silme Hatası:", e); }
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), { contracts: updated }, { merge: true });
+          } catch (e) { console.error("Sözleşme Silme Hatası:", e); }
+      } else {
+          setCustomers(prev => prev.map(c => c.id === selectedCustomerId ? { ...c, contracts: updated } : c));
+      }
   };
 
   // Bir dosya seçilip belirtilen müşterinin carisine sözleşme/tutanak olarak yüklenmesi (modallardaki "Cariye Yükle")
@@ -2796,7 +2692,10 @@ const handleAddInvoice = async () => {
   const [isDeleteWarehouseModalOpen, setIsDeleteWarehouseModalOpen] = useState(false);
   const [warehouseToDelete, setWarehouseToDelete] = useState(null);
 
-  const [warehouses, setWarehouses] = useState([]);
+  const [warehouses, setWarehouses] = useState([
+      { id: 1, name: 'PENDİK ŞUBE', m3: 0, address: 'Bahçelievler Mah. Yeni Sk. Ravza Apt. No:5 C Pendik/İstanbul', orderIndex: 0 },
+      { id: 2, name: 'KARTAL ŞUBE', m3: 0, address: 'Kartal Sanayi Sitesi No:12 Kartal/İstanbul', orderIndex: 1 }
+  ]); // NOT: Örnek/sahte depo (şube) verisi
 
   const handleAddWarehouse = async () => {
       if (!newDepoName) return;
@@ -2871,7 +2770,11 @@ const handleAddInvoice = async () => {
   const [isDeleteBlockModalOpen, setIsDeleteBlockModalOpen] = useState(false);
   const [blockToDelete, setBlockToDelete] = useState(null);
 
-  const [blocks, setBlocks] = useState([]);
+  const [blocks, setBlocks] = useState([
+      { id: 101, warehouseId: 1, name: 'A BLOK', m3: 0, orderIndex: 0 },
+      { id: 102, warehouseId: 1, name: 'B BLOK', m3: 0, orderIndex: 1 },
+      { id: 201, warehouseId: 2, name: 'A BLOK', m3: 0, orderIndex: 0 }
+  ]); // NOT: Örnek/sahte blok verisi
 
   const handleAddBlock = async () => {
       if (!newBlockName || !selectedWarehouseId) return;
@@ -2962,7 +2865,14 @@ const handleAddInvoice = async () => {
   const [isDeleteRoomModalOpen, setIsDeleteRoomModalOpen] = useState(false);
   const [roomToDelete, setRoomToDelete] = useState(null);
 
-  const [rooms, setRooms] = useState([]);
+  const [rooms, setRooms] = useState([
+      { id: 1001, blockId: 101, name: 'A-101', customerName: 'AHMET YILMAZ', m3: 15, monthlyFee: '6600', hasKdv: true, entryDate: '2025-03-10', paymentDate: '2025-03-10', sealNo: 'MH-10234', broughtBy: 'kendisi', paidMonths: ['2026-4', '2026-5'], isReserved: false, orderIndex: 0 },
+      { id: 1002, blockId: 101, name: 'A-102', customerName: null, m3: 12, isReserved: false, paidMonths: [], orderIndex: 1 },
+      { id: 1003, blockId: 101, name: 'A-103', customerName: 'ELİF KAYA', m3: 22, monthlyFee: '8200', hasKdv: true, entryDate: '2024-06-01', paymentDate: '2024-06-01', sealNo: 'MH-55621', broughtBy: 'sembol', teamList: 'Mehmet Şen, Cemal Kaya', paidMonths: ['2026-3'], isReserved: false, orderIndex: 2 },
+      { id: 1004, blockId: 102, name: 'B-201', customerName: null, m3: 18, isReserved: true, reservedName: 'MEHMET DEMİR', reservedPhone: '5321234567', reserveExpiry: '20.07.2026', reserveExpiryTimestamp: Date.now() + 10 * 24 * 60 * 60 * 1000, paidMonths: [], orderIndex: 0 },
+      { id: 1005, blockId: 102, name: 'B-202', customerName: 'CANAN ŞAHİN', m3: 30, monthlyFee: '11500', hasKdv: true, entryDate: '2023-01-15', paymentDate: '2023-01-15', sealNo: 'MH-99012', broughtBy: 'kendisi', paidMonths: [], isReserved: false, orderIndex: 1 },
+      { id: 2001, blockId: 201, name: 'K-501', customerName: null, m3: 9, isReserved: false, paidMonths: [], orderIndex: 0 }
+  ]); // NOT: Örnek/sahte oda verisi — Firebase bağlandığında canlı depo verileriyle güncellenecektir.
 
   const handleAddRoom = async () => {
       if (!newRoomName || !selectedBlockId) return;
@@ -3048,13 +2958,6 @@ const handleAddInvoice = async () => {
 
   const [activeSizeFilter, setActiveSizeFilter] = useState(null);
   const [isSizeFilterDropdownOpen, setIsSizeFilterDropdownOpen] = useState(false);
-  // YENİ EKLENEN: "Depo Boyutu Bul" butonu artık Blok ve Oda Listesi'nden de açılabiliyor.
-  // Bu state, hangi depo/blokta arama yapıldığını tutar; null ise (Depo Listesi'nden açılınca)
-  // eskisi gibi TÜM depolarda arama yapılır — mevcut davranış hiç değişmedi.
-  const [sizeFilterScope, setSizeFilterScope] = useState(null); // null | { type: 'warehouse'|'block', id }
-  // YENİ EKLENEN: "Rezerve" butonu — Depo Boyutu Bul'un yanında, rezerve odaları listelemek için
-  const [isReserveFilterActive, setIsReserveFilterActive] = useState(false);
-  const [reserveFilterScope, setReserveFilterScope] = useState(null); // null | { type: 'warehouse'|'block', id }
   const sizeFilters = [
       { id: '1+0', label: '1+0 (0 - 12 m³)', min: 0, max: 12 },
       { id: '1+1', label: '1+1 (13 - 18 m³)', min: 13, max: 18 },
@@ -3065,6 +2968,8 @@ const handleAddInvoice = async () => {
 
   const [isEndRentModalOpen, setIsEndRentModalOpen] = useState(false);
   const [endRentData, setEndRentData] = useState({ exitDate: new Date().toISOString().split('T')[0], photo: null, carrierName: '', carrierVkn: '', carrierAuthorized: '' });
+  // YENİ EKLENEN: Çıkış modalında "Yükle" açılır menüsü
+  const [endRentUploadMenu, setEndRentUploadMenu] = useState(false);
   // --- İCRA SÜRECİ STATE'LERİ ---
   const [isLegalActionModalOpen, setIsLegalActionModalOpen] = useState(false);
   const [legalActionData, setLegalActionData] = useState({ reason: '', type: 'start' }); // 'start' veya 'stop'
@@ -3115,8 +3020,6 @@ const handleAddInvoice = async () => {
   const [increaseMode, setIncreaseMode] = useState('percentage');
   const [increasePercentage, setIncreasePercentage] = useState('');
   const [newRentAmount, setNewRentAmount] = useState('');
-  // YENİ EKLENEN: Zammın geçerli olacağı tarih (varsayılan: yıldönümü). Bu tarihten bugüne kadarki aylar yeni kiraya güncellenir.
-  const [increaseEffectiveDate, setIncreaseEffectiveDate] = useState('');
   
 const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
   const [pastIncreaseData, setPastIncreaseData] = useState({ date: new Date().toISOString().split('T')[0], amount: '', isKdvIncluded: true });
@@ -3134,12 +3037,8 @@ const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
   const [editRentData, setEditRentData] = useState({ customerName: '', entryDate: '', paymentDate: '', monthlyFee: '', hasKdv: true, sealNo: '', broughtBy: 'kendisi', teamList: '' });
 
   const [isTutanakDropdownOpen, setIsTutanakDropdownOpen] = useState(false);
-  // YENİ EKLENEN: "Bilgilendirme Gönder" — hangi bilgilendirme açık (type) + yazdır/paylaş (ayrı, ek giriş noktası)
+  // YENİ EKLENEN: "Bilgilendirme Gönder" — hangi bilgilendirme açık (type) + yazdır/paylaş/yükle
   const [infoNotifyModal, setInfoNotifyModal] = useState(null); // 'self' | 'exit' | 'entry'
-  const [isInfoNotifyDropdownOpen, setIsInfoNotifyDropdownOpen] = useState(false);
-  // YENİ EKLENEN: Oda detayından "Randevu Oluştur" modalı
-  const [roomAppointmentModal, setRoomAppointmentModal] = useState(false);
-  const [roomAppointmentData, setRoomAppointmentData] = useState({ date: new Date().toISOString().split('T')[0], time: '10:00 - 11:00', purpose: 'giris-cikis' });
 
   // --- HEDİYE AY STATE'LERİ ---
   const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
@@ -3152,6 +3051,110 @@ const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
   // --- GİRİŞ-ÇIKIŞ STATE'LERİ ---
   const [isEntryExitModalOpen, setIsEntryExitModalOpen] = useState(false);
   const [entryExitData, setEntryExitData] = useState({ newSealNo: '', protocolPhoto: null, finalPhoto: null });
+  // YENİ EKLENEN: Giriş-Çıkış modalında "Yükle" açılır seçenek menüsü (hangi alanın açık olduğu)
+  const [entryExitUploadMenu, setEntryExitUploadMenu] = useState(null); // 'protocol' | 'final' | null
+
+  // YENİ EKLENEN: Giriş-Çıkış Tutanağını müşteri bilgileriyle doldurup yazdırır (imza alanlı)
+  const handlePrintEntryExitProtocol = () => {
+      const room = rooms.find(r => r.id === selectedRoomId);
+      if (!room) return;
+      const customer = customers.find(c => c.name === room.customerName);
+      const today = new Date();
+      const dd = String(today.getDate()).padStart(2, '0');
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const yyyy = today.getFullYear();
+      const companyName = contractSettings.accountHolder || 'SEMBOL NAKLİYAT DEPOCULUK TİC. LTD. ŞTİ.';
+      const sealFee = Number(collectionRates.sealFee) || 200;
+
+      const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><title>DepoEvim Giriş-Çıkış Tutanağı</title>
+      <style>
+        @page { size: A4; margin: 20mm; }
+        * { box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
+        body { color: #1f2937; line-height: 1.7; }
+        .head { text-align:center; border-bottom: 3px solid #dc2626; padding-bottom: 14px; margin-bottom: 26px; }
+        .head .brand { font-size: 30px; font-weight: 900; letter-spacing: 1px; color:#111827; }
+        .head .brand span { color:#dc2626; }
+        .head .sub { font-size: 11px; letter-spacing: 3px; color:#6b7280; margin-top:2px; text-transform:uppercase; }
+        h1 { text-align:center; color:#dc2626; font-size: 22px; margin: 20px 0 26px; letter-spacing:0.5px; }
+        .body-text { font-size: 15px; font-weight:600; margin-bottom: 22px; }
+        .fill { display:inline-block; min-width: 220px; border-bottom: 1.5px solid #111827; font-weight:800; text-align:center; padding: 0 6px; }
+        .fill.small { min-width: 90px; }
+        .info { font-size: 15px; font-weight:800; margin: 6px 0; }
+        .warn { font-size: 13px; color:#374151; margin: 22px 0; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:10px 14px; }
+        .sign { margin-top: 50px; }
+        .sign-row { display:flex; justify-content:space-between; margin-top: 40px; }
+        .sign-box { width: 45%; text-align:center; }
+        .sign-line { border-top: 1.5px solid #111827; padding-top: 8px; font-weight:700; font-size: 13px; }
+        .foot { margin-top: 60px; text-align:center; font-size: 10px; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:12px; }
+        .foot b { color:#111827; }
+      </style></head><body>
+        <div class="head">
+          <div class="brand">Depo<span>evim</span></div>
+          <div class="sub">Evden Eve · Asansörlü Taşıma · Depolama</div>
+        </div>
+        <h1>DEPO GİRİŞ / ÇIKIŞ TUTANAĞI</h1>
+        <p class="body-text">
+          ${companyName} firmasının deposunda bulunan
+          <span class="fill">${customer?.name || room.customerName || '..............................'}</span> isimli
+          <span class="fill small">${room.name || '............'}</span> oda numaralı depoya giriş yapmış olup;
+          depolama alanında olabilecek tüm hasarların ve eksik eşyaların sorumluluğu şahsıma aittir.
+        </p>
+        <div class="info">GİRİŞ TARİHİ : ${dd} / ${mm} / ${yyyy}</div>
+        <div class="info">SAAT : &nbsp; GİRİŞ ....... / .......  &nbsp;&nbsp;–&nbsp;&nbsp; ÇIKIŞ ....... / .......</div>
+        <div class="info">YENİ MÜHÜR NO : <span class="fill small">${entryExitData.newSealNo || '............'}</span></div>
+        <div class="info">MÜŞTERİ NO : ${customer?.customerNo || '............'} &nbsp;&nbsp;|&nbsp;&nbsp; TEL : ${customer?.phone || '............'}</div>
+        <div class="warn">
+          <strong>MÜHÜR DEĞİŞTİRME ÜCRETİ ${sealFee.toLocaleString('tr-TR')} TL + KDV</strong> faturanıza eklenecektir. (1 saatlik ücrettir.)
+        </div>
+        <div class="sign">
+          <div class="sign-row">
+            <div class="sign-box"><div class="sign-line">Müşteri Ad Soyad / İmza</div></div>
+            <div class="sign-box"><div class="sign-line">Yetkili / İmza - Kaşe</div></div>
+          </div>
+        </div>
+        <div class="foot">
+          <b>${companyName}</b><br/>
+          Bahçelievler Mah. Yeni Sokak No:5 C Pendik / İstanbul<br/>
+          0(216) 390 89 99 · 0(554) 726 16 61 · www.sembolevdeneve.com
+        </div>
+        <script>window.onload = function(){ setTimeout(function(){ window.print(); }, 300); };</script>
+      </body></html>`;
+
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+      const doc = iframe.contentWindow.document;
+      doc.open();
+      doc.write(html);
+      doc.close();
+      setTimeout(() => { try { document.body.removeChild(iframe); } catch(e){} }, 60000);
+  };
+
+  // YENİ EKLENEN: Giriş-Çıkış Tutanağını WhatsApp ile müşteriye gönderir (hazır bilgilendirme metni)
+  const handleShareEntryExitProtocol = () => {
+      const room = rooms.find(r => r.id === selectedRoomId);
+      if (!room) return;
+      const customer = customers.find(c => c.name === room.customerName);
+      const today = new Date();
+      const dateStr = today.toLocaleDateString('tr-TR');
+      const sealFee = Number(collectionRates.sealFee) || 200;
+      const companyName = contractSettings.accountHolder || 'Sembol Nakliyat Depoculuk Tic. Ltd. Şti';
+
+      const text = `📄 *DEPOEVİM GİRİŞ / ÇIKIŞ TUTANAĞI*\n\nDeğerli müşterimiz *${customer?.name || room.customerName || ''}*,\n\nAşağıdaki bilgilerle deponuza giriş/çıkış işlemi kaydedilmiştir:\n\n• Oda No: *${room.name || '-'}*\n• Müşteri No: *${customer?.customerNo || '-'}*\n• İşlem Tarihi: *${dateStr}*\n• Yeni Mühür No: *${entryExitData.newSealNo || '-'}*\n\nDepolama alanında olabilecek tüm hasarların ve eksik eşyaların sorumluluğu tarafınıza aittir.\n\n⚠️ Mühür değiştirme ücreti *${sealFee.toLocaleString('tr-TR')} TL + KDV* faturanıza eklenecektir (1 saatlik ücrettir).\n\nTutanağın imzalı aslı için lütfen depo yetkilimizle iletişime geçiniz.\n\n${companyName}\nDepoEvim`;
+      const encoded = encodeURIComponent(text);
+
+      // Telefon numarasını normalize et (boşluk/tire temizle, baştaki 0/90 kaldır)
+      let rawPhone = String(customer?.phone || '').replace(/\D/g, '');
+      if (rawPhone.startsWith('90')) rawPhone = rawPhone.slice(2);
+      if (rawPhone.startsWith('0')) rawPhone = rawPhone.slice(1);
+
+      window.open(`https://wa.me/90${rawPhone}?text=${encoded}`, '_blank');
+  };
 
 const handleEntryExitSave = async () => {
       if (!entryExitData.newSealNo) return;
@@ -3300,8 +3303,6 @@ const handleCancelReservation = async () => {
   // --- YENİ EKLENEN: TOPLU MÜŞTERİ İÇE AKTARMA STATE'LERİ ---
   const [isCustomerUploading, setIsCustomerUploading] = useState(false);
   const [customerImportResult, setCustomerImportResult] = useState(null);
-  const [customerImportHistory, setCustomerImportHistory] = useState([]);
-  const [isCustomerImportHistoryOpen, setIsCustomerImportHistoryOpen] = useState(false);
 
   const handleBulkFileUpload = async (e) => {
       const file = e.target.files[0];
@@ -3740,24 +3741,7 @@ const reader = new FileReader();
                       }
                   }
 
-                  // YENİ EKLENEN: Aktarım işlemini Firebase'e kaydet (Tarihçe Raporu İçin)
-                  const importRecordId = Date.now().toString();
-                  const importRecord = {
-                      id: importRecordId,
-                      timestamp: Date.now(),
-                      dateStr: new Date().toLocaleString('tr-TR'),
-                      fileName: file.name || 'Bilinmeyen Dosya',
-                      importedCustomerCount,
-                      updatedRoomCount,
-                      addedCustomerIds: newCustomers.map(c => String(c.id)),
-                      updatedRoomNames: Object.keys(roomUpdates)
-                  };
-
-                  if (db && firebaseUser && (importedCustomerCount > 0 || updatedRoomCount > 0)) {
-                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerImportHistory', importRecordId), importRecord);
-                  }
-
-                  setCustomerImportResult(importRecord);
+                  setCustomerImportResult({ importedCustomerCount, updatedRoomCount });
 
               } catch (err) {
                   console.error(err);
@@ -3774,36 +3758,186 @@ const reader = new FileReader();
       e.target.value = '';
   };
 
-  const handleRevertCustomerImport = async (historyRecord) => {
-      if (!window.confirm("Bu müşteri aktarımını ve eklediği tüm kayıtları geri almak istediğinize emin misiniz?")) return;
+  // YENİ EKLENEN: Oda Kiralama ekranında, girilen bilgilerle müşteri sözleşmesini hazırlar.
+  // Mevcut cari sözleşme şablonunu (contractSettings.clauses) oda/ödeme bilgileriyle doldurur + ödeme bilgilendirmesi ekler.
+  const buildRentalContractHtml = () => {
+      const room = selectedRoomDetail;
+      const custName = rentData.customerName || '..............................';
+      const customer = customers.find(c => c.name === custName);
+      const entryD = rentData.entryDate ? new Date(rentData.entryDate) : new Date();
+      const dateStr = entryD.toLocaleDateString('tr-TR');
+      const base = Number(rentData.monthlyFee || 0);
+      const kdvIncl = Math.round(rentData.hasKdv ? base * 1.20 : base);
+      const companyName = contractSettings.accountHolder || 'Sembol Nakliyat Depoculuk Tic. Ltd. Şti';
+      const iban = contractSettings.iban || '';
+      const bank = contractSettings.bankFullName || '';
 
-      setIsCustomerUploading(true);
-      if (db && firebaseUser) {
-          try {
-              if (historyRecord.addedCustomerIds) {
-                  for (const cId of historyRecord.addedCustomerIds) {
-                      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cId)));
-                  }
-              }
+      // Sözleşme maddelerini (varsa) oda/müşteri bilgileriyle doldur
+      let clausesHtml = '';
+      (contractSettings.clauses || []).forEach(cl => {
+          let text = (cl.content || '')
+              .replace(/{{MUSTERI_AD}}/g, custName)
+              .replace(/{{MUSTERI_TC}}/g, customer?.tc || '............')
+              .replace(/{{MUSTERI_TELEFON}}/g, customer?.phone || '............')
+              .replace(/{{ODA_NUMARASI}}/g, room?.name || '............')
+              .replace(/{{MUSTERI_NUMARASI}}/g, customer?.customerNo || '............')
+              .replace(/{{GIRIS_TARIHI}}/g, dateStr)
+              .replace(/{{AYLIK_UCRET}}/g, `${kdvIncl.toLocaleString('tr-TR')} TL (KDV Dahil)`)
+              .replace(/{{BANKA_TAM_ADI}}/g, bank)
+              .replace(/{{IBAN}}/g, iban)
+              .replace(/{{HESAP_SAHIBI}}/g, companyName)
+              .replace(/{{IBAN_UYARI}}/g, contractSettings.ibanWarning || '');
+          clausesHtml += `<div class="clause"><h3>${cl.title || ''}</h3><p>${text.replace(/\n/g, '<br/>')}</p></div>`;
+      });
 
-              if (historyRecord.updatedRoomNames) {
-                  for (const rName of historyRecord.updatedRoomNames) {
-                      const roomToRevert = rooms.find(r => r.name === rName);
-                      if (roomToRevert) {
-                          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomToRevert.id)), {
-                              customerName: '', entryDate: '', paymentDate: '', monthlyFee: 0, hasKdv: false, paidMonths: [], rentedBy: ''
-                          }, { merge: true });
-                      }
-                  }
-              }
+      const styles = `
+        @page { size:A4; margin:18mm; }
+        * { box-sizing:border-box; font-family:'Segoe UI',Arial,sans-serif; }
+        body { color:#1f2937; line-height:1.6; font-size:12.5px; }
+        .head { text-align:center; border-bottom:3px solid #dc2626; padding-bottom:12px; margin-bottom:20px; }
+        .head .brand { font-size:26px; font-weight:900; color:#111827; } .head .brand span{ color:#dc2626; }
+        .head .sub { font-size:10px; letter-spacing:3px; color:#6b7280; text-transform:uppercase; }
+        h1 { text-align:center; color:#dc2626; font-size:18px; margin:14px 0 20px; }
+        .box { border:1px solid #e5e7eb; border-radius:8px; padding:12px 16px; margin-bottom:16px; background:#f9fafb; }
+        .box .row { display:flex; justify-content:space-between; padding:3px 0; font-size:12.5px; }
+        .box .row b { color:#111827; }
+        .pay { border:1px solid #bfdbfe; background:#eff6ff; border-radius:8px; padding:12px 16px; margin-bottom:16px; }
+        .pay h3 { color:#1d4ed8; font-size:13px; margin:0 0 6px; }
+        .clause { margin-bottom:12px; } .clause h3 { font-size:13px; color:#111827; margin:0 0 3px; }
+        .clause p { margin:0; font-size:11.5px; color:#374151; }
+        .sign-row { display:flex; justify-content:space-between; margin-top:40px; }
+        .sign-box { width:45%; text-align:center; } .sign-line { border-top:1.5px solid #111827; padding-top:6px; font-weight:700; font-size:12px; }
+        .foot { margin-top:40px; text-align:center; font-size:9px; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:10px; }`;
 
-              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerImportHistory', String(historyRecord.id)));
-              if (customerImportResult?.id === historyRecord.id) {
-                  setCustomerImportResult(null);
-              }
-          } catch (e) { console.error("Müşteri Aktarımı Geri Alma Hatası:", e); }
-      }
-      setIsCustomerUploading(false);
+      return `<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><title>DepoEvim Kiralama Sözleşmesi</title><style>${styles}</style></head><body>
+        <div class="head"><div class="brand">Depo<span>evim</span></div><div class="sub">Evden Eve · Asansörlü Taşıma · Depolama</div></div>
+        <h1>DEPO KİRALAMA SÖZLEŞMESİ</h1>
+        <div class="box">
+          <div class="row"><span>Müşteri Adı Soyadı:</span><b>${custName}</b></div>
+          <div class="row"><span>Müşteri No:</span><b>${customer?.customerNo || '-'}</b></div>
+          <div class="row"><span>TC / VKN:</span><b>${customer?.tc || '-'}</b></div>
+          <div class="row"><span>Telefon:</span><b>${customer?.phone || '-'}</b></div>
+          <div class="row"><span>Oda No:</span><b>${room?.name || '-'}</b></div>
+          <div class="row"><span>Giriş Tarihi:</span><b>${dateStr}</b></div>
+          <div class="row"><span>Aylık Kira (KDV Dahil):</span><b>${kdvIncl.toLocaleString('tr-TR')} TL</b></div>
+          <div class="row"><span>Mühür No:</span><b>${rentData.sealNo || '-'}</b></div>
+        </div>
+        <div class="pay">
+          <h3>ÖDEME BİLGİLENDİRMESİ</h3>
+          <div style="font-size:12px">Aylık kira bedeliniz <b>${kdvIncl.toLocaleString('tr-TR')} TL (KDV Dahil)</b> olup, her ay <b>${dateStr.split('.')[0]}</b>'inde tahsil edilir.<br/>
+          Banka: <b>${bank}</b><br/>Hesap Sahibi: <b>${companyName}</b><br/>IBAN: <b>${iban}</b><br/>
+          <span style="color:#b91c1c">Ödeme açıklamasına <b>${customer?.customerNo || 'Müşteri No'}</b> numaranızı yazmanız rica olunur.</span></div>
+        </div>
+        ${clausesHtml}
+        <div class="sign-row">
+          <div class="sign-box"><div class="sign-line">Müşteri Ad Soyad / İmza</div></div>
+          <div class="sign-box"><div class="sign-line">${companyName} / Kaşe-İmza</div></div>
+        </div>
+        <div class="foot"><b>${companyName}</b><br/>Bahçelievler Mah. Yeni Sokak No:5 C Pendik / İstanbul · 0(216) 390 89 99 · www.sembolevdeneve.com</div>
+        <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
+      </body></html>`;
+  };
+
+  // YENİ EKLENEN: Oda detayındaki "Sözleşme İndir" — odanın GÜNCEL (en son zamlı) kirasıyla sözleşme üretir.
+  // Eski cari/oda kayıtlarındaki tutarları DEĞİŞTİRMEZ; yalnızca sözleşme çıktısında güncel kirayı gösterir.
+  const handlePrintRoomCurrentContract = () => {
+      const room = selectedRoomDetail;
+      if (!room) return;
+      const customer = customers.find(c => c.name === room.customerName);
+      const entryD = parseDateLocal(room.entryDate || '2026-01-01');
+      const dateStr = entryD.toLocaleDateString('tr-TR');
+      // Güncel kira = odanın en son geçerli kirası (monthlyFee; increaseHistory ile senkron)
+      const base = Number(room.monthlyFee || 0);
+      const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
+      const kdvIncl = Math.round(hasKdv ? base * 1.20 : base);
+      const companyName = contractSettings.accountHolder || 'Sembol Nakliyat Depoculuk Tic. Ltd. Şti';
+      const iban = contractSettings.iban || '';
+      const bank = contractSettings.bankFullName || '';
+
+      let clausesHtml = '';
+      (contractSettings.clauses || []).forEach(cl => {
+          let text = (cl.content || '')
+              .replace(/{{MUSTERI_AD}}/g, customer?.name || room.customerName || '')
+              .replace(/{{MUSTERI_TC}}/g, customer?.tc || '............')
+              .replace(/{{MUSTERI_TELEFON}}/g, customer?.phone || '............')
+              .replace(/{{ODA_NUMARASI}}/g, room.name || '............')
+              .replace(/{{MUSTERI_NUMARASI}}/g, customer?.customerNo || '............')
+              .replace(/{{GIRIS_TARIHI}}/g, dateStr)
+              .replace(/{{AYLIK_UCRET}}/g, `${kdvIncl.toLocaleString('tr-TR')} TL (KDV Dahil)`)
+              .replace(/{{BANKA_TAM_ADI}}/g, bank).replace(/{{IBAN}}/g, iban)
+              .replace(/{{HESAP_SAHIBI}}/g, companyName).replace(/{{IBAN_UYARI}}/g, contractSettings.ibanWarning || '');
+          clausesHtml += `<div class="clause"><h3>${cl.title || ''}</h3><p>${text.replace(/\n/g, '<br/>')}</p></div>`;
+      });
+
+      const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><title>DepoEvim Kiralama Sözleşmesi</title><style>
+        @page { size:A4; margin:18mm; } * { box-sizing:border-box; font-family:'Segoe UI',Arial,sans-serif; }
+        body { color:#1f2937; line-height:1.6; font-size:12.5px; }
+        .head { text-align:center; border-bottom:3px solid #dc2626; padding-bottom:12px; margin-bottom:20px; }
+        .head .brand { font-size:26px; font-weight:900; color:#111827; } .head .brand span{ color:#dc2626; }
+        .head .sub { font-size:10px; letter-spacing:3px; color:#6b7280; text-transform:uppercase; }
+        h1 { text-align:center; color:#dc2626; font-size:18px; margin:14px 0 20px; }
+        .box { border:1px solid #e5e7eb; border-radius:8px; padding:12px 16px; margin-bottom:16px; background:#f9fafb; }
+        .box .row { display:flex; justify-content:space-between; padding:3px 0; font-size:12.5px; } .box .row b { color:#111827; }
+        .pay { border:1px solid #bfdbfe; background:#eff6ff; border-radius:8px; padding:12px 16px; margin-bottom:16px; }
+        .pay h3 { color:#1d4ed8; font-size:13px; margin:0 0 6px; }
+        .clause { margin-bottom:12px; } .clause h3 { font-size:13px; color:#111827; margin:0 0 3px; } .clause p { margin:0; font-size:11.5px; color:#374151; }
+        .sign-row { display:flex; justify-content:space-between; margin-top:40px; } .sign-box { width:45%; text-align:center; } .sign-line { border-top:1.5px solid #111827; padding-top:6px; font-weight:700; font-size:12px; }
+        .foot { margin-top:40px; text-align:center; font-size:9px; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:10px; }</style></head><body>
+        <div class="head"><div class="brand">Depo<span>evim</span></div><div class="sub">Evden Eve · Asansörlü Taşıma · Depolama</div></div>
+        <h1>DEPO KİRALAMA SÖZLEŞMESİ</h1>
+        <div class="box">
+          <div class="row"><span>Müşteri Adı Soyadı:</span><b>${customer?.name || room.customerName || '-'}</b></div>
+          <div class="row"><span>Müşteri No:</span><b>${customer?.customerNo || '-'}</b></div>
+          <div class="row"><span>TC / VKN:</span><b>${customer?.tc || '-'}</b></div>
+          <div class="row"><span>Telefon:</span><b>${customer?.phone || '-'}</b></div>
+          <div class="row"><span>Oda No:</span><b>${room.name || '-'}</b></div>
+          <div class="row"><span>Giriş Tarihi:</span><b>${dateStr}</b></div>
+          <div class="row"><span>Güncel Aylık Kira (KDV Dahil):</span><b>${kdvIncl.toLocaleString('tr-TR')} TL</b></div>
+        </div>
+        <div class="pay"><h3>ÖDEME BİLGİLENDİRMESİ</h3>
+          <div style="font-size:12px">Güncel aylık kira bedeliniz <b>${kdvIncl.toLocaleString('tr-TR')} TL (KDV Dahil)</b>'dir.<br/>
+          Banka: <b>${bank}</b><br/>Hesap Sahibi: <b>${companyName}</b><br/>IBAN: <b>${iban}</b><br/>
+          <span style="color:#b91c1c">Ödeme açıklamasına <b>${customer?.customerNo || 'Müşteri No'}</b> numaranızı yazınız.</span></div>
+        </div>
+        ${clausesHtml}
+        <div class="sign-row"><div class="sign-box"><div class="sign-line">Müşteri Ad Soyad / İmza</div></div><div class="sign-box"><div class="sign-line">${companyName} / Kaşe-İmza</div></div></div>
+        <div class="foot"><b>${companyName}</b><br/>Bahçelievler Mah. Yeni Sokak No:5 C Pendik / İstanbul · 0(216) 390 89 99 · www.sembolevdeneve.com</div>
+        <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script></body></html>`;
+
+      const iframe = document.createElement('iframe');
+      iframe.style.position='fixed'; iframe.style.right='0'; iframe.style.bottom='0'; iframe.style.width='0'; iframe.style.height='0'; iframe.style.border='0';
+      document.body.appendChild(iframe);
+      const docu = iframe.contentWindow.document; docu.open(); docu.write(html); docu.close();
+      setTimeout(() => { try { document.body.removeChild(iframe); } catch(e){} }, 60000);
+  };
+
+  const handlePrintRentalContract = () => {
+      if (!rentData.customerName) { alert('Lütfen önce müşteri seçin.'); return; }
+      const html = buildRentalContractHtml();
+      const iframe = document.createElement('iframe');
+      iframe.style.position='fixed'; iframe.style.right='0'; iframe.style.bottom='0'; iframe.style.width='0'; iframe.style.height='0'; iframe.style.border='0';
+      document.body.appendChild(iframe);
+      const doc = iframe.contentWindow.document; doc.open(); doc.write(html); doc.close();
+      setTimeout(() => { try { document.body.removeChild(iframe); } catch(e){} }, 60000);
+  };
+
+  const handleShareRentalContract = () => {
+      const custName = rentData.customerName;
+      const customer = customers.find(c => c.name === custName);
+      if (!customer) { alert('Sözleşmeyi paylaşmak için kayıtlı bir müşteri seçili olmalı.'); return; }
+      const room = selectedRoomDetail;
+      const base = Number(rentData.monthlyFee || 0);
+      const kdvIncl = Math.round(rentData.hasKdv ? base * 1.20 : base);
+      const dateStr = (rentData.entryDate ? new Date(rentData.entryDate) : new Date()).toLocaleDateString('tr-TR');
+      const companyName = contractSettings.accountHolder || 'Sembol Nakliyat Depoculuk Tic. Ltd. Şti';
+      const iban = contractSettings.iban || '';
+      const bank = contractSettings.bankFullName || '';
+      const text = `📄 *DEPOEVİM KİRALAMA SÖZLEŞMESİ / ÖDEME BİLGİLENDİRMESİ*\n\nDeğerli müşterimiz *${custName}*,\n\n• Oda No: *${room?.name || '-'}*\n• Giriş Tarihi: *${dateStr}*\n• Aylık Kira (KDV Dahil): *${kdvIncl.toLocaleString('tr-TR')} TL*\n• Müşteri No: *${customer.customerNo || '-'}*\n\n💳 *Ödeme Bilgileri*\nBanka: ${bank}\nHesap Sahibi: ${companyName}\nIBAN: ${iban}\n\n⚠️ Ödeme açıklamasına mutlaka *${customer.customerNo || 'Müşteri No'}* numaranızı yazınız.\n\n${companyName}\nDepoEvim`;
+      const encoded = encodeURIComponent(text);
+      let rawPhone = String(customer.phone || '').replace(/\D/g, '');
+      if (rawPhone.startsWith('90')) rawPhone = rawPhone.slice(2);
+      if (rawPhone.startsWith('0')) rawPhone = rawPhone.slice(1);
+      window.open(`https://wa.me/90${rawPhone}?text=${encoded}`, '_blank');
   };
 
 const handleRentRoom = async () => {
@@ -3822,28 +3956,15 @@ const handleRentRoom = async () => {
           if (rentData.hasKdv) proratedDebtAmount = proratedDebtAmount * 1.20;
       }
 
-      // 2. Nakliye Bedeli Cari Hesaplaması
+      // 2. Nakliye bedeli kaldırıldı — artık cariye nakliye ücreti yansıtılmaz.
       let transportDebtAmount = 0;
-      if (rentData.broughtBy === 'sembol' && rentData.transportPrice) {
-          transportDebtAmount = Number(rentData.transportPrice);
-          if (rentData.transportHasKdv) {
-              transportDebtAmount = transportDebtAmount * 1.20;
-          }
-      }
 
       // 3. FİREBASE CARİ HESAP GÜNCELLEMESİ (Müşteri)
       const customerToUpdate = customers.find(c => c.name === rentData.customerName);
-      if (customerToUpdate && (transportDebtAmount > 0 || proratedDebtAmount > 0)) {
+      if (customerToUpdate && (proratedDebtAmount > 0)) {
           let existingDebts = customerToUpdate.extraDebts || [];
           let existingPayments = customerToUpdate.payments || []; 
           
-          if (transportDebtAmount > 0) {
-              const hasSameDayTransport = existingDebts.some(d => d.type === 'transport' && d.date === rentData.entryDate);
-              if (!hasSameDayTransport) {
-                  existingDebts = [...existingDebts, { id: Date.now() + 1, type: 'transport', date: rentData.entryDate, amount: transportDebtAmount, desc: 'Sembol Nakliyat Taşıma Bedeli' }];
-                  existingPayments = [...existingPayments, { id: Date.now() + 3, amount: transportDebtAmount, date: rentData.entryDate, note: 'Sembol Nakliyat Taşıma Tahsilatı (Otomatik)' }];
-              }
-          }
           if (proratedDebtAmount > 0) {
               existingDebts = [...existingDebts, { id: Date.now() + 2, type: 'prorated', date: rentData.entryDate, amount: proratedDebtAmount, desc: `Gün Farkı Bedeli (${dayDiff} Gün)` }];
           }
@@ -3919,6 +4040,8 @@ const handleGlobalPayment = async () => {
             try {
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(paymentId)), newPayment);
             } catch(e) { console.error("Askıda Ödeme Kayıt Hatası:", e); }
+        } else {
+            setPendingCollections(prev => [...prev, newPayment]);
         }
     } else {
         const customerId = globalPaymentData.customerId;
@@ -3935,6 +4058,8 @@ const handleGlobalPayment = async () => {
                         payments: [...existingPayments, newPayment]
                     }, { merge: true });
                 } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
+            } else {
+                setCustomers(prev => prev.map(c => String(c.id) === String(customerId) ? { ...c, payments: [...existingPayments, newPayment] } : c));
             }
         }
     }
@@ -3959,17 +4084,27 @@ const handleGlobalPayment = async () => {
   const handleSendPaymentToPending = async (customerId, paymentId) => {
       if (!window.confirm("Bu tahsilatı cariden kaldırıp Askıda Kalan Tahsilatlara göndermek istediğinize emin misiniz?")) return;
       const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
-      if (!customerToUpdate || !db || !firebaseUser) return;
+      if (!customerToUpdate) return;
       const payment = (customerToUpdate.payments || []).find(p => Number(p.id) === Number(paymentId));
       if (!payment) return;
+
+      const { id: _oldId, ...paymentRest } = payment;
+      const newPendingId = Date.now();
+      const updatedPayments = (customerToUpdate.payments || []).filter(p => Number(p.id) !== Number(paymentId));
+
+      // ÖNİZLEME MODU: db yoksa yerel state üzerinden aynı işlemi uygula
+      if (!db) {
+          setCustomers(prev => prev.map(c => String(c.id) === String(customerId) ? { ...c, payments: updatedPayments } : c));
+          setPendingCollections(prev => [...prev, { ...paymentRest, id: newPendingId, customerId, customerName: customerToUpdate.name, customerNo: customerToUpdate.customerNo }]);
+          return;
+      }
+
+      if (!firebaseUser) return;
       try {
           // 1. Cariden kaldır
-          const updatedPayments = (customerToUpdate.payments || []).filter(p => Number(p.id) !== Number(paymentId));
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { payments: updatedPayments }, { merge: true });
 
           // 2. Askıda Kalan Tahsilatlara (pendingCollections) yeni kayıt olarak ekle
-          const { id: _oldId, ...paymentRest } = payment;
-          const newPendingId = Date.now();
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(newPendingId)), { ...paymentRest, id: newPendingId });
       } catch(e) { console.error("Askıya Gönderme Hatası:", e); }
   };
@@ -3986,7 +4121,6 @@ const handleGlobalPayment = async () => {
           return;
       }
       if (!window.confirm(`${customerToUpdate.name} müşterisinin tüm KDV'siz odaları, BU AYDAN İTİBAREN ödediği tutar değişmeden KDV DAHİL (faturalı) borçlandırılacak. Geçmiş aylar olduğu gibi kalır. Onaylıyor musunuz?`)) return;
-      if (!db || !firebaseUser) return;
 
       // Geçiş anahtarı: bu ayın yıl-ay değeri (ledger bu aydan itibaren KDV dahil işler)
       const now = new Date();
@@ -3999,11 +4133,21 @@ const handleGlobalPayment = async () => {
           return { monthlyFee: String(newBase), hasKdv: true, kdvStartKey };
       };
 
-      try {
-          for (const room of kdvsizRooms) {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(room.id)), buildKdvUpdate(room), { merge: true });
-          }
-      } catch(e) { console.error("KDV'li Yapma Hatası:", e); }
+      if (db && firebaseUser) {
+          try {
+              for (const room of kdvsizRooms) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(room.id)), buildKdvUpdate(room), { merge: true });
+              }
+          } catch(e) { console.error("KDV'li Yapma Hatası:", e); }
+      } else {
+          // Önizleme modu: yerel state güncelle
+          setRooms(prev => prev.map(r => {
+              if (r.customerName === customerToUpdate.name && r.hasKdv === false) {
+                  return { ...r, ...buildKdvUpdate(r) };
+              }
+              return r;
+          }));
+      }
       alert(`${customerToUpdate.name} müşterisinin ${kdvsizRooms.length} odası bu aydan itibaren KDV dahil (faturalı) borçlandırılacak. Geçmiş aylar değişmedi, ödeme tutarı sabit kaldı.`);
   };
 
@@ -4220,7 +4364,7 @@ const handleEndRentConfirm = async () => {
 
               const isGifted = room.giftMonths && monthCounter < room.giftMonths;
               const isFree = room.isFreeRoom;
-
+              
               if (isDueYet && !room.paidMonths?.includes(key) && !isGifted && !isFree) {
                   pendingDebtsToTransfer.push({
                       id: Date.now() + Math.random(),
@@ -4362,38 +4506,57 @@ const handleChangeRoomConfirm = async () => {
     }
   };
 
+  // YENİ EKLENEN: Bir odanın belirli bir yıl-ay için geçerli baz kirasını döndürür.
+  // increaseHistory varsa o aya (veya öncesine) ait en güncel kaydı, yoksa odanın monthlyFee'sini verir.
+  const getRoomFeeForMonth = (room, year, month) => {
+      let effective = Number(room.monthlyFee || 0);
+      if (Array.isArray(room.increaseHistory) && room.increaseHistory.length > 0) {
+          const targetIdx = year * 12 + month;
+          let chosen = null;
+          room.increaseHistory.forEach(h => {
+              const parts = String(h.effectiveKey).split('-');
+              const hIdx = parseInt(parts[0]) * 12 + parseInt(parts[1]);
+              if (hIdx <= targetIdx) {
+                  if (!chosen || hIdx > chosen.idx) chosen = { idx: hIdx, fee: Number(h.baseFee) };
+              }
+          });
+          if (chosen) effective = chosen.fee;
+      }
+      return effective;
+  };
+
   const handleOpenApplyIncreaseModal = (room, year) => {
-      const base = Number(room.monthlyFee || 0);
+      // YENİ: Zam, bu yılın giriş ayına denk gelir; baz olarak BİR ÖNCEKİ ayın geçerli kirası alınır.
+      const entryDForBase = parseDateLocal(room.entryDate || '2026-01-01');
+      const anchorDForBase = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryDForBase;
+      const increaseMonth = anchorDForBase.getMonth();
+      // Bir önceki ay (zam ayının bir öncesi)
+      let prevMonth = increaseMonth - 1;
+      let prevYear = parseInt(year);
+      if (prevMonth < 0) { prevMonth = 11; prevYear = parseInt(year) - 1; }
+      const base = getRoomFeeForMonth(room, prevYear, prevMonth);
+
       const rate = Number(collectionRates.roomIncreaseRate || 50);
       const defaultNew = Math.round(base + (base * rate / 100));
-      
-      setIncreaseModalData({ ...room, targetYear: parseInt(year) });
+
+      // increaseModalData'ya baz kirayı da ekliyoruz ki yüzde/tutar hesapları bu baz üzerinden yürüsün
+      setIncreaseModalData({ ...room, targetYear: parseInt(year), increaseBaseFee: base });
       setIncreaseMode('percentage');
       setIncreasePercentage(rate.toString());
       setNewRentAmount(defaultNew.toString());
-
-      // YENİ EKLENEN: Zammın geçerli olacağı tarihi, seçili zam yılındaki yıldönümü olarak varsay
-      // (giriş tarihinin gün/ayı + hedef yıl). Örn: giriş 26.07.2023, hedef 2024 => 2024-07-26
-      try {
-          const entryD = parseDateLocal(room.entryDate || `${year}-01-01`);
-          const anniv = new Date(parseInt(year), entryD.getMonth(), entryD.getDate());
-          setIncreaseEffectiveDate(anniv.toISOString().split('T')[0]);
-      } catch(e) {
-          setIncreaseEffectiveDate(`${year}-01-01`);
-      }
-
       setIsApplyIncreaseModalOpen(true);
   };
 
   const handlePercentageInput = (val) => {
       setIncreasePercentage(val);
-      const base = Number(increaseModalData?.monthlyFee || 0);
+      // YENİ: Baz olarak bir önceki ayın geçerli kirası (increaseBaseFee) kullanılır
+      const base = Number(increaseModalData?.increaseBaseFee ?? increaseModalData?.monthlyFee ?? 0);
       setNewRentAmount(Math.round(base + (base * Number(val) / 100)).toString());
   };
 
   const handleAmountInput = (val) => {
       setNewRentAmount(val);
-      const base = Number(increaseModalData?.monthlyFee || 0);
+      const base = Number(increaseModalData?.increaseBaseFee ?? increaseModalData?.monthlyFee ?? 0);
       const perc = base > 0 ? ((Number(val) - base) / base * 100).toFixed(1) : 0;
       setIncreasePercentage(perc.toString());
   };
@@ -4401,8 +4564,10 @@ const handleChangeRoomConfirm = async () => {
   const handleConfirmIncrease = async () => {
       if (!increaseModalData || !newRentAmount) return;
 
+      const room = increaseModalData;
       const newFee = Number(newRentAmount);
-      const oldFee = Number(increaseModalData.monthlyFee);
+      // YENİ: Eski (baz) kira = zam ayından bir önceki ayın geçerli kirası
+      const oldFee = Number(increaseModalData.increaseBaseFee ?? increaseModalData.monthlyFee);
       const percentage = Number(increasePercentage);
 
       const historyEntry = {
@@ -4415,89 +4580,35 @@ const handleChangeRoomConfirm = async () => {
           yearsPassed: increaseModalData.yearsPassed
       };
 
-      // YENİ EKLENEN: Geçmişe dönük güncelleme.
-      // Zam oranı ayın 3-4'ünde açıklandığı için yıldönümü (geçerlilik tarihi) ile bugün arasındaki
-      // aylar da yeni kiraya göre güncellenir. Aradaki her ayın kirası TAMAMEN yeni tutara çekilir.
-      const room = increaseModalData;
-      const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
-      const newMonthlyTotal = hasKdv ? newFee * 1.20 : newFee;
-      const monthsStr = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+      // YENİ EKLENEN: Zam, giriş ayına denk gelen ay itibarıyla (targetYear yılında) geçerli olur.
+      // Örn. 06.07.2025 giren müşteri için 2026 zammı → Temmuz 2026 ve sonrası yeni kira; öncesi eski kira.
+      const entryD = parseDateLocal(room.entryDate || '2026-01-01');
+      const anchorD = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryD;
+      const effectiveMonth = anchorD.getMonth();
+      const effectiveKey = `${increaseModalData.targetYear}-${effectiveMonth}`;
 
-      const retroOverrides = [];
-      if (increaseEffectiveDate) {
-          const startDate = parseDateLocal(increaseEffectiveDate);
-          const targetDay = startDate.getDate();
-          const today = new Date();
-          let loopDate = new Date(startDate);
-          // Geçerlilik tarihinden bugüne kadar olan her ayı, yeni kira tutarına güncelle
-          let guard = 0;
-          while (loopDate <= today && guard < 120) {
-              const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
-              const txId = `debt-${room.id}-${key}`;
-              const mName = monthsStr[loopDate.getMonth()];
-              retroOverrides.push({
-                  txId,
-                  date: new Date(loopDate).getTime(),
-                  desc: `${room.name} Odası - ${mName} ${loopDate.getFullYear()} Kirası (Zamlı)`,
-                  debt: newMonthlyTotal,
-                  baseDebt: newFee,
-                  kdvDebt: hasKdv ? newFee * 0.20 : 0,
-                  credit: 0
-              });
-              let nMonth = loopDate.getMonth() + 1;
-              let nYear = loopDate.getFullYear();
-              if (nMonth > 11) { nMonth = 0; nYear++; }
-              const maxDayInNextMonth = new Date(nYear, nMonth + 1, 0).getDate();
-              loopDate = new Date(nYear, nMonth, Math.min(targetDay, maxDayInNextMonth));
-              guard++;
-          }
-      }
-
-      const customerToUpdate = customers.find(c => c.name === room.customerName);
-
-      // YENİ EKLENEN: increaseHistory — mevcut retroOverrides/priceHistory mekanizmasının YANINA eklenen,
-      // odanın zam geçmişini ek olarak izleyen bir kayıt (getRoomFeeForMonth tarafından kullanılır).
-      // Bu, retroOverrides sistemini DEĞİŞTİRMEZ; cari hesaptaki asıl borç hâlâ retroOverrides ile yönetilir.
-      const entryDForHistory = parseDateLocal(room.entryDate || '2026-01-01');
-      const anchorDForHistory = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryDForHistory;
-      const effectiveKey = `${increaseModalData.targetYear}-${anchorDForHistory.getMonth()}`;
+      // increaseHistory boşsa, geçmiş ayların eski ücretle kalması için başlangıç kaydını da ekle
       let baseHistory = Array.isArray(room.increaseHistory) ? [...room.increaseHistory] : [];
+      if (baseHistory.length === 0) {
+          baseHistory.push({ effectiveKey: `${anchorD.getFullYear()}-${anchorD.getMonth()}`, baseFee: oldFee });
+      }
+      // Aynı etkin ay varsa güncelle, yoksa ekle
       const newIncreaseHistory = [...baseHistory.filter(h => h.effectiveKey !== effectiveKey), { effectiveKey, baseFee: newFee }];
 
       if (db && firebaseUser) {
           try {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(increaseModalData.id)), {
                   monthlyFee: newRentAmount,
-                  priceHistory: [...(increaseModalData.priceHistory || []), historyEntry],
-                  increaseHistory: newIncreaseHistory
+                  increaseHistory: newIncreaseHistory,
+                  priceHistory: [...(increaseModalData.priceHistory || []), historyEntry]
               }, { merge: true });
-
-              // Geçmişe dönük ay güncellemelerini cari hesaba override olarak yaz
-              if (customerToUpdate && retroOverrides.length > 0) {
-                  const existingOverrides = customerToUpdate.ledgerOverrides || [];
-                  const filtered = existingOverrides.filter(o => !retroOverrides.some(n => n.txId === o.txId));
-                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
-                      ledgerOverrides: [...filtered, ...retroOverrides]
-                  }, { merge: true });
-              }
           } catch(e) { console.error("Firebase Zam Kayıt Hatası:", e); }
       } else {
-          // ÖNİZLEME (yerel state) MODU: Firebase yokken de çalışsın
-          setRooms(prev => prev.map(r => r.id === increaseModalData.id ? {
-              ...r,
-              monthlyFee: newRentAmount,
-              priceHistory: [...(r.priceHistory || []), historyEntry],
-              increaseHistory: newIncreaseHistory
-          } : r));
-
-          if (customerToUpdate && retroOverrides.length > 0) {
-              setCustomers(prev => prev.map(c => {
-                  if (c.id !== customerToUpdate.id) return c;
-                  const existingOverrides = c.ledgerOverrides || [];
-                  const filtered = existingOverrides.filter(o => !retroOverrides.some(n => n.txId === o.txId));
-                  return { ...c, ledgerOverrides: [...filtered, ...retroOverrides] };
-              }));
-          }
+          // Önizleme modu: yerel state güncelle
+          setRooms(prev => prev.map(r => r.id === increaseModalData.id
+              ? { ...r, monthlyFee: newRentAmount, increaseHistory: newIncreaseHistory, priceHistory: [...(r.priceHistory || []), historyEntry] }
+              : r
+          ));
       }
 
       setIsApplyIncreaseModalOpen(false);
@@ -4673,7 +4784,7 @@ const handleSaveRoomAppointment = () => {
         roomName: room.name
     };
 
-    // Takvime kaydet (Firebase + yerel state)
+    // Takvime kaydet (canlı + önizleme)
     if (db && firebaseUser) {
         try { setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', String(newAppt.id)), newAppt); } catch(e) { console.error(e); }
     }
@@ -4733,8 +4844,7 @@ const newAppt = {
         warehouseId: parseInt(appointmentData.warehouseId),
         date: appointmentData.date,
         time: appointmentData.time,
-        purpose: appointmentData.purpose,
-        createdBy: currentUserProfile.name // YENİ EKLENEN: randevuyu oluşturan kullanıcı takvimde küçük olarak gösterilecek
+        purpose: appointmentData.purpose
     };
 
     // FİREBASE'E KAYIT İŞLEMİ
@@ -4791,8 +4901,9 @@ const newAppt = {
   // ============================================================================
   // YENİ EKLENEN: BANKA OTOMATİK HAREKET ALMA (CANLI API) ALT YAPISI
   // ============================================================================
-  // Girilen API bilgileri backend'e (/api/bank/*) iletilir; bu uçlar çalıştığınız
-  // bankanın Open Banking / hesap hareketleri API'sine güvenli şekilde bağlanır.
+  // Bağlantı mantığı: Girilen API bilgileri backend'e (/api/bank/connect) iletilir.
+  // Canlı ortamda bu uç, çalışılan bankanın Open Banking / hesap hareketleri API'sine
+  // güvenli şekilde bağlanır. Önizleme/backend yokken bağlantı simüle edilir.
   // Bir müşteriyle eşleşen hareket "tahsilat" olarak carisine, eşleşmeyen "askıya" düşer.
 
   const matchBankTxToCustomer = (description) => {
@@ -4816,6 +4927,11 @@ const newAppt = {
           return;
       }
       setBankApiStatus('connecting');
+      // ÖNİZLEME/backend yoksa bağlantıyı simüle et
+      if (!db) {
+          setTimeout(() => { setBankApiConnected(true); setBankApiStatus('connected'); }, 1200);
+          return;
+      }
       try {
           const res = await fetch('/api/bank/connect', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4835,8 +4951,12 @@ const newAppt = {
       setBankApiConnected(false); setBankApiStatus('idle');
   };
 
-  // Tek seferlik hareket çekme (backend'ten gerçek veri)
+  // Tek seferlik hareket çekme (canlı: backend, önizleme: örnek üretimi yok — yalnızca gerçek veri)
   const fetchBankTransactionsOnce = async () => {
+      if (!db) {
+          // Önizleme modunda gerçek banka verisi olmadığından yeni hareket üretilmez.
+          return;
+      }
       try {
           const res = await fetch('/api/bank/transactions', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4894,19 +5014,72 @@ const newAppt = {
       if (!tx) return;
       if (tx.status === 'tahsilat' && tx.matchedCustomerId) {
           const cust = customers.find(c => c.id === tx.matchedCustomerId);
-          if (cust && db && firebaseUser) {
+          if (cust) {
               const payment = { id: Date.now(), amount: tx.amount, date: tx.rawDate ? new Date(tx.rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0], note: `Banka Otomatik: ${tx.description}`, hasEInvoice: false };
               const updatedPayments = [...(cust.payments || []), payment];
-              try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updatedPayments }, { merge: true }); } catch(e){ console.error(e); }
+              if (db && firebaseUser) {
+                  try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updatedPayments }, { merge: true }); } catch(e){ console.error(e); }
+              } else {
+                  setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, payments: updatedPayments } : c));
+              }
           }
-      } else if (db && firebaseUser) {
+      } else {
           // Askıya al
           const pending = { id: Date.now(), amount: tx.amount, date: tx.rawDate ? new Date(tx.rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0], note: `Banka Otomatik: ${tx.description}`, customerName: tx.matchedCustomerName || 'Eşleşmedi' };
-          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)), pending); } catch(e){ console.error(e); }
+          if (db && firebaseUser) {
+              try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pending.id)), pending); } catch(e){ console.error(e); }
+          } else {
+              setPendingCollections(prev => [...prev, pending]);
+          }
       }
       setBankApiTransactions(prev => prev.map(t => t.id === txId ? { ...t, processed: true } : t));
   };
-  // ============================================================================
+
+  // YENİ EKLENEN: Oda Listesi kartındaki oda fotoğrafını (roomListPhoto) ekle/değiştir
+  const handleSetRoomListPhoto = async (roomId, file) => {
+      if (!file) return;
+      try {
+          const url = await uploadImageToServer(file);
+          if (db && firebaseUser) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomId)), { roomListPhoto: url }, { merge: true });
+          } else {
+              setRooms(prev => prev.map(r => r.id === roomId ? { ...r, roomListPhoto: url } : r));
+          }
+      } catch (e) { console.error('Oda Fotoğrafı Yükleme Hatası:', e); }
+  };
+  const handleRemoveRoomListPhoto = async (roomId) => {
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomId)), { roomListPhoto: null }, { merge: true }); } catch(e){ console.error(e); }
+      } else {
+          setRooms(prev => prev.map(r => r.id === roomId ? { ...r, roomListPhoto: null } : r));
+      }
+  };
+
+  // YENİ EKLENEN: Depo (şube) / blok kartı fotoğrafını (listPhoto) ekle-değiştir / sil
+  const handleSetEntityPhoto = async (type, id, file) => {
+      if (!file) return;
+      const coll = type === 'warehouse' ? 'warehouses' : 'blocks';
+      try {
+          const url = await uploadImageToServer(file);
+          if (db && firebaseUser) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', coll, String(id)), { listPhoto: url }, { merge: true });
+          } else if (type === 'warehouse') {
+              setWarehouses(prev => prev.map(w => w.id === id ? { ...w, listPhoto: url } : w));
+          } else {
+              setBlocks(prev => prev.map(b => b.id === id ? { ...b, listPhoto: url } : b));
+          }
+      } catch (e) { console.error('Fotoğraf Yükleme Hatası:', e); }
+  };
+  const handleRemoveEntityPhoto = async (type, id) => {
+      const coll = type === 'warehouse' ? 'warehouses' : 'blocks';
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', coll, String(id)), { listPhoto: null }, { merge: true }); } catch(e){ console.error(e); }
+      } else if (type === 'warehouse') {
+          setWarehouses(prev => prev.map(w => w.id === id ? { ...w, listPhoto: null } : w));
+      } else {
+          setBlocks(prev => prev.map(b => b.id === id ? { ...b, listPhoto: null } : b));
+      }
+  };
 
   const handleUpdateAllLedgers = () => {
       setIsUpdateAllModalOpen(true);
@@ -4940,29 +5113,25 @@ const newAppt = {
   };
 
   const appointmentPurposes = {
-      'giris-cikis': { label: 'Depoya Giriş - Çıkış', color: 'bg-blue-500', text: 'text-blue-700', border: 'border-blue-200', bgLight: 'bg-blue-50' },
+      'giris-cikis': { label: 'Odadan Giriş - Çıkış', color: 'bg-blue-500', text: 'text-blue-700', border: 'border-blue-200', bgLight: 'bg-blue-50' },
       'ziyaret': { label: 'Yeni Müşteri Adayı Ziyaret', color: 'bg-purple-500', text: 'text-purple-700', border: 'border-purple-200', bgLight: 'bg-purple-50' },
       'esya-getirme': { label: 'Yeni Müşteri Eşya Getiriyor', color: 'bg-emerald-500', text: 'text-emerald-700', border: 'border-emerald-200', bgLight: 'bg-emerald-50' },
-      'tahliye': { label: 'Depodan Tüm Eşyaları Kendisi Çıkartıcak', color: 'bg-red-500', text: 'text-red-700', border: 'border-red-200', bgLight: 'bg-red-50' },
+      'tahliye': { label: 'Odadan Tüm Eşyaları Kendisi Çıkaracak', color: 'bg-red-500', text: 'text-red-700', border: 'border-red-200', bgLight: 'bg-red-50' },
       'temizlik': { label: 'Depo Temizlik', color: 'bg-orange-500', text: 'text-orange-700', border: 'border-orange-200', bgLight: 'bg-orange-50' },
   };
-
-  // YENİ EKLENEN: Bugüne ait randevu sayısı — sol menüdeki Takvim öğesinde yanıp sönen rozet için
-  const todayApptCount = appointments.filter(a => a.date === new Date().toISOString().split('T')[0]).length;
 
   const menuItems = [
     { id: 'dashboard', label: 'Anasayfa', icon: LayoutDashboard, permId: 'menu-dashboard' },
     { id: 'takvim', label: 'Takvim', icon: Calendar, permId: 'menu-takvim' },
     { id: 'musteri-listesi', label: 'Müşteri Listesi', icon: Users, permId: 'menu-musteri-listesi', subItems: [{ id: 'musteri-ekle', label: 'Yeni Müşteri Ekle', permId: 'page-musteri-ekle' }, { id: 'mevcut-musteriler', label: 'Mevcut Müşteriler', permId: 'page-mevcut-musteriler' }, { id: 'tum-musteriler', label: 'Tüm Müşteriler', permId: 'page-tum-musteriler' }] },
     { id: 'odeme-islemleri', label: 'Ödeme İşlemleri', icon: Wallet, permId: 'menu-odeme-islemleri', subItems: [
-        { id: 'odeme-girisi', label: 'Tahsilat Girişi Yap', permId: 'page-odeme-girisi' },
+        { id: 'odeme-girisi', label: 'Tahsilat Girişi Yap', permId: 'page-odeme-girisi' }, 
         { id: 'askida-kalan-odemeler', label: 'Askıda Kalan Tahsilatlar', permId: 'page-askida-kalan-odemeler' },
         { id: 'tahsilat-hareketleri', label: 'Tahsilat Hareketleri', permId: 'page-tahsilat-hareketleri' },
         { id: 'gunu-gelen-odalar', label: 'Günü Gelen Odalar', permId: 'page-gunu-gelen-odalar' },
         { id: 'senesi-dolan-odalar', label: 'Senesi Dolan Odalar', permId: 'page-senesi-dolan-odalar' },
         { id: 'aylik-odeme', label: 'Aylık Borç Takip', permId: 'page-aylik-odeme' },
-        { id: 'kdvsiz-cariler', label: 'KDVsiz Cariler', permId: 'page-kdvsiz-cariler' },
-        { id: 'depo-odemeleri-guncelle', label: 'Depo Ödemeleri', action: handleUpdateAllLedgers }
+        { id: 'kdvsiz-cariler', label: 'KDVsiz Cariler', permId: 'page-kdvsiz-cariler' }
     ] },
     { id: 'depo', label: 'Depo Listesi', icon: Box, permId: 'menu-depo' },
     { id: 'finans-yonetimi', label: 'Finans Yönetimi', icon: TrendingUp, permId: 'menu-finans-yonetimi', subItems: [
@@ -5056,7 +5225,7 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
   }).length;
   const overduePercentage = activeRentalsCount > 0 ? ((overdueCount / activeRentalsCount) * 100).toFixed(1) : 0;
 
-  // YENİ EKLENEN: Gösterge Paneli detayları için yardımcı hesaplar (yeni, tıklanabilir ek kartlar için)
+  // YENİ EKLENEN: Gösterge Paneli detayları için yardımcı hesaplar
   // "dd.mm.yyyy" veya ISO tarihini Date'e çevir
   const parseAnyDate = (s) => {
       if (!s) return null;
@@ -5083,9 +5252,9 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
       return true;
   };
 
-  // Bugün kaydedilen müşteri sayısı (yeni kart için)
+  // Bugün kaydedilen müşteri sayısı (kart 1 için)
   const todayNewCustomersCount = customers.filter(c => inDashboardRange(parseAnyDate(c.createdAt), 'today')).length;
-  // Bugün çıkış yapan müşteri sayısı — odaların çıkış geçmişinden
+  // Bugün çıkış yapan müşteri sayısı (kart 2 için) — odaların çıkış geçmişinden
   const collectExits = (range) => {
       const list = [];
       rooms.forEach(r => {
@@ -5099,7 +5268,7 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
       return list;
   };
   const todayExitsCount = collectExits('today').length;
-  // Bugün giren oda sayısı — entryExitHistory girişleri + aktif odaların entryDate'i
+  // Bugün giren oda sayısı (kart 3) — entryExitHistory girişleri + aktif odaların entryDate'i
   const collectEntries = (range) => {
       const list = [];
       rooms.forEach(r => {
@@ -5119,20 +5288,14 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
   const todayEntriesCount = collectEntries('today').length;
 
   const dashboardCards = [
-    { id: 1, title: 'TOPLAM MÜŞTERİ', value: totalCustomersCount.toString(), desc: 'Sistemdeki tüm müşteri kayıtları', tag: `Aktif kiracı %${activeTenantPercentage}`, tagColor: 'text-green-700 bg-green-100', borderColor: 'border-blue-500', iconColor: 'text-blue-500 bg-blue-50', icon: Users, chartData: [10, 15, 12, 20, 18, 25, 30], chartColor: '#3b82f6' },
-    { id: 2, title: 'AKTİF KİRALAMA', value: activeRentalsCount.toString(), desc: 'Şu anki dolu oda sayısı', tag: `Oda kapasitesi %${roomCapacityPercentage}`, tagColor: 'text-orange-700 bg-orange-100', borderColor: 'border-orange-400', iconColor: 'text-orange-500 bg-orange-50', icon: Box, chartData: [20, 22, 25, 23, 28, 30, 32], chartColor: '#f97316' },
-    { id: 3, title: 'BUGÜN VADESİ OLAN', value: dueTodayCount.toString(), desc: 'Planlı ödeme günü bugün olanlar', tag: `Aktif kiranın %${dueTodayPercentage} payı`, tagColor: 'text-gray-600 bg-gray-100', borderColor: 'border-teal-400', iconColor: 'text-teal-500 bg-teal-50', icon: Calendar, chartData: [5, 10, 8, 15, 10, 18, 25], chartColor: '#14b8a6' },
-    { id: 4, title: 'ÖNÜMÜZDEKİ 7 GÜN VADE', value: dueNext7Count.toString(), desc: 'Yarın ve +7 gün arası vadesi gelen', tag: `Aktif kiranın %${dueNext7Percentage} payı`, tagColor: 'text-gray-600 bg-gray-100', borderColor: 'border-blue-400', iconColor: 'text-blue-500 bg-blue-50', icon: Calendar, chartData: [10, 12, 15, 10, 20, 25, 20], chartColor: '#3b82f6' },
-    { id: 5, title: 'VADESİ GEÇMİŞ (ÖDENMEDİ)', value: overdueCount.toString(), desc: 'Bu yıl • vade geçti • ödeme tarihi yok', tag: `Aktif kiranın %${overduePercentage} payı`, tagColor: 'text-red-700 bg-red-100', borderColor: 'border-red-500', iconColor: 'text-red-500 bg-red-50', icon: AlertCircle, chartData: [30, 25, 28, 20, 15, 10, 5], chartColor: '#ef4444' },
+    { id: 1, title: 'KAYDEDİLEN MÜŞTERİ', value: todayNewCustomersCount.toString(), desc: 'Bugün sisteme eklenen müşteriler', tag: 'Detay için tıklayın', tagColor: 'text-blue-700 bg-blue-100', borderColor: 'border-blue-500', iconColor: 'text-blue-500 bg-blue-50', icon: Users, chartData: [10, 15, 12, 20, 18, 25, 30], chartColor: '#3b82f6' },
+    { id: 2, title: 'ÇIKIŞ YAPAN MÜŞTERİLER', value: todayExitsCount.toString(), desc: 'Bugün depodan çıkış yapanlar', tag: 'Detay için tıklayın', tagColor: 'text-orange-700 bg-orange-100', borderColor: 'border-orange-400', iconColor: 'text-orange-500 bg-orange-50', icon: LogOut, chartData: [20, 22, 25, 23, 28, 30, 32], chartColor: '#f97316' },
+    { id: 3, title: 'GİREN ODA SAYISI', value: todayEntriesCount.toString(), desc: 'Bugün odaya giriş yapılanlar', tag: 'Detay için tıklayın', tagColor: 'text-teal-700 bg-teal-100', borderColor: 'border-teal-400', iconColor: 'text-teal-500 bg-teal-50', icon: Box, chartData: [5, 10, 8, 15, 10, 18, 25], chartColor: '#14b8a6' },
+    { id: 4, title: 'ÇIKAN ODA SAYISI', value: todayExitsCount.toString(), desc: 'Bugün odadan çıkış yapılanlar', tag: 'Detay için tıklayın', tagColor: 'text-blue-700 bg-blue-100', borderColor: 'border-blue-400', iconColor: 'text-blue-500 bg-blue-50', icon: Box, chartData: [10, 12, 15, 10, 20, 25, 20], chartColor: '#3b82f6' },
+    { id: 5, title: 'VADESİ GEÇMİŞ (GİRİŞ/ÇIKIŞ)', value: (todayEntriesCount + todayExitsCount).toString(), desc: 'Bugün giriş/çıkış yapan müşteriler', tag: 'Detay için tıklayın', tagColor: 'text-red-700 bg-red-100', borderColor: 'border-red-500', iconColor: 'text-red-500 bg-red-50', icon: AlertCircle, chartData: [30, 25, 28, 20, 15, 10, 5], chartColor: '#ef4444' },
     { id: 6, title: 'TOPLAM DEPO', value: warehouses.length.toString(), desc: `${totalRoomsCount} oda kapasitesi (tüm depolar)`, tag: `Genel doluluk %${roomCapacityPercentage}`, tagColor: 'text-purple-700 bg-purple-100', borderColor: 'border-purple-500', iconColor: 'text-purple-500 bg-purple-50', icon: Home, chartData: [10, 10, 10, 10, 10, 10, 10], chartColor: '#a855f7' },
     { id: 7, title: 'DOLU ODA', value: activeRentalsCount.toString(), desc: 'Hesaba bağlı oda sayısı', tag: `Tüm odaların %${roomCapacityPercentage} payı`, tagColor: 'text-green-700 bg-green-100', borderColor: 'border-green-500', iconColor: 'text-green-500 bg-green-50', icon: Box, chartData: [10, 20, 30, 40, 50, 60, 70], chartColor: '#22c55e' },
     { id: 8, title: 'BOŞ ODA', value: emptyRoomsCount.toString(), desc: 'Kiraya hazır kapasite', tag: `Tüm odaların %${emptyRoomPercentage} payı`, tagColor: 'text-gray-600 bg-gray-100', borderColor: 'border-slate-500', iconColor: 'text-slate-500 bg-slate-50', icon: Box, chartData: [50, 40, 30, 20, 10, 5, 2], chartColor: '#64748b' },
-    // YENİ EKLENEN: Tıklanabilir ek detay kartları (mevcut kartların YERİNE değil, YANINA eklendi)
-    { id: 9, title: 'KAYDEDİLEN MÜŞTERİ (BUGÜN)', value: todayNewCustomersCount.toString(), desc: 'Bugün sisteme eklenen müşteriler', tag: 'Detay için tıklayın', tagColor: 'text-blue-700 bg-blue-100', borderColor: 'border-blue-500', iconColor: 'text-blue-500 bg-blue-50', icon: Users, chartData: [10, 15, 12, 20, 18, 25, 30], chartColor: '#3b82f6' },
-    { id: 10, title: 'ÇIKIŞ YAPAN MÜŞTERİLER (BUGÜN)', value: todayExitsCount.toString(), desc: 'Bugün depodan çıkış yapanlar', tag: 'Detay için tıklayın', tagColor: 'text-orange-700 bg-orange-100', borderColor: 'border-orange-400', iconColor: 'text-orange-500 bg-orange-50', icon: LogOut, chartData: [20, 22, 25, 23, 28, 30, 32], chartColor: '#f97316' },
-    { id: 11, title: 'GİREN ODA SAYISI (BUGÜN)', value: todayEntriesCount.toString(), desc: 'Bugün odaya giriş yapılanlar', tag: 'Detay için tıklayın', tagColor: 'text-teal-700 bg-teal-100', borderColor: 'border-teal-400', iconColor: 'text-teal-500 bg-teal-50', icon: Box, chartData: [5, 10, 8, 15, 10, 18, 25], chartColor: '#14b8a6' },
-    { id: 12, title: 'ÇIKAN ODA SAYISI (BUGÜN)', value: todayExitsCount.toString(), desc: 'Bugün odadan çıkış yapılanlar', tag: 'Detay için tıklayın', tagColor: 'text-blue-700 bg-blue-100', borderColor: 'border-blue-400', iconColor: 'text-blue-500 bg-blue-50', icon: Box, chartData: [10, 12, 15, 10, 20, 25, 20], chartColor: '#3b82f6' },
-    { id: 13, title: 'ODASINA GİRİŞ/ÇIKIŞ YAPAN MÜŞTERİLER', value: (todayEntriesCount + todayExitsCount).toString(), desc: 'Bugün giriş/çıkış hareketi olan müşteriler', tag: 'Detay için tıklayın', tagColor: 'text-red-700 bg-red-100', borderColor: 'border-red-500', iconColor: 'text-red-500 bg-red-50', icon: AlertCircle, chartData: [30, 25, 28, 20, 15, 10, 5], chartColor: '#ef4444' },
   ];
 
   const renderYearlyPayments = () => {
@@ -5177,10 +5340,26 @@ const start = new Date(loopDate);
 
           const paymentKey = `${start.getFullYear()}-${start.getMonth()}`;
           const txId = `debt-${selectedRoomDetail.id}-${paymentKey}`;
-          
-          let displayTotalAmount = totalAmount;
-          let displayBaseAmount = baseAmount;
-          let displayKdvAmount = kdvAmount;
+
+          // YENİ: O aya geçerli kira (zam geçmişine göre) — zamdan önceki aylar eski, sonrası yeni kira
+          const effectiveBase = getRoomFeeForMonth(selectedRoomDetail, start.getFullYear(), start.getMonth());
+          const effKdv = hasKdv ? effectiveBase * 0.20 : 0;
+          const effTotal = effectiveBase + effKdv;
+
+          // YENİ: Bu ay zam yapıldıysa ekstra bilgi (increaseHistory effectiveKey eşleşmesi)
+          let increaseInfo = null;
+          if (Array.isArray(selectedRoomDetail.increaseHistory)) {
+              const hit = selectedRoomDetail.increaseHistory.find(h => String(h.effectiveKey) === `${start.getFullYear()}-${start.getMonth()}`);
+              // priceHistory'den önceki ücreti bul (varsa)
+              if (hit) {
+                  const ph = (selectedRoomDetail.priceHistory || []).find(p => Number(p.newFee) === Number(hit.baseFee));
+                  increaseInfo = ph ? `Zam: ${Number(ph.oldFee).toLocaleString('tr-TR')} → ${Number(ph.newFee).toLocaleString('tr-TR')} TL` : `Zam uygulandı: ${Number(hit.baseFee).toLocaleString('tr-TR')} TL`;
+              }
+          }
+
+          let displayTotalAmount = effTotal;
+          let displayBaseAmount = effectiveBase;
+          let displayKdvAmount = effKdv;
           let isSpecificGift = false;
 
           const override = overrides.find(o => o.txId === txId);
@@ -5208,7 +5387,8 @@ const start = new Date(loopDate);
             hasKdv: hasKdv,
             status: stat,
             color: statColor,
-            title: `${start.getDate()} ${monthsStr[start.getMonth()]} ${start.getFullYear()} - ${end.getDate()} ${monthsStr[end.getMonth()]} ${end.getFullYear()} Arası Kira Bedeli`,
+            increaseInfo: increaseInfo,
+            title: `${start.getDate()} ${monthsStr[start.getMonth()]} ${start.getFullYear()} - ${end.getDate()} ${monthsStr[end.getMonth()]} ${end.getFullYear()}`,
             payDay: start.getDate(),
             paymentKey: paymentKey,
             txId: txId,
@@ -5271,7 +5451,7 @@ const targetDay = selectedRoomDetail.paymentDate && !selectedRoomDetail.paymentD
 
       const isGifted = selectedRoomDetail.giftMonths && monthCounter < selectedRoomDetail.giftMonths;
       const isFree = selectedRoomDetail.isFreeRoom;
-
+      
 if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !isFree) {
         totalUnpaid += currentMonthlyTotal;
       }
@@ -5289,27 +5469,6 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
 
   const totalDebt = calculateTotalDebt();
 
-  // YENİ EKLENEN: Bir odanın belirli bir yıl-ay için geçerli baz kirasını döndürür.
-  // increaseHistory varsa o aya (veya öncesine) ait en güncel kaydı, yoksa odanın monthlyFee'sini verir.
-  // Bu, mevcut sabit-kira hesabının YERİNE değil, ÜZERİNE eklenen bir katmandır: increaseHistory
-  // hiç yoksa (mevcut odalarda olduğu gibi) davranış tamamen aynı kalır.
-  const getRoomFeeForMonth = (room, year, month) => {
-      let effective = Number(room.monthlyFee || 0);
-      if (Array.isArray(room.increaseHistory) && room.increaseHistory.length > 0) {
-          const targetIdx = year * 12 + month;
-          let chosen = null;
-          room.increaseHistory.forEach(h => {
-              const parts = String(h.effectiveKey).split('-');
-              const hIdx = parseInt(parts[0]) * 12 + parseInt(parts[1]);
-              if (hIdx <= targetIdx) {
-                  if (!chosen || hIdx > chosen.idx) chosen = { idx: hIdx, fee: Number(h.baseFee) };
-              }
-          });
-          if (chosen) effective = chosen.fee;
-      }
-      return effective;
-  };
-
   // --- YENİ EKLENEN: OTOMATİK GECİKME FAİZİ VE CARİ HESAP OLUŞTURUCU ---
   const getCustomerLedger = (customer) => {
       const customerRooms = rooms.filter(r => r.customerName === customer.name);
@@ -5320,7 +5479,9 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
       customerRooms.forEach(room => {
           const entryD = parseDateLocal(room.entryDate || '2026-01-01');
           let paymentAnchorD = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryD;
+          const baseAmt = Number(room.monthlyFee || 0);
           const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
+          const monthlyTotal = hasKdv ? baseAmt * 1.20 : baseAmt;
 
           // Ödeme gününü (day) sabitle, aylar eklendikçe değişmesin
           const targetDay = room.paymentDate && !room.paymentDate.includes('-') ? parseInt(room.paymentDate) : paymentAnchorD.getDate();
@@ -5348,37 +5509,43 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
                   let actualPayDay = Math.min(targetDay, maxDayInMonth); 
                   let txDate = new Date(year, month, actualPayDay);
 
-                  // YENİ EKLENDİ: Ödeme günü geldiğinde borç AYNI GÜN değil, BİR SONRAKİ GÜN cariye düşer.
-                  // (Aynı gün depodan çıkan müşteriden o ayın kirası alınmadığı için.)
-                  // Ekstrede görünen tarih yine ödeme günüdür (dateStr değişmez); yalnızca borcun
-                  // hesaba yansıma anı 1 gün ertelenir. İcra süreci varsa bu erteleme uygulanmaz.
-                  const isUnderLegal = room.isUnderLegalAction && room.legalActionStartDate;
-                  let effectiveTxDate = txDate;
-                  if (!isUnderLegal) {
-                      effectiveTxDate = new Date(txDate);
-                      effectiveTxDate.setDate(effectiveTxDate.getDate() + 1);
-                  }
+                  // YENİ EKLENEN: Borç, ödeme gününde DEĞİL, bir gün SONRASINDA cariye düşer.
+                  // (Aynı gün çıkış yapan müşteriden o ayın kirası alınmadığı için.)
+                  // Görünen tarih (txDate/dateStr) yine ödeme günüdür; sadece düşme koşulu ertelenir.
+                  let dueDate = new Date(year, month, actualPayDay + 1);
+                  dueDate.setHours(0, 0, 0, 0);
 
-                  if (effectiveTxDate <= calculationEndDate) {
+                  if (dueDate <= calculationEndDate) {
                   const isGifted = room.giftMonths && monthCounter < room.giftMonths;
                   const isFree = room.isFreeRoom;
-
                   // YENİ EKLENEN: Zam geçmişi (increaseHistory) — o aya geçerli baz kira seçilir.
-                  // increaseHistory yoksa (mevcut odalarda olduğu gibi) baseAmt/hasKdv aynen kullanılır; davranış değişmez.
-                  const effectiveBase = getRoomFeeForMonth(room, year, month);
+                  // Zam yalnızca etkin ayından (effectiveKey) itibaren geçerli olur; önceki aylar eski ücretle kalır.
+                  // increaseHistory yoksa odanın güncel monthlyFee'si tüm aylara uygulanır (eski davranış korunur).
+                  let effectiveBase = baseAmt;
+                  if (Array.isArray(room.increaseHistory) && room.increaseHistory.length > 0) {
+                      const monthIndexVal = year * 12 + month;
+                      let chosen = null;
+                      room.increaseHistory.forEach(h => {
+                          const parts = String(h.effectiveKey).split('-');
+                          const hIdx = parseInt(parts[0]) * 12 + parseInt(parts[1]);
+                          if (hIdx <= monthIndexVal) {
+                              if (!chosen || hIdx > chosen.idx) chosen = { idx: hIdx, fee: Number(h.baseFee) };
+                          }
+                      });
+                      if (chosen) effectiveBase = chosen.fee;
+                  }
                   // YENİ EKLENEN: "Carisini KDV'li Yap" sonrası, sadece geçiş ayından (kdvStartKey) itibaren
                   // borçlandırma KDV dahil işlenir; öncesi eski (KDV'siz) haliyle kalır.
-                  // kdvStartKey yoksa (mevcut odalarda olduğu gibi) odanın kendi hasKdv değeri tüm aylara uygulanır.
+                  // kdvStartKey yoksa odanın kendi hasKdv değeri tüm aylara uygulanır (eski davranış korunur).
                   let monthHasKdv = hasKdv;
                   if (room.kdvStartKey) {
                       const startParts = String(room.kdvStartKey).split('-');
                       const startY = parseInt(startParts[0]);
                       const startM = parseInt(startParts[1]);
                       const isFromSwitchOnward = (year > startY) || (year === startY && month >= startM);
-                      monthHasKdv = isFromSwitchOnward;
+                      monthHasKdv = isFromSwitchOnward; // geçişten sonra KDV dahil, önce KDV'siz
                   }
                   const monthAppliedTotal = monthHasKdv ? effectiveBase * 1.20 : effectiveBase;
-
                   const appliedMonthlyTotal = (isGifted || isFree) ? 0 : monthAppliedTotal;
                   const appliedBaseAmt = (isGifted || isFree) ? 0 : effectiveBase;
                   const appliedKdvDebt = (isGifted || isFree) ? 0 : (monthHasKdv ? effectiveBase * 0.20 : 0);
@@ -5418,6 +5585,9 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
       // 2. Global Ödemeler
       if (customer.payments) {
           customer.payments.forEach(pay => {
+              // Otomatik nakliye/taşıma tahsilatları kaldırıldı — cari ekstrede gösterilmez
+              const noteLower = String(pay.note || '').toLowerCase();
+              if (noteLower.includes('nakliye') || noteLower.includes('taşıma')) return;
               const pDate = new Date(pay.date);
               ledgerTransactions.push({
                   id: `credit-global-${pay.id}`,
@@ -5435,6 +5605,8 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
       // 3. Ekstra Borçlar
       if (customer.extraDebts) {
           customer.extraDebts.forEach(debt => {
+              // Nakliye/taşıma bedelleri kaldırıldı — cari ekstrede gösterilmez
+              if (debt.type === 'transport' || String(debt.desc || '').toLowerCase().includes('nakliye') || String(debt.desc || '').toLowerCase().includes('taşıma')) return;
               const dDate = new Date(debt.date);
               const amount = Number(debt.amount);
               const hasKdv = debt.hasKdv !== false; // Eğer özellik yoksa KDV'li varsay (geçmişe dönük destek)
@@ -5672,7 +5844,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                           </label>
                       </div>
 
-                      <button type="submit" className="mt-2 bg-blue-600 hover:bg-blue-700 text-white w-full py-3.5 rounded-xl font-bold text-base shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-0.5">
+                      <button type="button" onClick={handleLogin} className="mt-2 bg-blue-600 hover:bg-blue-700 text-white w-full py-3.5 rounded-xl font-bold text-base shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-0.5">
                           Sisteme Giriş Yap
                       </button>
                   </form>
@@ -5698,7 +5870,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
           <nav className="space-y-2 px-3 pb-8">
             {menuItems.filter(item => hasPerm('mainMenus', item.permId)).map((item) => {
               const hasActiveSub = item.subItems?.some(sub => sub.id === activeMenu);
-              // Alt öğeleri de izne göre süz (izin verilmeyen sayfalar gizlenir; action-only öğeler her zaman gösterilir)
+              // Alt öğeleri de izne göre süz (izin verilmeyen sayfalar gizlenir)
               const visibleSubs = item.subItems ? item.subItems.filter(sub => !sub.permId || sub.action || hasPerm('pages', sub.permId)) : null;
 
               return visibleSubs ? (
@@ -5757,13 +5929,6 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                     }
                 }} className={`w-full flex items-center gap-3 px-3 py-2.5 border rounded-xl shadow-sm transition-colors text-sm font-medium ${activeMenu === item.id && !selectedCustomerId ? 'border-orange-200 bg-orange-50 text-orange-600' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
                   <item.icon size={18} className={activeMenu === item.id ? 'text-orange-500' : 'text-gray-400'} />{item.label}
-                  {/* YENİ EKLENEN: Takvim için bugünkü randevu sayısını gösteren yanıp sönen bildirim ışığı */}
-                  {item.id === 'takvim' && todayApptCount > 0 && (
-                      <span className="ml-auto relative flex items-center justify-center">
-                          <span className="absolute inline-flex h-5 w-5 rounded-full bg-red-400 opacity-75 animate-ping"></span>
-                          <span className="relative inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-red-500 text-white text-[10px] font-black shadow-sm">{todayApptCount}</span>
-                      </span>
-                  )}
                 </button>
               )
             })}
@@ -5932,37 +6097,12 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
           <>
           {activeMenu === 'dashboard' ? (
              <div className="max-w-7xl mx-auto">
-              {/* YENİ EKLENEN: Kullanıcıya özel selamlama + depo işine özel günlük motivasyon sözü */}
-              {(() => {
-                  const now = new Date();
-                  const hour = now.getHours();
-                  const greeting = hour < 12 ? 'Günaydın' : (hour < 18 ? 'İyi günler' : 'İyi akşamlar');
-                  const firstName = (currentUserProfile.name || '').split(' ')[0] || '';
-                  // Yılın gününe göre her gün farklı, döngüsel motivasyon sözü seç
-                  const startOfYear = new Date(now.getFullYear(), 0, 0);
-                  const dayOfYear = Math.floor((now - startOfYear) / (1000 * 60 * 60 * 24));
-                  const motivasyon = MOTIVASYON_SOZLERI[dayOfYear % MOTIVASYON_SOZLERI.length];
-                  return (
-                      <div className="mb-6 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 rounded-2xl p-6 sm:p-7 shadow-lg shadow-indigo-500/20 text-white relative overflow-hidden">
-                          <div className="absolute -right-6 -top-6 w-32 h-32 bg-white/10 rounded-full"></div>
-                          <div className="absolute -right-10 bottom-0 w-24 h-24 bg-white/5 rounded-full"></div>
-                          <div className="relative z-10">
-                              <h2 className="text-2xl sm:text-3xl font-black tracking-tight mb-1">Merhabalar, {firstName} 👋</h2>
-                              <p className="text-indigo-100 text-sm font-medium mb-4">{greeting}! {now.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' })}</p>
-                              <div className="flex items-start gap-3 bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/15 max-w-2xl">
-                                  <Gift size={20} className="shrink-0 mt-0.5 text-amber-200" />
-                                  <p className="text-sm sm:text-[15px] font-medium leading-relaxed italic">"{motivasyon}"</p>
-                              </div>
-                          </div>
-                      </div>
-                  );
-              })()}
               <div className="mb-6"><h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Özet</h1><h2 className="text-2xl font-bold text-gray-800">Gösterge Paneli</h2></div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                 {dashboardCards.map((card) => {
-                  // YENİ EKLENEN: id 9-13 (ek kartlar) tıklanınca detay penceresi açar; 1-8 mevcut davranışıyla değişmeden kalır.
-                  const detailMap = { 9: 'newCustomers', 10: 'exitedCustomers', 11: 'enteredRooms', 12: 'exitedRooms', 13: 'overdueMovements' };
-                  const detailTitleMap = { 9: 'Bugün Kaydedilen Müşteriler', 10: 'Çıkış Yapan Müşteriler', 11: 'Giren Oda Sayısı', 12: 'Çıkan Oda Sayısı', 13: 'Odasına Giriş/Çıkış Yapan Müşteriler' };
+                  // YENİ EKLENEN: İlk 5 kart tıklanınca detay penceresi açar
+                  const detailMap = { 1: 'newCustomers', 2: 'exitedCustomers', 3: 'enteredRooms', 4: 'exitedRooms', 5: 'overdueMovements' };
+                  const detailTitleMap = { 1: 'Bugün Kaydedilen Müşteriler', 2: 'Çıkış Yapan Müşteriler', 3: 'Giren Oda Sayısı', 4: 'Çıkan Oda Sayısı', 5: 'Sadece Odasına Giriş/Çıkış Yapan Müşteriler' };
                   const detailType = detailMap[card.id];
                   const clickable = !!detailType;
                   return (
@@ -6237,14 +6377,11 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                  {dayAppts.map(appt => {
                                      const pData = appointmentPurposes[appt.purpose];
                                      const warehouseName = warehouses.find(w => w.id === appt.warehouseId)?.name;
-                                     // YENİ EKLENEN: Randevuyu oluşturan kişi mi yoksa Yönetici mi kontrolü (rol tabanlı "İptal Et" butonu için)
+                                     // YENİ EKLENEN: Randevuyu oluşturan kişi mi yoksa Yönetici mi kontrolü
                                      const isOwnAppointment = appt.createdBy && appt.createdBy === currentUserProfile.name;
                                      const isManagerUser = currentUserProfile.role === 'Yönetici';
                                      return (
-                                         <div key={appt.id} className={`relative flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border ${pData.border} ${pData.bgLight} transition-shadow hover:shadow-md`}>
-                                             {appt.createdBy && (
-                                                 <span className="absolute top-1.5 right-2 text-[9px] font-semibold text-gray-400 italic">{appt.createdBy} oluşturdu</span>
-                                             )}
+                                         <div key={appt.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border ${pData.border} ${pData.bgLight} transition-shadow hover:shadow-md`}>
                                              <div className="flex items-start gap-4 mb-3 sm:mb-0">
                                                  <div className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-white ${pData.color} shadow-sm`}>
                                                      <Clock size={20} />
@@ -6255,14 +6392,9 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                          {appt.customerType === 'unregistered' && <span className="bg-gray-200 text-gray-600 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">Kayıtsız Müşteri</span>}
                                                      </div>
                                                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-medium text-gray-600">
-                                                         {/* Numaraya tıklayınca doğrudan arama yapılır, yanında küçük WhatsApp butonu vardır */}
-                                                         <span className="flex items-center gap-1.5">
-                                                             <a href={`tel:+90${(appt.customerPhone || '').replace(/\D/g, '')}`} className="flex items-center gap-1 text-gray-500 hover:text-indigo-600 transition-colors" title="Ara"><Phone size={12}/> {appt.customerPhone}</a>
-                                                             {appt.customerPhone && (
-                                                                 <a href={`https://wa.me/90${(appt.customerPhone || '').replace(/\D/g, '')}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="bg-emerald-500 hover:bg-emerald-600 text-white p-1 rounded-md transition-colors shadow-sm" title="WhatsApp ile mesaj at"><MessageCircle size={11}/></a>
-                                                             )}
-                                                         </span>
+                                                         <span className="flex items-center gap-1 text-gray-500"><Phone size={12}/> {appt.customerPhone}</span>
                                                          <span className="flex items-center gap-1 text-gray-500"><Home size={12}/> {warehouseName}</span>
+                                                         {appt.createdBy && <span className="flex items-center gap-1 text-gray-400 italic"><UserCog size={12}/> {appt.createdBy}</span>}
                                                      </div>
                                                  </div>
                                              </div>
@@ -6271,11 +6403,14 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                  <div className="flex items-center gap-2">
                                                      <span className="font-black text-gray-800 bg-white/50 px-2 py-0.5 rounded text-sm">{appt.time}</span>
                                                      <button onClick={() => { setEditApptData({...appt}); setIsEditApptModalOpen(true); }} className="bg-white hover:bg-indigo-50 text-indigo-600 p-1.5 rounded-lg transition-colors shadow-sm border border-indigo-100" title="Randevuyu Düzenle"><Edit size={14}/></button>
-                                                     {/* YENİ EKLENEN: İptal Et butonu — randevuyu oluşturan kişi veya Yönetici için ek bir kontrol (mevcut Sil butonunun YANINA eklendi) */}
+                                                     {/* YENİ EKLENEN: İptal Et butonu — randevuyu oluşturan kişi veya Yönetici görebilir */}
                                                      {(isOwnAppointment || isManagerUser) && (
                                                          <button onClick={() => { if(window.confirm('Bu randevuyu iptal etmek istediğinize emin misiniz?')) handleDeleteAppointment(appt.id); }} className="bg-white hover:bg-orange-50 text-orange-600 p-1.5 rounded-lg transition-colors shadow-sm border border-orange-100" title="Randevuyu İptal Et"><X size={14}/></button>
                                                      )}
-                                                     <button onClick={() => { if(window.confirm('Bu randevuyu silmek istediğinize emin misiniz?')) handleDeleteAppointment(appt.id); }} className="bg-white hover:bg-red-50 text-red-600 p-1.5 rounded-lg transition-colors shadow-sm border border-red-100" title="Randevuyu Sil"><Trash2 size={14}/></button>
+                                                     {/* Sil butonu artık sadece Yönetici rütbesindeki kullanıcılara görünür */}
+                                                     {isManagerUser && (
+                                                         <button onClick={() => { if(window.confirm('Bu randevuyu silmek istediğinize emin misiniz?')) handleDeleteAppointment(appt.id); }} className="bg-white hover:bg-red-50 text-red-600 p-1.5 rounded-lg transition-colors shadow-sm border border-red-100" title="Randevuyu Sil (Yönetici)"><Trash2 size={14}/></button>
+                                                     )}
                                                  </div>
                                              </div>
                                          </div>
@@ -6307,7 +6442,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                     <input type="text" readOnly value="Kayıt tamamlandığında otomatik olarak 5 haneli benzersiz numara atanacaktır." className="border-2 border-[#1bc5bd]/20 bg-teal-50/50 rounded-xl px-4 py-2.5 text-sm focus:outline-none font-semibold text-teal-700 cursor-not-allowed" />
                   </div>
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'Ad Soyad (Zorunlu)' : 'Firma Adı / Yetkili Kişi (Zorunlu)'}</label><input type="text" value={newCustomer.name} onChange={(e) => setNewCustomer({...newCustomer, name: e.target.value})} placeholder={customerType === 'bireysel' ? 'Ad Soyad' : 'Firma Adı'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
-                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'TC Kimlik Numarası (Zorunlu)' : 'Vergi Numarası / Dairesi (Zorunlu)'}</label><input type="text" value={newCustomer.tc} onChange={(e) => setNewCustomer({...newCustomer, tc: e.target.value})} placeholder={customerType === 'bireysel' ? 'TC Kimlik No' : 'Vergi No'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
+                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{customerType === 'bireysel' ? 'TC Kimlik Numarası (Zorunlu)' : 'Vergi Numarası (Zorunlu)'}</label><input type="text" value={newCustomer.tc} onChange={(e) => setNewCustomer({...newCustomer, tc: e.target.value})} placeholder={customerType === 'bireysel' ? 'TC Kimlik No' : 'Vergi No'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
                   {/* YENİ EKLENEN: Kurumsal müşteride Vergi Numarasının yanına Vergi Dairesi alanı */}
                   {customerType === 'kurumsal' && (
                       <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Vergi Dairesi (Zorunlu)</label><input type="text" value={newCustomer.taxOffice} onChange={(e) => setNewCustomer({...newCustomer, taxOffice: e.target.value})} placeholder="Örn: Pendik Vergi Dairesi" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-400 font-medium text-slate-700" /></div>
@@ -6414,18 +6549,6 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
             <div className="max-w-7xl mx-auto flex flex-col h-full bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="flex justify-between items-center mb-6">
                 <div><h2 className="text-2xl font-bold text-slate-800">{activeMenu === 'mevcut-musteriler' ? 'Mevcut Müşteriler' : 'Tüm Müşteriler'}</h2><p className="text-sm text-gray-500 mt-1">{activeMenu === 'mevcut-musteriler' ? 'Şu anda depolarda aktif odası bulunan müşteriler.' : 'Sisteme kayıtlı geçmiş ve mevcut tüm müşteriler.'}</p></div>
-                <div className="flex gap-2">
-                    <button onClick={() => setIsCustomerImportHistoryOpen(true)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-colors flex items-center gap-2" title="Geçmiş Toplu Yüklemeler">
-                        <History size={16} />
-                        <span className="hidden sm:inline">Aktarım Geçmişi</span>
-                    </button>
-                    <label className={`bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-colors cursor-pointer flex items-center gap-2 ${isCustomerUploading ? 'opacity-50 pointer-events-none' : ''}`} title="Otomatik Taramalı Excel Aktarımı">
-                        {isCustomerUploading ? <RefreshCcw size={16} className="animate-spin" /> : <Upload size={16} />}
-                        <span className="hidden sm:inline">Excel'den Müşteri Aktar</span>
-                        <span className="sm:hidden">Aktar</span>
-                        <input type="file" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" className="hidden" onChange={handleBulkCustomerUpload} disabled={isCustomerUploading} />
-                    </label>
-                </div>
               </div>
 
               {customerImportResult && (
@@ -6542,16 +6665,15 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <a href={`tel:+90${customer.phone}`} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"><Phone size={14}/> Ara</a>
                               <a href={`https://wa.me/90${customer.phone}`} target="_blank" rel="noreferrer" className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-teal-500/30"><MessageCircle size={14}/> WhatsApp</a>
                               <button onClick={() => handleOpenContract(customer)} className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-indigo-500/30"><Download size={14}/> Sözleşme İndir</button>
-                              <button onClick={() => setInfoModalCustomer(customer)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-emerald-500/30"><Info size={14}/> Bilgilendirme</button>
                               <button onClick={() => setIsInvoiceModalOpen(true)} className="bg-cyan-500 hover:bg-cyan-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-cyan-500/30"><FileTextIcon size={14}/> Faturalar</button>
-                              {/* YENİ EKLENEN: Sözleşmeler bölümü (mevcut Faturalar/Bilgilendirme butonlarının yanına eklendi) */}
+                              {/* YENİ EKLENEN: Sözleşmeler bölümü */}
                               <button onClick={() => setIsContractsModalOpen(true)} className="bg-violet-500 hover:bg-violet-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-violet-500/30"><FileTextIcon size={14}/> Sözleşmeler</button>
-                              {/* YENİ EKLENEN: Sadece KDV'siz odası olan müşterilerde görünen KDV'li Yap + Bilgilendir butonları */}
+                              {/* YENİ EKLENEN: Sadece KDV'siz odası olan müşterilerde görünen KDV'li Yap + Bilgilendirme butonları */}
                               {customerRooms.some(r => r.hasKdv === false) && (
                                   <>
                                       <button onClick={() => handleConvertCustomerToKdv(customer.id)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-emerald-500/30" title="Tüm KDV'siz odaları, ödeme tutarı değişmeden KDV dahil (faturalı) hale getir"><FileTextIcon size={14}/> KDV'li Yap</button>
                                       <div className="relative">
-                                          <button onClick={() => setKdvInfoMenuFor(kdvInfoMenuFor === customer.id ? null : customer.id)} className="bg-teal-500 hover:bg-teal-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-teal-500/30" title="E-Fatura / yeni IBAN geçiş bilgilendirmesi gönder"><MessageCircle size={14}/> KDV Geçiş Bilgisi</button>
+                                          <button onClick={() => setKdvInfoMenuFor(kdvInfoMenuFor === customer.id ? null : customer.id)} className="bg-teal-500 hover:bg-teal-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-teal-500/30" title="E-Fatura / yeni IBAN geçiş bilgilendirmesi gönder"><MessageCircle size={14}/> Bilgilendir</button>
                                           {kdvInfoMenuFor === customer.id && (
                                               <div className="absolute right-0 mt-2 w-52 bg-white rounded-xl shadow-2xl border border-gray-100 z-30 overflow-hidden">
                                                   <div className="px-3 py-2 bg-teal-50 border-b border-teal-100 text-[10px] font-bold text-teal-700 uppercase tracking-wider">E-Fatura Geçiş Bilgisi</div>
@@ -6637,7 +6759,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                        </div>
                                    </div>
                                    
-                                   {/* Ek Belgeler / Arşiv Belgeleri Alanı — SEKMELİ (Faturalar / Sözleşmeler / Oda Fotoğrafları / Ek Belgeler) */}
+                                   {/* Ek Belgeler / Arşiv Belgeleri Alanı — SEKMELİ */}
                                    <div className="flex flex-col gap-3">
                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Arşiv Belgeleri / Ek Belgeler</span>
                                        {/* Sekme başlıkları */}
@@ -6654,7 +6776,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                            ))}
                                        </div>
 
-                                       {/* FATURALAR (aynı veri; Fatura İşlemleri modalıyla da yönetilir) */}
+                                       {/* FATURALAR */}
                                        {archiveTab === 'faturalar' && (
                                            <div className="border border-gray-200 rounded-xl p-3 bg-white min-h-[9rem] flex flex-wrap gap-3 items-start content-start shadow-inner">
                                                {(!customer.invoices || customer.invoices.length === 0) ? (
@@ -6665,7 +6787,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                    [...customer.invoices].sort((a,b)=>b.id-a.id).map((inv) => (
                                                        <div key={inv.id} className="relative group border border-gray-200 rounded-lg p-2 bg-cyan-50/40 flex flex-col items-center gap-1 w-24 shadow-sm hover:shadow-md transition-all">
                                                            <a href={inv.file || '#'} target="_blank" rel="noreferrer" className="w-full h-14 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden">
-                                                               {inv.file && String(inv.file).startsWith('data:image') ? <img src={inv.file} alt="Fatura" className="w-full h-full object-cover"/> : <FileTextIcon size={22} className="text-cyan-500" />}
+                                                               {inv.file && !String(inv.file).includes('pdf') && String(inv.file).startsWith('data:image') ? <img src={inv.file} alt="Fatura" className="w-full h-full object-cover"/> : <FileTextIcon size={22} className="text-cyan-500" />}
                                                            </a>
                                                            <span className="text-[9px] text-gray-600 font-bold truncate w-full text-center">{inv.invoiceNo || 'Fatura'}</span>
                                                            <span className="text-[8px] text-gray-400">{inv.date ? new Date(inv.date).toLocaleDateString('tr-TR') : ''}</span>
@@ -6676,7 +6798,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                            </div>
                                        )}
 
-                                       {/* SÖZLEŞMELER (aynı veri; Sözleşmeler modalıyla da yönetilir) */}
+                                       {/* SÖZLEŞMELER */}
                                        {archiveTab === 'sozlesmeler' && (
                                            <div className="border border-gray-200 rounded-xl p-3 bg-white min-h-[9rem] flex flex-wrap gap-3 items-start content-start shadow-inner">
                                                {(!customer.contracts || customer.contracts.length === 0) ? (
@@ -6691,14 +6813,14 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                            </a>
                                                            <span className="text-[9px] text-gray-600 font-bold truncate w-full text-center" title={ct.label}>{ct.label || 'Sözleşme'}</span>
                                                            <span className="text-[8px] text-gray-400">{ct.date ? new Date(ct.date).toLocaleDateString('tr-TR') : ''}</span>
-                                                           <button onClick={() => { if (customer.id === selectedCustomerId) handleDeleteContract(ct.id); }} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" title="Sözleşmeyi Sil"><X size={10} strokeWidth={3} /></button>
+                                                           <button onClick={() => { if (customer.id === selectedCustomerId) handleDeleteContract(ct.id); else { setSelectedCustomerId(customer.id); handleDeleteContract(ct.id); } }} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" title="Sözleşmeyi Sil"><X size={10} strokeWidth={3} /></button>
                                                        </div>
                                                    ))
                                                )}
                                            </div>
                                        )}
 
-                                       {/* ODA FOTOĞRAFLARI (YENİ EKLENEN) */}
+                                       {/* ODA FOTOĞRAFLARI */}
                                        {archiveTab === 'odafoto' && (
                                            <div className="border border-gray-200 rounded-xl p-3 bg-white min-h-[9rem] flex flex-wrap gap-3 items-start content-start shadow-inner">
                                                {getCustomerRoomPhotos(customer.name).length === 0 ? (
@@ -6719,7 +6841,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                            </div>
                                        )}
 
-                                       {/* EK BELGELER (mevcut davranış korunuyor: Ekle butonu + liste) */}
+                                       {/* EK BELGELER */}
                                        {archiveTab === 'ekbelge' && (
                                            <div className="flex flex-col gap-2">
                                                <div className="flex justify-end">
@@ -6730,9 +6852,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                </div>
                                                <div className="border border-gray-200 rounded-xl p-3 bg-white min-h-[9rem] flex flex-wrap gap-3 items-start content-start shadow-inner">
                                                    {(!customer.extraDocuments || customer.extraDocuments.length === 0) ? (
-                                                       <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 opacity-70 mt-4">
-                                                           <FolderOpen size={24} className="mb-1 text-gray-300" />
-                                                           <span className="text-[10px] font-medium text-gray-400">Henüz ek belge bulunmuyor</span>
+                                                       <div className="w-full flex flex-col items-center justify-center text-gray-400 opacity-70 py-8">
+                                                           <FolderOpen size={24} className="mb-1 text-gray-300" /><span className="text-[10px] font-medium text-gray-400">Henüz ek belge bulunmuyor</span>
                                                        </div>
                                                    ) : (
                                                        customer.extraDocuments.map((doc, idx) => (
@@ -6935,7 +7056,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                   <button onClick={() => setPaymentEntryMode('bulk')} className={`pb-3 px-2 text-sm font-bold border-b-2 transition-colors ${paymentEntryMode === 'bulk' ? 'border-[#1bc5bd] text-[#1bc5bd]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                       Toplu Ödeme Yükle (Excel/CSV)
                   </button>
-                  {/* YENİ EKLENEN: Banka Otomatik Hareket Alma sekmesi */}
                   <button onClick={() => setPaymentEntryMode('bankapi')} className={`pb-3 px-2 text-sm font-bold border-b-2 transition-colors ${paymentEntryMode === 'bankapi' ? 'border-[#1bc5bd] text-[#1bc5bd]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                       Banka Otomatik Hareket Alma
                   </button>
@@ -6978,9 +7098,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <span className="text-sm font-bold text-amber-700 flex items-center gap-1.5"><CreditCard size={16}/> Kredi Kartıyla Tahsilat</span>
                             </label>
                           </div>
-                          <div className="flex flex-col gap-1.5"><label className="text-sm font-semibold text-gray-700">{globalPaymentData.isCreditCard ? 'Müşteriden Alınan Tutar (Cariye)' : 'Ödenen Tutar (TL)'}</label><input type="number" value={globalPaymentData.amount} onChange={(e)=>setGlobalPaymentData({...globalPaymentData, amount: e.target.value})} placeholder="Örn: 6600" className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-cyan-500 font-bold text-slate-800 text-lg" /></div>
+                          <div className="flex flex-col gap-1.5"><label className="text-sm font-semibold text-gray-700">{globalPaymentData.isCreditCard ? 'Müşteriden Alınan Tutar (Cariye)' : 'Ödenen Tutar (TL)'}</label><input type="number" value={globalPaymentData.amount} onChange={(e)=>setGlobalPaymentData({...globalPaymentData, amount: e.target.value})} placeholder="Örn: 30000" className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-cyan-500 font-bold text-slate-800 text-lg" /></div>
                           {globalPaymentData.isCreditCard && (
-                            <div className="flex flex-col gap-1.5"><label className="text-sm font-semibold text-amber-700">Kesintili Tutar (Hesaba Geçen Net)</label><input type="number" value={globalPaymentData.netAmount} onChange={(e)=>setGlobalPaymentData({...globalPaymentData, netAmount: e.target.value})} placeholder="Örn: 6400" className="w-full px-4 py-3 border-2 border-amber-300 rounded-xl text-sm focus:outline-none focus:border-amber-500 font-bold text-slate-800 text-lg bg-amber-50/40" /></div>
+                            <div className="flex flex-col gap-1.5"><label className="text-sm font-semibold text-amber-700">Kesintili Tutar (Hesaba Geçen Net)</label><input type="number" value={globalPaymentData.netAmount} onChange={(e)=>setGlobalPaymentData({...globalPaymentData, netAmount: e.target.value})} placeholder="Örn: 28450" className="w-full px-4 py-3 border-2 border-amber-300 rounded-xl text-sm focus:outline-none focus:border-amber-500 font-bold text-slate-800 text-lg bg-amber-50/40" /></div>
                           )}
                           <div className="flex flex-col gap-1.5"><label className="text-sm font-semibold text-gray-700">Ödeme Tarihi (Bankaya Geliş)</label><input type="date" value={globalPaymentData.date} onChange={(e)=>setGlobalPaymentData({...globalPaymentData, date: e.target.value})} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-cyan-500 font-medium text-slate-700" /></div>
                           <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-sm font-semibold text-gray-700">İşlem Açıklaması / Dekont Notu</label><textarea rows="3" value={globalPaymentData.note} onChange={(e)=>setGlobalPaymentData({...globalPaymentData, note: e.target.value})} placeholder="Örn: Haziran 2026 kirası" className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-cyan-500 resize-none font-medium text-slate-700"></textarea></div>
@@ -7144,7 +7264,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   </>
                               )}
                           </div>
-                          <p className="text-[11px] text-gray-400 mt-3">Güvenlik: API bilgileriniz yalnızca banka bağlantısı için kullanılır. Hareketler bankanın resmî API'sinden güvenli sunucu üzerinden çekilir.</p>
+                          <p className="text-[11px] text-gray-400 mt-3">Güvenlik: API bilgileriniz yalnızca banka bağlantısı için kullanılır. Canlı ortamda hareketler bankanın resmî API'sinden güvenli sunucu üzerinden çekilir.</p>
                       </div>
 
                       {/* Canlı hareketler tablosu */}
@@ -7209,15 +7329,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     </div>
                     <select value={debtMonthFilter} onChange={(e) => setDebtMonthFilter(e.target.value)} className="w-full sm:w-auto px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 font-bold text-slate-700 shadow-sm cursor-pointer">
                         <option value="all">Tüm Borçlular</option>
-                        <option value="1">1 Ay Gecikenler</option>
-                        <option value="2">2 Ay Gecikenler</option>
-                        <option value="3">3 Ay Gecikenler</option>
-                        <option value="4">4 Ay Gecikenler</option>
-                        <option value="5+">5+ Ay Gecikenler</option>
-                    </select>
-                    {/* YENİ EKLENEN: Borç tutarı (TL aralığı) filtresi */}
-                    <select value={debtAmountFilter} onChange={(e) => setDebtAmountFilter(e.target.value)} className="w-full sm:w-auto px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 font-bold text-slate-700 shadow-sm cursor-pointer">
-                        <option value="all">Tüm Tutarlar</option>
                         <option value="0-30000">0 - 30.000 TL Arası</option>
                         <option value="30000-50000">30.000 - 50.000 TL Arası</option>
                         <option value="50000-100000">50.000 - 100.000 TL Arası</option>
@@ -7225,7 +7336,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     </select>
                     {/* YENİ EKLENEN: Tahsilat durumu / Yeni Eklenen filtresi */}
                     <select value={debtPaymentFilter} onChange={(e) => setDebtPaymentFilter(e.target.value)} className="w-full sm:w-auto px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 font-bold text-slate-700 shadow-sm cursor-pointer">
-                        <option value="all">Tahsilat Durumu: Tümü</option>
                         <option value="new">Yeni Eklenen</option>
                         <option value="1">1 Aydır Tahsilat Yok</option>
                         <option value="2">2 Aydır Tahsilat Yok</option>
@@ -7265,11 +7375,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   monthsOwed = 1; 
                               }
                           }
-            
+
                           // YENİ EKLENEN: Faiz durumu — cari hesabında (ledger) faiz hareketi işlenmiş mi?
+                          // Faiz işlemi açıldıktan ve müşterinin carisine faiz işlendikten sonra durum "başladı" olur.
                           const interestApplied = Array.isArray(ledger) && ledger.some(tx => tx.isInterest);
 
                           // YENİ EKLENEN: Kaç aydır tahsilat (ödeme) girişi yapılmadığı hesabı.
+                          // Son ödeme tarihinden bugüne kadar geçen ay sayısı. Tahsilat girişi olunca otomatik sıfırlanır.
                           const payments = customer.payments || [];
                           let monthsSincePayment = null; // null = hiç ödeme yok
                           let lastPaymentDateStr = null;
@@ -7283,8 +7395,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   if (monthsSincePayment < 0) monthsSincePayment = 0;
                               }
                           }
-
+            
                           // YENİ EKLENEN: "Yeni Eklenen" sıralaması için müşterinin en son borç ekleme zamanı.
+                          // Ledger'daki borç (debt) hareketlerinin ve manuel ek borçların en yeni tarihini alır.
                           let lastDebtTime = 0;
                           if (Array.isArray(ledger)) {
                               ledger.forEach(tx => {
@@ -7314,27 +7427,19 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                       let filteredDebtors = debtors.filter(c => c.name.toLowerCase().includes(debtSearchTerm.toLowerCase()));
 
-                      if (debtMonthFilter !== 'all') {
-                          if (debtMonthFilter === '5+') {
-                              filteredDebtors = filteredDebtors.filter(c => c.monthsOwed >= 5);
-                          } else {
-                              const targetMonths = parseInt(debtMonthFilter);
-                              filteredDebtors = filteredDebtors.filter(c => c.monthsOwed === targetMonths);
-                          }
-                      }
-
-                      // YENİ EKLENEN: Borç tutarı aralığına göre filtreleme (mevcut ay-gecikme filtresiyle BİRLİKTE, ek olarak çalışır)
-                      if (debtAmountFilter === '0-30000') {
+                      // YENİ EKLENEN: Borç tutarı aralığına göre filtreleme
+                      if (debtMonthFilter === '0-30000') {
                           filteredDebtors = filteredDebtors.filter(c => c.totalDebt <= 30000);
-                      } else if (debtAmountFilter === '30000-50000') {
+                      } else if (debtMonthFilter === '30000-50000') {
                           filteredDebtors = filteredDebtors.filter(c => c.totalDebt > 30000 && c.totalDebt <= 50000);
-                      } else if (debtAmountFilter === '50000-100000') {
+                      } else if (debtMonthFilter === '50000-100000') {
                           filteredDebtors = filteredDebtors.filter(c => c.totalDebt > 50000 && c.totalDebt <= 100000);
-                      } else if (debtAmountFilter === '100000+') {
+                      } else if (debtMonthFilter === '100000+') {
                           filteredDebtors = filteredDebtors.filter(c => c.totalDebt > 100000);
                       }
+                      // "all" (Tüm Borçlular) seçiliyken tüm borçlular gösterilir, en yüksekten en düşüğe sıralanır (aşağıdaki .sort ile)
 
-                      // YENİ EKLENEN: Kaç aydır tahsilat yok / Yeni Eklenen filtresi (ek olarak çalışır)
+                      // YENİ EKLENEN: Kaç aydır tahsilat yok / Yeni Eklenen filtresi
                       if (debtPaymentFilter === '1') {
                           filteredDebtors = filteredDebtors.filter(c => c.monthsSincePayment === 1);
                       } else if (debtPaymentFilter === '2') {
@@ -7348,7 +7453,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       } else if (debtPaymentFilter === 'none') {
                           filteredDebtors = filteredDebtors.filter(c => c.monthsSincePayment === null);
                       }
-                      // 'new' (Yeni Eklenen) seçiliyken filtre uygulanmaz; sadece aşağıdaki sıralamayı etkiler.
+                      // 'new' (Yeni Eklenen) seçiliyken tüm borçlular kalır, aşağıda en son borç eklenene göre sıralanır.
 
                       // YENİ EKLENEN: Toplam borcu hesapla
                       const grandTotalDebt = filteredDebtors.reduce((sum, c) => sum + c.totalDebt, 0);
@@ -7375,20 +7480,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               </div>
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                                  {/* YENİ EKLENEN: Sıralama artık odanın en son zamlanmış (güncel) kirasına göre
-                                  hesaplanan gecikme ayı sayısına (monthsOwed) göre yapılıyor — en çok ay geciken
-                                  en üstte. Eşit ay gecikmesi olanlar arasında ise borç tutarına göre sıralanır. */}
-                              {/* YENİ EKLENEN: Tahsilat Durumu filtresi "Yeni Eklenen" ise en son borç eklenene göre sıralanır (ek özellik). */}
-                              {filteredDebtors.sort((a, b) => debtPaymentFilter === 'new' ? (b.lastDebtTime - a.lastDebtTime) : (b.monthsOwed - a.monthsOwed || b.totalDebt - a.totalDebt)).map((customer) => {
-                                      let delayColor = 'bg-gray-100 text-gray-600 border-gray-200';
-                                      if (customer.monthsOwed >= 5) delayColor = 'bg-red-500 text-white border-red-600';
-
-                                      // YENİ EKLENEN: Faiz durumu rengi (mevcut "X Ay Gecikme" rozetinin YANINA eklenir)
+                                  {filteredDebtors.sort((a, b) => debtPaymentFilter === 'new' ? (b.lastDebtTime - a.lastDebtTime) : (b.totalDebt - a.totalDebt)).map((customer) => {
+                                      // YENİ: Faiz durumu rengi
                                       const interestBadge = customer.interestApplied
                                           ? 'bg-red-500 text-white border-red-600'
                                           : 'bg-emerald-50 text-emerald-700 border-emerald-200';
 
-                                      // YENİ EKLENEN: Kaç aydır tahsilat yok — renk kademesi
+                                      // YENİ: Kaç aydır tahsilat yok — renk kademesi (uzun süre → daha koyu uyarı)
                                       let noPayColor = 'bg-slate-100 text-slate-600 border-slate-200';
                                       if (customer.monthsSincePayment === null) {
                                           noPayColor = 'bg-gray-800 text-white border-gray-900';
@@ -7406,7 +7504,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                   <h4 className="font-bold text-gray-800 text-lg mb-1 truncate cursor-pointer hover:text-red-500" onClick={() => setSelectedCustomerId(customer.id)}>{customer.name}</h4>
                                                   <div className="text-xs text-gray-500 font-medium mb-4 flex items-center gap-1"><Phone size={12}/> {customer.phone}</div>
 
-                                                  {/* YENİ EKLENEN: Kaç aydır tahsilat girişi yapılmadığı bildirim şeridi (mevcut rozetlerin YANINA eklendi) */}
+                                                  {/* YENİ EKLENEN: Kaç aydır tahsilat girişi yapılmadığı bildirim şeridi */}
                                                   <div className={`mb-3 rounded-xl px-3 py-2 border flex items-center gap-2 ${noPayColor}`}>
                                                       <History size={16} className="shrink-0" />
                                                       <div className="leading-tight">
@@ -7430,10 +7528,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                   </div>
 
                                                   <div className="flex flex-wrap gap-2 mb-4">
-                                                      <span className={`px-2 py-1 rounded text-[10px] font-bold border shadow-sm ${delayColor}`}>
-                                                          {customer.monthsOwed} Ay Gecikme
-                                                      </span>
-                                                      {/* YENİ EKLENEN: Faiz Durumu rozeti (mevcut Ay Gecikme rozetinin YANINA eklendi) */}
+                                                      {/* YENİ: "X Ay Gecikme" yerine Faiz Durumu */}
                                                       <span className={`px-2 py-1 rounded text-[10px] font-bold border shadow-sm flex items-center gap-1 ${interestBadge}`}>
                                                           <AlertCircle size={10} /> {customer.interestApplied ? 'Faiz Başladı' : 'Faiz Başlamadı'}
                                                       </span>
@@ -7555,11 +7650,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
        
                       // Tarih filtresi
                       if (collectionFilter === 'all') return true;
-
+                      
                       const itemDate = new Date(item.date);
                       itemDate.setHours(0, 0, 0, 0);
 
-                      // YENİ EKLENEN: Son gelenler — bugünden en az 2 ay öncesine kadar olan tahsilatlar (mevcut filtrelerin YANINA eklendi)
+                      // YENİ EKLENEN: Son gelenler — bugünden en az 2 ay öncesine kadar olan tahsilatlar
                       if (collectionFilter === 'recent') {
                           const twoMonthsAgo = new Date(today);
                           twoMonthsAgo.setMonth(today.getMonth() - 2);
@@ -7575,16 +7670,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       }
                       if (collectionFilter === 'month') {
                           return itemDate.getMonth() === today.getMonth() && itemDate.getFullYear() === today.getFullYear();
-                      }
-                      if (collectionFilter === 'lastMonth') {
-                          let lastMonth = today.getMonth() - 1;
-                          let year = today.getFullYear();
-                          // Eğer şu an Ocak ayıysa, geçen ay geçen yılın Aralık ayıdır
-                          if (lastMonth < 0) {
-                              lastMonth = 11;
-                              year--;
-                          }
-                          return itemDate.getMonth() === lastMonth && itemDate.getFullYear() === year;
                       }
                       if (collectionFilter === 'year') {
                           return itemDate.getFullYear() === today.getFullYear();
@@ -7603,14 +7688,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   <input type="text" placeholder="Müşteri Adı veya No..." value={collectionSearchTerm} onChange={(e) => setCollectionSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-green-400 focus:ring-2 focus:ring-green-50 shadow-sm font-medium" />
                               </div>
 <div className="flex bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm w-full sm:w-auto overflow-x-auto">
-                                  {/* YENİ EKLENEN: Son Tahsilatlar hızlı filtresi (mevcut filtrelerin YANINA eklendi) */}
                                   <button onClick={() => setCollectionFilter('recent')} className={`px-4 py-2.5 text-sm font-bold transition-colors whitespace-nowrap ${collectionFilter === 'recent' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Son Tahsilatlar</button>
-                                  <button onClick={() => setCollectionFilter('today')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'today' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Günlük</button>
-                                  <button onClick={() => setCollectionFilter('week')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'week' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Haftalık</button>
+                                  <button onClick={() => setCollectionFilter('today')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'today' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bugün</button>
+                                  <button onClick={() => setCollectionFilter('week')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'week' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Hafta</button>
                                   <button onClick={() => setCollectionFilter('month')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'month' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Ay</button>
-                                  <button onClick={() => setCollectionFilter('lastMonth')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'lastMonth' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Geçen Ay</button>
-                                  <button onClick={() => setCollectionFilter('year')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'year' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Yıl</button>
-                                  <button onClick={() => setCollectionFilter('all')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'all' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Tümü</button>
+                                  <button onClick={() => setCollectionFilter('year')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors whitespace-nowrap ${collectionFilter === 'year' ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Sene</button>
                               </div>
                           </div>
 
@@ -7634,7 +7716,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                   <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
                                                       <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-700">{dateStr}</td>
                                                       <td className="px-6 py-4">
-                                                          <div className="font-bold text-gray-800">{tx.customerName}</div>
+                                                          <div className="font-bold text-gray-800 cursor-pointer hover:text-[#1bc5bd] hover:underline transition-colors" onClick={() => setSelectedCustomerId(tx.customerId)} title="Müşteri carisine git">{tx.customerName}</div>
                                                           <div className="text-[10px] text-gray-400 mt-0.5">No: {tx.customerNo}</div>
                                                       </td>
                                                       <td className="px-6 py-4 font-medium text-gray-600">{tx.note}</td>
@@ -7642,15 +7724,28 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                       <td className="px-6 py-4 text-center">
                                                           <div className="flex items-center justify-center gap-2">
                                                               {tx.hasEInvoice ? (
-                                                                  <button onClick={() => handleViewEInvoice(tx)} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm" title="E-Faturayı Görüntüle ve Yazdır">
-                                                                      <FileTextIcon size={14}/> E-Fatura Gör
-                                                                  </button>
+                                                                  <div className="flex flex-col items-stretch gap-1">
+                                                                      <button onClick={() => {
+                                                                          // YENİ: "Faturayı Yükle" ile yüklenmiş bir dosya varsa onu aç (aynı dosya),
+                                                                          // yoksa eski davranışa (sentetik e-arşiv görüntüle) geri dön.
+                                                                          const cust = customers.find(c => c.id === tx.customerId);
+                                                                          const uploaded = cust?.invoices?.find(inv => (tx.eInvoiceNo && inv.invoiceNo === tx.eInvoiceNo) || (inv.amount === tx.amount && inv.date === tx.date));
+                                                                          if (uploaded && uploaded.file) { window.open(uploaded.file, '_blank'); }
+                                                                          else { handleViewEInvoice(tx); }
+                                                                      }} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm" title="Yüklenen faturayı görüntüle">
+                                                                          <FileTextIcon size={14}/> Faturayı Gör
+                                                                      </button>
+                                                                      {/* YENİ EKLENEN: Fatura zaten başlatıldıysa, altında küçük "Faturayı Tekrar Başlat" butonu */}
+                                                                      <button onClick={() => { setEInvoiceError(null); setEInvoiceModalData(tx); }} className="bg-white hover:bg-blue-50 text-blue-600 border border-blue-100 px-1.5 py-0.5 rounded-md text-[9px] font-bold transition-colors flex items-center justify-center gap-1 shadow-sm" title="Fatura bilgilerini Paraşüt'e tekrar aktar">
+                                                                          <RefreshCcw size={9}/> Tekrar Başlat
+                                                                      </button>
+                                                                  </div>
                                                               ) : (
-                                                                  <button onClick={() => { setEInvoiceError(null); setEInvoiceModalData(tx); }} className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm" title="MBT Portalına E-Fatura/E-Arşiv Gönder">
-                                                                      <FileTextIcon size={14}/> E-Fatura Kes
+                                                                  <button onClick={() => { setEInvoiceError(null); setEInvoiceModalData(tx); }} className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm" title="Fatura bilgilerini Paraşüt'e aktar (başlat)">
+                                                                      <FileTextIcon size={14}/> Faturayı Başlat
                                                                   </button>
                                                               )}
-                                                              {/* YENİ EKLENEN: Fatura yüklenmişse "Faturayı Paylaş", değilse "Faturayı Yükle" — mevcut E-Fatura Gör/Kes butonlarının YANINA eklendi */}
+                                                              {/* YENİ EKLENEN: Fatura yüklenmişse "Faturayı Paylaş", değilse "Faturayı Yükle" */}
                                                               {(() => {
                                                                   const cust = customers.find(c => c.id === tx.customerId);
                                                                   const uploaded = cust?.invoices?.find(inv => (tx.eInvoiceNo && inv.invoiceNo === tx.eInvoiceNo) || (inv.amount === tx.amount && inv.date === tx.date));
@@ -7662,7 +7757,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                                       );
                                                                   }
                                                                   return (
-                                                                      <button onClick={() => setUploadInvoiceData(tx)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm" title="Kestiğiniz faturayı yükleyip cariye kaydedin">
+                                                                      <button onClick={() => setUploadInvoiceData(tx)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm" title="Paraşüt'te kestiğiniz faturayı yükleyip cariye kaydedin">
                                                                           <Upload size={14}/> Faturayı Yükle
                                                                       </button>
                                                                   );
@@ -7733,7 +7828,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                               {(() => {
-                                  // hasKdv === false olan (yani +KDV uygulanmayan) dolu odaları bul
+                                  // YENİ EKLENEN: hasKdv === false olan (yani +KDV uygulanmayan) dolu odaları bul
                                   const kdvsizRooms = rooms.filter(r => r.customerName && r.hasKdv === false);
                                   const filteredKdvsiz = kdvsizRooms.filter(room =>
                                       room.customerName.toLowerCase().includes(kdvsizSearchTerm.toLowerCase()) ||
@@ -8181,13 +8276,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <div className="animate-in fade-in duration-300">
                     <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-purple-200 bg-purple-50/30">
                         <div>
-                            <button onClick={() => { setActiveSizeFilter(null); setSizeFilterScope(null); }} className="text-xs font-bold text-gray-500 hover:text-purple-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
+                            <button onClick={() => setActiveSizeFilter(null)} className="text-xs font-bold text-gray-500 hover:text-purple-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
                             <h2 className="text-2xl font-bold text-purple-900">Boş Depo Arama: {sizeFilters.find(f => f.id === activeSizeFilter)?.label}</h2>
-                            {sizeFilterScope && (
-                                <p className="text-xs font-bold text-purple-500 mt-1">
-                                    {sizeFilterScope.type === 'warehouse' ? `Sadece "${warehouses.find(w => w.id === sizeFilterScope.id)?.name}" deposu içinde aranıyor` : `Sadece "${blocks.find(b => b.id === sizeFilterScope.id)?.name}" bloğu içinde aranıyor`}
-                                </p>
-                            )}
                         </div>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-6 pb-8">
@@ -8196,17 +8286,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             const filteredEmptyRooms = rooms.filter(r => {
                                 const isEmpty = !r.customerName && (!r.isReserved || r.reserveExpiryTimestamp < Date.now());
                                 const m3 = Number(r.m3 || 0);
-                                const sizeOk = isEmpty && m3 >= filterOpt.min && m3 <= filterOpt.max;
-                                if (!sizeOk) return false;
-                                // YENİ EKLENEN: Bulunduğu depo/blok kapsamına göre filtreleme
-                                if (sizeFilterScope?.type === 'warehouse') {
-                                    const block = blocks.find(b => b.id === r.blockId);
-                                    return block?.warehouseId === sizeFilterScope.id;
-                                }
-                                if (sizeFilterScope?.type === 'block') {
-                                    return r.blockId === sizeFilterScope.id;
-                                }
-                                return true;
+                                return isEmpty && m3 >= filterOpt.min && m3 <= filterOpt.max;
                             });
 
                             if (filteredEmptyRooms.length === 0) {
@@ -8229,7 +8309,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                         setSelectedBlockId(block?.id);
                                         setSelectedRoomId(oda.id);
                                         setActiveSizeFilter(null);
-                                        setSizeFilterScope(null);
                                     }} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
                                         <div className="px-4 py-3 flex justify-between items-center bg-[#1bc5bd] text-white shadow-md z-10">
                                             <div className="flex flex-col min-w-0 mr-2">
@@ -8253,84 +8332,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         })()}
                     </div>
                  </div>
-              ) : isReserveFilterActive ? (
-                 <div className="animate-in fade-in duration-300">
-                    <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-orange-200 bg-orange-50/30">
-                        <div>
-                            <button onClick={() => { setIsReserveFilterActive(false); setReserveFilterScope(null); }} className="text-xs font-bold text-gray-500 hover:text-orange-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
-                            <h2 className="text-2xl font-bold text-orange-900">Rezerve Odalar</h2>
-                            {reserveFilterScope && (
-                                <p className="text-xs font-bold text-orange-500 mt-1">
-                                    {reserveFilterScope.type === 'warehouse' ? `Sadece "${warehouses.find(w => w.id === reserveFilterScope.id)?.name}" deposu içinde gösteriliyor` : `Sadece "${blocks.find(b => b.id === reserveFilterScope.id)?.name}" bloğu içinde gösteriliyor`}
-                                </p>
-                            )}
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-6 pb-8">
-                        {(() => {
-                            const reservedRooms = rooms.filter(r => {
-                                const isValidReservation = r.isReserved && !r.customerName && (!r.reserveExpiryTimestamp || r.reserveExpiryTimestamp > Date.now());
-                                if (!isValidReservation) return false;
-                                if (reserveFilterScope?.type === 'warehouse') {
-                                    const block = blocks.find(b => b.id === r.blockId);
-                                    return block?.warehouseId === reserveFilterScope.id;
-                                }
-                                if (reserveFilterScope?.type === 'block') {
-                                    return r.blockId === reserveFilterScope.id;
-                                }
-                                return true;
-                            });
-
-                            if (reservedRooms.length === 0) {
-                                return (
-                                    <div className="col-span-full py-16 text-center bg-white rounded-xl border border-dashed border-gray-300 shadow-sm">
-                                        <Calendar size={40} className="mx-auto text-gray-300 mb-4" />
-                                        <h3 className="text-lg font-bold text-gray-700">Rezerve Edilmiş Oda Bulunamadı</h3>
-                                        <p className="text-sm text-gray-500 mt-1">Bu kapsamda şu anda geçerli bir rezervasyon yok.</p>
-                                    </div>
-                                );
-                            }
-
-                            return reservedRooms.map((oda) => {
-                                const block = blocks.find(b => b.id === oda.blockId);
-                                const warehouse = warehouses.find(w => w.id === block?.warehouseId);
-
-                                return (
-                                    <div key={oda.id} onClick={() => {
-                                        setSelectedWarehouseId(warehouse?.id);
-                                        setSelectedBlockId(block?.id);
-                                        setSelectedRoomId(oda.id);
-                                        setIsReserveFilterActive(false);
-                                        setReserveFilterScope(null);
-                                    }} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
-                                        <div className="px-4 py-3 flex justify-between items-center bg-orange-500 text-white shadow-md z-10">
-                                            <div className="flex flex-col min-w-0 mr-2">
-                                                <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
-                                                <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
-                                            </div>
-                                            <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner shrink-0">{oda.m3} m³</span>
-                                        </div>
-                                        <div className="flex-1 relative flex flex-col justify-center items-center min-h-[140px] gap-1 p-3"
-                                            style={{ backgroundImage: 'repeating-linear-gradient(to bottom, #fff7ed, #fff7ed 12px, #fed7aa 12px, #fed7aa 14px)' }}>
-                                            <div className="px-3 py-2 rounded-lg border-2 shadow-sm font-bold uppercase text-[11px] text-center max-w-[90%] truncate bg-white text-orange-600 border-orange-200">
-                                                REZERVELİ
-                                            </div>
-                                            <span className="text-[11px] font-bold text-orange-800 text-center truncate max-w-full">{oda.reservedName}</span>
-                                            <span className="text-[9px] text-orange-600 text-center">Son Geçerlilik: {oda.reserveExpiry}</span>
-                                        </div>
-                                    </div>
-                                );
-                            });
-                        })()}
-                    </div>
-                 </div>
               ) : !selectedWarehouseId ? (
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-col sm:flex-row gap-4 sm:gap-0">
                     <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
                     <div className="flex flex-wrap items-center gap-3">
                         <div className="relative">
-                            <button onClick={() => { setSizeFilterScope(null); setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen); }} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
+                            <button onClick={() => setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen)} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
                                 <Search size={16} /> Depo Boyutu Bul
                             </button>
                             {isSizeFilterDropdownOpen && (
@@ -8350,9 +8358,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 </>
                             )}
                         </div>
-                        <button onClick={() => { setReserveFilterScope(null); setIsReserveFilterActive(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-orange-500/30">
-                            <Calendar size={16} /> Rezerve
-                        </button>
                         <button onClick={() => setIsAddWarehouseModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors shadow-sm">Depo Ekle <Plus size={16} /></button>
                     </div>
                   </div>
@@ -8388,7 +8393,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             {depo.listPhoto ? <img src={depo.listPhoto} alt={depo.name} className="w-full h-full object-cover" /> : <Home size={28} strokeWidth={1.5} />}
                           </div>
                           <div className="flex gap-1.5 z-10" onClick={e => e.stopPropagation()}>
-                            {/* YENİ EKLENEN: Depo fotoğrafı görüntüle/yükle */}
                             <button onClick={(e) => { e.stopPropagation(); setEntityPhotoViewer({ type: 'warehouse', id: depo.id }); }} className="bg-gray-100 hover:bg-slate-700 hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="Depo Fotoğrafı"><Eye size={14} /></button>
                             <button onClick={(e) => { e.stopPropagation(); setEditWarehouseData({...depo}); setIsEditWarehouseModalOpen(true); }} className="bg-gray-100 hover:bg-[#1bc5bd] hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="Düzenle"><Edit size={14} /></button>
                             <button onClick={(e) => handleDeleteWarehouseClick(e, depo.id)} className="bg-gray-100 hover:bg-[#f64e60] hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="Depoyu Sil"><Trash2 size={14} /></button>
@@ -8436,40 +8440,14 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <div><button onClick={() => setSelectedWarehouseId(null)} className="text-xs font-bold text-gray-400 hover:text-[#1bc5bd] tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> {warehouses.find(w => w.id === selectedWarehouseId)?.name}</button><h2 className="text-2xl font-bold text-slate-800">Blok Listesi</h2></div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <div className="relative">
-                            <button onClick={() => { setSizeFilterScope({ type: 'warehouse', id: selectedWarehouseId }); setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen); }} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
-                                <Search size={16} /> Depo Boyutu Bul
-                            </button>
-                            {isSizeFilterDropdownOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setIsSizeFilterDropdownOpen(false)}></div>
-                                    <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-100 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                                        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase flex items-center justify-between">
-                                            <span>Bu Depodaki Boş Odalar</span>
-                                            <button onClick={() => setIsSizeFilterDropdownOpen(false)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
-                                        </div>
-                                        {sizeFilters.map(f => (
-                                            <button key={f.id} onClick={() => { setActiveSizeFilter(f.id); setIsSizeFilterDropdownOpen(false); }} className="w-full text-left px-4 py-3 text-sm font-bold text-gray-700 hover:bg-purple-50 hover:text-purple-700 border-b border-gray-50 last:border-0 transition-colors flex items-center justify-between group">
-                                                <div className="flex items-center gap-2"><Box size={16} className="text-purple-400 group-hover:text-purple-600 transition-colors" /> {f.label}</div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                        <button onClick={() => { setReserveFilterScope({ type: 'warehouse', id: selectedWarehouseId }); setIsReserveFilterActive(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-orange-500/30">
-                            <Calendar size={16} /> Rezerve
-                        </button>
-                        <button onClick={() => setIsAddBlockModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Blok Ekle <Plus size={16} /></button>
-                    </div>
+                    <button onClick={() => setIsAddBlockModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Blok Ekle <Plus size={16} /></button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6 pb-8">
                   {(() => {
                     // YENİ EKLENEN: Bloklar, bağlı olduğu şubenin (deponun) rengini kullanır.
                     // Şube rengi, deponun warehouses dizisindeki sırasına göre aynı paletten seçilir.
                     const bColorPalette = [
-                      { side: 'bg-indigo-500/80', title: 'text-indigo-900', titleHover: 'group-hover:text-indigo-600', icon: 'text-indigo-400', barBg: 'bg-indigo-50', bar: 'bg-indigo-500', statText: 'text-indigo-900/60', border: 'border-indigo-100', editBg: 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600', divide: 'border-indigo-50' },
+                      { side: 'bg-blue-500/80', title: 'text-blue-900', titleHover: 'group-hover:text-blue-600', icon: 'text-blue-400', barBg: 'bg-blue-50', bar: 'bg-blue-500', statText: 'text-blue-900/60', border: 'border-blue-100', editBg: 'bg-blue-50 hover:bg-blue-100 text-blue-600', divide: 'border-blue-50' },
                       { side: 'bg-emerald-500/80', title: 'text-emerald-900', titleHover: 'group-hover:text-emerald-600', icon: 'text-emerald-400', barBg: 'bg-emerald-50', bar: 'bg-emerald-500', statText: 'text-emerald-900/60', border: 'border-emerald-100', editBg: 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600', divide: 'border-emerald-50' },
                       { side: 'bg-amber-500/80', title: 'text-amber-900', titleHover: 'group-hover:text-amber-600', icon: 'text-amber-400', barBg: 'bg-amber-50', bar: 'bg-amber-500', statText: 'text-amber-900/60', border: 'border-amber-100', editBg: 'bg-amber-50 hover:bg-amber-100 text-amber-600', divide: 'border-amber-50' },
                       { side: 'bg-purple-500/80', title: 'text-purple-900', titleHover: 'group-hover:text-purple-600', icon: 'text-purple-400', barBg: 'bg-purple-50', bar: 'bg-purple-500', statText: 'text-purple-900/60', border: 'border-purple-100', editBg: 'bg-purple-50 hover:bg-purple-100 text-purple-600', divide: 'border-purple-50' },
@@ -8491,14 +8469,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       {/* Konteyner/Blok Yan Direkleri (Raf Görünümü) */}
                       <div className={`absolute left-0 top-0 bottom-0 w-2.5 ${bColor.side}`}></div>
                       <div className={`absolute right-0 top-0 bottom-0 w-2.5 ${bColor.side}`}></div>
-
+                      
                       <div className="p-5 px-7 flex-1 flex flex-col">
                         <div className="flex justify-between items-start mb-4">
                           <h3 className={`text-2xl font-black ${bColor.title} uppercase tracking-tight flex items-center gap-2 ${bColor.titleHover} transition-colors`}>
                              {blok.listPhoto ? <img src={blok.listPhoto} alt={blok.name} className="w-8 h-8 rounded-lg object-cover border border-white shadow-sm" /> : <LayoutDashboard size={24} className={bColor.icon} />} {blok.name}
                           </h3>
                           <div className="flex gap-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                            {/* YENİ EKLENEN: Blok fotoğrafı görüntüle/yükle */}
                             <button onClick={(e) => { e.stopPropagation(); setEntityPhotoViewer({ type: 'block', id: blok.id }); }} className="bg-slate-100 hover:bg-slate-700 hover:text-white text-slate-500 p-1.5 rounded transition-colors" title="Blok Fotoğrafı"><Eye size={14} /></button>
                             <button onClick={(e) => { e.stopPropagation(); setEditBlockData({...blok}); setIsEditBlockModalOpen(true); }} className={`${bColor.editBg} p-1.5 rounded transition-colors`} title="Düzenle"><Edit size={14} /></button>
                             <button onClick={(e) => handleDeleteBlockClick(e, blok.id)} className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded transition-colors" title="Sil"><Trash2 size={14} /></button>
@@ -8508,7 +8485,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             </div>
                           </div>
                         </div>
-
+                        
                         <div className="mb-6 mt-auto">
                            <div className={`flex justify-between text-xs font-bold ${bColor.statText} mb-2`}>
                               <span>{occupied} m³ / {capacity} m³</span>
@@ -8518,7 +8495,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <div className={`h-full ${bColor.bar} rounded-full transition-all duration-500`} style={{ width: `${percentage}%` }}></div>
                            </div>
                         </div>
-
+                        
                         <div className={`flex justify-between items-center border-t ${bColor.divide} pt-4`}>
                           <div className="flex items-center gap-1.5 text-teal-600 bg-teal-50 px-2 py-1 rounded" title="Boş Odalar"><Home size={14} strokeWidth={2.5}/> <span className="font-bold text-sm">{stats.empty}</span></div>
                           <div className="flex items-center gap-1.5 text-orange-500 bg-orange-50 px-2 py-1 rounded" title="Rezerve Odalar"><Clock size={14} strokeWidth={2.5}/> <span className="font-bold text-sm">{stats.reserved}</span></div>
@@ -8534,33 +8511,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <div><button onClick={() => setSelectedBlockId(null)} className="text-xs font-bold text-gray-400 hover:text-[#1bc5bd] tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> {blocks.find(b => b.id === selectedBlockId)?.name}</button><h2 className="text-2xl font-bold text-slate-800">Oda Listesi</h2></div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <div className="relative">
-                            <button onClick={() => { setSizeFilterScope({ type: 'block', id: selectedBlockId }); setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen); }} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
-                                <Search size={16} /> Depo Boyutu Bul
-                            </button>
-                            {isSizeFilterDropdownOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setIsSizeFilterDropdownOpen(false)}></div>
-                                    <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-100 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                                        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase flex items-center justify-between">
-                                            <span>Bu Bloktaki Boş Odalar</span>
-                                            <button onClick={() => setIsSizeFilterDropdownOpen(false)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
-                                        </div>
-                                        {sizeFilters.map(f => (
-                                            <button key={f.id} onClick={() => { setActiveSizeFilter(f.id); setIsSizeFilterDropdownOpen(false); }} className="w-full text-left px-4 py-3 text-sm font-bold text-gray-700 hover:bg-purple-50 hover:text-purple-700 border-b border-gray-50 last:border-0 transition-colors flex items-center justify-between group">
-                                                <div className="flex items-center gap-2"><Box size={16} className="text-purple-400 group-hover:text-purple-600 transition-colors" /> {f.label}</div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                        <button onClick={() => { setReserveFilterScope({ type: 'block', id: selectedBlockId }); setIsReserveFilterActive(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-orange-500/30">
-                            <Calendar size={16} /> Rezerve
-                        </button>
-                        <button onClick={() => setIsAddRoomModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Oda Ekle <Plus size={16} /></button>
-                    </div>
+                    <button onClick={() => setIsAddRoomModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Oda Ekle <Plus size={16} /></button>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-6 pb-8">
                     {rooms.filter(r => r.blockId === selectedBlockId).map((oda, index, arr) => {
@@ -8614,7 +8565,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              <div className={`relative z-10 px-3 py-2 rounded-lg border-2 shadow-sm font-bold uppercase text-[11px] text-center max-w-[90%] truncate ${badgeStyle}`}>
                                  {statusText}
                              </div>
-
+                             
                              {/* Hover Aksiyonları */}
                              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20" onClick={e => e.stopPropagation()}>
                                 <button onClick={(e) => { e.stopPropagation(); setEditRoomData({...oda}); setIsEditRoomModalOpen(true); }} className="bg-white hover:bg-gray-100 text-gray-700 p-1.5 rounded-md shadow transition-colors" title="Düzenle"><Edit size={14} /></button>
@@ -8723,8 +8674,23 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         </div>
                      ) : (
                         <>
-                           <div className="mb-8">
-                              <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-6">ODA BİLGİLERİ</h3>
+                           <div className="mb-8 border border-gray-200 rounded-2xl p-6 shadow-sm bg-gradient-to-br from-white to-slate-50/50">
+                              <div className="flex flex-wrap justify-between items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+                                 <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2"><Box size={16} className="text-[#1bc5bd]"/> Oda Bilgileri</h3>
+                                 {/* YENİ: Sağ üstte hızlı işlem butonları */}
+                                 <div className="flex flex-wrap gap-2">
+                                    <button onClick={() => { 
+                                       setEditRentData({
+                                         customerName: selectedRoomDetail.customerName || '', entryDate: selectedRoomDetail.entryDate || '', paymentDate: selectedRoomDetail.paymentDate || '', monthlyFee: selectedRoomDetail.monthlyFee || '', hasKdv: selectedRoomDetail.hasKdv !== undefined ? selectedRoomDetail.hasKdv : true, sealNo: selectedRoomDetail.sealNo || '', broughtBy: selectedRoomDetail.broughtBy || 'kendisi', teamList: selectedRoomDetail.teamList || ''
+                                       }); setIsEditRentModalOpen(true); 
+                                    }} className="flex items-center gap-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm"><Edit size={14}/> Giriş Bilgilerini Düzenle</button>
+                                    {selectedRoomDetail?.isUnderLegalAction ? (
+                                       <button onClick={() => { setLegalActionData({ reason: '', type: 'stop' }); setIsLegalActionModalOpen(true); }} className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm"><Shield size={14}/> İcrayı Kaldır</button>
+                                    ) : (
+                                       <button onClick={() => { setLegalActionData({ reason: '', type: 'start' }); setIsLegalActionModalOpen(true); }} className="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-900 border border-red-200 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm"><Shield size={14}/> Oda İcra</button>
+                                    )}
+                                 </div>
+                              </div>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                                 <div className="flex flex-col gap-1.5">
                                   <label className="text-[11px] text-gray-500 font-semibold">Ad Soyad</label>
@@ -8763,8 +8729,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">İşlemi Yapan Yetkili</label><input type="text" readOnly value={selectedRoomDetail?.rentedBy || 'Bilinmiyor'} className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium" /></div>
                                 <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">Eşyayı Getiren</label><input type="text" readOnly value={selectedRoomDetail?.broughtBy === 'sembol' ? 'Sembol Nakliyat' : 'Müşteri Kendisi'} className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium" /></div>
                                 <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">Hasar Durumu</label><input type="text" readOnly value={selectedRoomDetail?.hasDamage ? 'Hasar Var' : 'Hasar Yok'} className={`border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm font-bold ${selectedRoomDetail?.hasDamage ? 'text-orange-500' : 'text-teal-600'}`} /></div>
-                                {selectedRoomDetail?.broughtBy === 'sembol' && <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">Görevli Ekip Listesi</label><input type="text" readOnly value={selectedRoomDetail?.teamList || '-'} className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium" /></div>}
-                                {selectedRoomDetail?.broughtBy === 'sembol' && <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">Nakliye Ücreti</label><input type="text" readOnly value={selectedRoomDetail?.transportPrice ? `${selectedRoomDetail.transportPrice} TL ${selectedRoomDetail.transportHasKdv ? '(+KDV)' : ''}` : '-'} className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium" /></div>}
                                 {selectedRoomDetail?.hasDamage && <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-[11px] text-gray-500 font-semibold">Hasar Açıklaması</label><textarea readOnly value={selectedRoomDetail?.damageDescription || '-'} rows="2" className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium resize-none" /></div>}
                                 {selectedRoomDetail?.entryPhoto && (
                                     <div className="flex flex-col gap-1.5 md:col-span-2">
@@ -8818,94 +8782,91 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               </div>
                            </div>
 
-                           <div className="flex flex-wrap items-center gap-2 mb-10 pb-6 border-b border-gray-100">
-                             <button onClick={() => setIsEntryExitModalOpen(true)} className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><RefreshCcw size={14}/> Giriş-Çıkış İşlemi</button>
-                             <button onClick={() => { 
-                                setEditRentData({
-                                  customerName: selectedRoomDetail.customerName || '', entryDate: selectedRoomDetail.entryDate || '', paymentDate: selectedRoomDetail.paymentDate || '', monthlyFee: selectedRoomDetail.monthlyFee || '', hasKdv: selectedRoomDetail.hasKdv !== undefined ? selectedRoomDetail.hasKdv : true, sealNo: selectedRoomDetail.sealNo || '', broughtBy: selectedRoomDetail.broughtBy || 'kendisi', teamList: selectedRoomDetail.teamList || ''
-                                }); setIsEditRentModalOpen(true); 
-                             }} className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><Edit size={14}/> Giriş Bilgilerini Düzenleme</button>
-                             <button onClick={() => setIsChangeRoomModalOpen(true)} className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><RefreshCcw size={14}/> Oda Değiştir</button>
-                             <button onClick={() => { setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null }); setIsEndRentModalOpen(true); }} className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><LogOut size={14}/> Depodan Çıkış Yap</button>
-                             {selectedRoomDetail?.isUnderLegalAction ? (
-                                <button onClick={() => { setLegalActionData({ reason: '', type: 'stop' }); setIsLegalActionModalOpen(true); }} className="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><Shield size={14}/> İcrayı Kaldır</button>
-                             ) : (
-                                <button onClick={() => { setLegalActionData({ reason: '', type: 'start' }); setIsLegalActionModalOpen(true); }} className="bg-red-900 hover:bg-red-950 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm border border-red-700"><Shield size={14}/> Müşteri İcra</button>
-                             )}
-                             {/* TUTANAK GÖNDER AÇILIR MENÜSÜ */}
-                             <div className="relative">
-                                <button onClick={() => setIsTutanakDropdownOpen(!isTutanakDropdownOpen)} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors">
-                                  <FileTextIcon size={14}/> Tutanak Gönder/Bilgilendir <ChevronDown size={14} className={`transition-transform ${isTutanakDropdownOpen ? 'rotate-180' : ''}`} />
-                                </button>
-                                {isTutanakDropdownOpen && (
-                                  <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setIsTutanakDropdownOpen(false)}></div>
-                                     <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-72 bg-white border border-gray-100 rounded-xl shadow-lg z-50 py-1 animate-in fade-in slide-in-from-top-2">
-                                       {[
-                                         { label: '1- Müşteri Kendi Alma Bilgilendirme', action: handleCustomerSelfPickupNotification },
-                                         { label: '2- Odaya Giriş Çıkış Tutanağı', action: handleRoomEntryExitDocument },
-                                         { label: '3- Hasar Tutanağı', action: handleDamageReportDocument },
-                                         { label: '4- Vekalet Tutanağı', action: handleProxyDocument },
-                                         { label: '5- Başka Nakliyeci Tarafından Giriş', action: handleExternalTransportEntry },
-                                         { label: '6- Başka Nakliyeci Tarafından Çıkış', action: () => { setIsTutanakDropdownOpen(false); alert('"6- Başka Nakliyeci Tarafından Çıkış" yakında eklenecektir.'); } },
-                                         { label: '7- Başka Müşteriye Teslim', action: () => { setIsTutanakDropdownOpen(false); alert('"7- Başka Müşteriye Teslim" yakında eklenecektir.'); } }
-                                       ].map((tutanakObj, idx) => (
-                                          <button 
-                                            key={idx}
-                                            onClick={tutanakObj.action}
-                                            className="w-full px-4 py-2.5 text-left text-xs font-bold text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors border-b border-gray-50 last:border-0"
-                                          >
-                                            {tutanakObj.label}
-                                          </button>
-                                       ))}
-                                    </div>
-                                  </>
-                                )}
+                           {/* YENİ: İki gruplu buton düzeni */}
+                           <div className="mb-10 pb-8 border-b border-gray-100 flex flex-col gap-6">
+                             {/* BLOK 1 - ODA İŞLEMLERİ */}
+                             <div>
+                               <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">Oda İşlemleri</h4>
+                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                 <button onClick={() => setIsEntryExitModalOpen(true)} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 text-indigo-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
+                                    <div className="w-10 h-10 rounded-xl bg-indigo-500 text-white flex items-center justify-center shadow-sm shadow-indigo-500/30 group-hover:scale-110 transition-transform"><RefreshCcw size={18}/></div>
+                                    <span className="text-center leading-tight">Oda Giriş-Çıkış İşlemi</span>
+                                 </button>
+                                 <button onClick={() => { setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null }); setIsEndRentModalOpen(true); }} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-red-50 hover:bg-red-100 border border-red-100 text-red-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
+                                    <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center shadow-sm shadow-red-500/30 group-hover:scale-110 transition-transform"><LogOut size={18}/></div>
+                                    <span className="text-center leading-tight">Odadan Çıkış Yap</span>
+                                 </button>
+                                 <button onClick={() => setIsChangeRoomModalOpen(true)} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-orange-50 hover:bg-orange-100 border border-orange-100 text-orange-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
+                                    <div className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center shadow-sm shadow-orange-500/30 group-hover:scale-110 transition-transform"><RefreshCcw size={18}/></div>
+                                    <span className="text-center leading-tight">Oda Değiştir</span>
+                                 </button>
+                               </div>
+                             </div>
+                             {/* BLOK 2 - MÜŞTERİ İŞLEMLERİ (orta): Randevu Oluştur + Müşteri Bilgilendirme */}
+                             <div>
+                               <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">Müşteri İşlemleri</h4>
+                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                 {/* Randevu Oluştur */}
+                                 <button onClick={() => { setRoomAppointmentData({ date: new Date().toISOString().split('T')[0], time: '10:00 - 11:00', purpose: 'giris-cikis' }); setRoomAppointmentModal(true); }} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-100 text-emerald-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
+                                    <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-sm shadow-emerald-500/30 group-hover:scale-110 transition-transform"><Calendar size={18}/></div>
+                                    <span className="text-center leading-tight">Randevu Oluştur</span>
+                                 </button>
+                                 {/* Müşteri Bilgilendirme (açılır menü) */}
+                                 <div className="relative">
+                                    <button onClick={() => setIsTutanakDropdownOpen(!isTutanakDropdownOpen)} className="group w-full h-full flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-blue-50 hover:bg-blue-100 border border-blue-100 text-blue-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
+                                      <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-sm shadow-blue-500/30 group-hover:scale-110 transition-transform"><FileTextIcon size={18}/></div>
+                                      <span className="text-center leading-tight flex items-center gap-1">Müşteri Bilgilendirme <ChevronDown size={12} className={`transition-transform ${isTutanakDropdownOpen ? 'rotate-180' : ''}`} /></span>
+                                    </button>
+                                    {isTutanakDropdownOpen && (
+                                      <>
+                                        <div className="fixed inset-0 z-40" onClick={() => setIsTutanakDropdownOpen(false)}></div>
+                                         <div className="absolute left-0 right-0 sm:right-0 mt-2 w-full sm:w-80 bg-white border border-gray-100 rounded-xl shadow-lg z-50 py-1 animate-in fade-in slide-in-from-top-2">
+                                           {[
+                                             { label: '1- Müşteri Kendisi Eşya Alma', type: 'self' },
+                                             { label: '2- Başka Nakliyeci ile Çıkış', type: 'exit' },
+                                             { label: '3- Başka Nakliyeci ile Giriş', type: 'entry' }
+                                           ].map((obj, idx) => (
+                                              <button key={idx} onClick={() => { setIsTutanakDropdownOpen(false); setInfoNotifyModal(obj.type); }} className="w-full px-4 py-3 text-left text-xs font-bold text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors border-b border-gray-50 last:border-0 flex items-center gap-2">
+                                                <MessageCircle size={14} className="text-blue-500 shrink-0"/> {obj.label}
+                                              </button>
+                                           ))}
+                                        </div>
+                                      </>
+                                    )}
+                                 </div>
+                               </div>
                              </div>
 
-                             {/* YENİ EKLENEN: Randevu Oluştur — mevcut Tutanak Gönder/Bilgilendir menüsünün YANINA eklendi, onu değiştirmez */}
-                             <button onClick={() => { setRoomAppointmentData({ date: new Date().toISOString().split('T')[0], time: '10:00 - 11:00', purpose: 'giris-cikis' }); setRoomAppointmentModal(true); }} className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><Calendar size={14}/> Randevu Oluştur</button>
-
-                             {/* YENİ EKLENEN: Müşteri Bilgilendirme (E-Fatura/IBAN'dan bağımsız, ayrı, ek bir açılır menü — mevcut Tutanak menüsünün YERİNE geçmez) */}
-                             <div className="relative">
-                                <button onClick={() => setIsInfoNotifyDropdownOpen(!isInfoNotifyDropdownOpen)} className="bg-sky-500 hover:bg-sky-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors">
-                                  <MessageCircle size={14}/> Müşteri Bilgilendirme <ChevronDown size={14} className={`transition-transform ${isInfoNotifyDropdownOpen ? 'rotate-180' : ''}`} />
-                                </button>
-                                {isInfoNotifyDropdownOpen && (
-                                  <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setIsInfoNotifyDropdownOpen(false)}></div>
-                                     <div className="absolute left-0 right-0 sm:right-0 sm:left-auto mt-2 w-full sm:w-80 bg-white border border-gray-100 rounded-xl shadow-lg z-50 py-1 animate-in fade-in slide-in-from-top-2">
-                                       {[
-                                         { label: '1- Müşteri Kendisi Eşya Alma', type: 'self' },
-                                         { label: '2- Başka Nakliyeci ile Çıkış', type: 'exit' },
-                                         { label: '3- Başka Nakliyeci ile Giriş', type: 'entry' }
-                                       ].map((obj, idx) => (
-                                          <button key={idx} onClick={() => { setIsInfoNotifyDropdownOpen(false); setInfoNotifyModal(obj.type); }} className="w-full px-4 py-3 text-left text-xs font-bold text-gray-700 hover:bg-sky-50 hover:text-sky-700 transition-colors border-b border-gray-50 last:border-0 flex items-center gap-2">
-                                            <MessageCircle size={14} className="text-sky-500 shrink-0"/> {obj.label}
-                                          </button>
-                                       ))}
+                             {/* BLOK 3 - MUHASEBE İŞLEMLERİ (alt): Ücretsiz Oda + Hediye Ay Ver */}
+                             <div>
+                               <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">Muhasebe İşlemleri</h4>
+                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                 {selectedRoomDetail?.isFreeRoom ? (
+                                    <div className="flex flex-col items-center justify-center gap-1.5 py-4 px-2 rounded-2xl bg-cyan-100 border border-cyan-200 text-cyan-700 font-bold text-xs">
+                                       <div className="w-10 h-10 rounded-xl bg-cyan-500 text-white flex items-center justify-center shadow-sm"><Gift size={18}/></div>
+                                       <span className="text-center leading-tight">Ücretsiz Oda</span>
+                                       <button onClick={handleRemoveFreeRoom} className="text-[10px] text-cyan-600 hover:text-cyan-800 underline" title="Ücretsiz Odayi Kaldir">Kaldır</button>
                                     </div>
-                                  </>
-                                )}
+                                 ) : (
+                                    <button onClick={() => { setFreeRoomReasonInput(''); setIsFreeRoomModalOpen(true); }} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-cyan-50 hover:bg-cyan-100 border border-cyan-100 text-cyan-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
+                                       <div className="w-10 h-10 rounded-xl bg-cyan-500 text-white flex items-center justify-center shadow-sm shadow-cyan-500/30 group-hover:scale-110 transition-transform"><Gift size={18}/></div>
+                                       <span className="text-center leading-tight">Ücretsiz Oda</span>
+                                    </button>
+                                 )}
+                                 {selectedRoomDetail?.giftMonths > 0 ? (
+                                    <div className="flex flex-col items-center justify-center gap-1.5 py-4 px-2 rounded-2xl bg-purple-100 border border-purple-200 text-purple-700 font-bold text-xs">
+                                       <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center shadow-sm"><Gift size={18}/></div>
+                                       <span className="text-center leading-tight">{selectedRoomDetail.giftMonths} Ay Hediye</span>
+                                       <button onClick={() => handleSetGiftMonths(0)} className="text-[10px] text-purple-500 hover:text-purple-800 underline" title="Hediyeyi Kaldır">Kaldır</button>
+                                    </div>
+                                 ) : (
+                                    <button onClick={() => { setGiftMonthValue(1); setIsGiftModalOpen(true); }} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-purple-50 hover:bg-purple-100 border border-purple-100 text-purple-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
+                                       <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center shadow-sm shadow-purple-500/30 group-hover:scale-110 transition-transform"><Gift size={18}/></div>
+                                       <span className="text-center leading-tight">Hediye Ay Ver</span>
+                                    </button>
+                                 )}
+                               </div>
                              </div>
-
-                             {selectedRoomDetail?.giftMonths > 0 ? (
-                                <div className="flex items-center bg-purple-100 text-purple-700 px-3 py-2 rounded text-xs font-bold gap-1 shadow-sm border border-purple-200">
-                                   <Gift size={14}/> {selectedRoomDetail.giftMonths} Ay Hediye Edildi
-                                   <button onClick={() => handleSetGiftMonths(0)} className="hover:bg-purple-200 p-0.5 rounded ml-1 transition-colors" title="Hediyeyi Kaldır"><X size={14}/></button>
-                                </div>
-                             ) : (
-                                <button onClick={() => { setGiftMonthValue(1); setIsGiftModalOpen(true); }} className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><Gift size={14}/> Hediye Ay Ver</button>
-                             )}
-
-                             {selectedRoomDetail?.isFreeRoom ? (
-                                <div className="flex items-center bg-cyan-100 text-cyan-700 px-3 py-2 rounded text-xs font-bold gap-1 shadow-sm border border-cyan-200">
-                                   <Gift size={14}/> Ücretsiz Oda
-                                   <button onClick={handleRemoveFreeRoom} className="hover:bg-cyan-200 p-0.5 rounded ml-1 transition-colors" title="Ücretsiz Odayı Kaldır"><X size={14}/></button>
-                                </div>
-                             ) : (
-                                <button onClick={() => { setFreeRoomReasonInput(''); setIsFreeRoomModalOpen(true); }} className="bg-cyan-500 hover:bg-cyan-600 text-white px-3 py-2 rounded text-xs font-medium flex items-center gap-1.5 shadow-sm"><Gift size={14}/> Ücretsiz Oda</button>
-                             )}
                            </div>
 
                            {selectedRoomDetail?.isFreeRoom && (
@@ -8954,38 +8915,37 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <button onClick={()=>setDetailYear(detailYear+1)} className="w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded-lg transition-colors font-bold text-gray-500">&gt;</button>
                            </div>
 
-                           <div className="flex flex-col gap-4 mb-10">
+                           <div className="flex flex-col gap-2.5 mb-10">
                               {currentPaymentsList.length > 0 ? currentPaymentsList.map((payment) => (
-                                 <div key={payment.id} className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 border rounded-2xl transition-all hover:shadow-md ${payment.isGifted ? 'bg-purple-50 border-purple-200' : (payment.isFree ? 'bg-cyan-50 border-cyan-200' : 'bg-white border-gray-200')}`}>
-                                    <div className="flex items-center gap-5 mb-4 sm:mb-0">
-                                       <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-bold text-lg ${payment.isGifted ? 'bg-purple-100 text-purple-600' : (payment.isFree ? 'bg-cyan-100 text-cyan-600' : 'bg-gray-100 text-gray-600')}`}>{payment.id + 1}</div>
-                                       <div>
-                                          <h4 className="font-bold text-gray-800 text-[15px] mb-1">{payment.title}</h4>
-                                          <div className="flex items-center gap-2">
-                                              <p className="text-xs text-gray-500 font-medium">İşlem Günü: {payment.payDay} {payment.month} {payment.year}</p>
-                                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${payment.color}`}>{payment.status}</span>
+                                 <div key={payment.id} className={`flex items-center justify-between gap-3 px-4 py-3 border rounded-xl transition-all hover:shadow-sm ${payment.isGifted ? 'bg-purple-50 border-purple-200' : (payment.isFree ? 'bg-cyan-50 border-cyan-200' : 'bg-white border-gray-200')}`}>
+                                    <div className="flex items-center gap-3 min-w-0">
+                                       <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center font-bold text-sm ${payment.isGifted ? 'bg-purple-100 text-purple-600' : (payment.isFree ? 'bg-cyan-100 text-cyan-600' : 'bg-slate-100 text-slate-500')}`}>{payment.id + 1}</div>
+                                       <div className="min-w-0">
+                                          <h4 className="font-bold text-gray-800 text-[13px] leading-tight">{payment.title}</h4>
+                                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                                              <p className="text-[11px] text-gray-400 font-medium">{payment.payDay} {payment.month} {payment.year}</p>
+                                              {payment.increaseInfo && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">⬆ {payment.increaseInfo}</span>}
                                           </div>
                                        </div>
                                     </div>
-<div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-8 w-full sm:w-auto">
-                                        <div className="flex flex-col sm:items-end">
-                                          <div className="flex items-center gap-3">
-                                             <span className={`font-extrabold text-2xl ${payment.isGifted ? 'text-purple-600' : (payment.isFree ? 'text-cyan-600' : 'text-gray-800')}`}>{(Number(payment.amount) || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL</span>
-                                             {!payment.isFree && (
-                                                 <button onClick={() => {
-                                                     setSpecificMonthEditData({
-                                                         txId: payment.txId,
-                                                         title: payment.title,
-                                                         currentAmount: payment.amount,
-                                                         newAmount: payment.amount,
-                                                         date: payment.dateObj,
-                                                         desc: `${selectedRoomDetail.name} Odası - Kira Düzenlemesi (${payment.month} ${payment.year})`
-                                                     });
-                                                     setIsEditSpecificMonthModalOpen(true);
-                                                 }} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-2 rounded-lg transition-colors shadow-sm" title="Bu ayın kirasını düzenle"><Edit size={16}/></button>
-                                             )}
-                                          </div>
-<span className="text-[11px] text-gray-400 font-medium mt-1">Net: {Number(payment.baseAmount).toFixed(0)} TL {payment.hasKdv && `+ KDV: ${Number(payment.kdvAmount).toFixed(0)} TL`}</span>                                       </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <div className="flex flex-col items-end">
+                                           <span className={`font-extrabold text-base ${payment.isGifted ? 'text-purple-600' : (payment.isFree ? 'text-cyan-600' : 'text-gray-800')}`}>{(Number(payment.amount) || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL</span>
+                                           <span className="text-[10px] text-gray-400 font-medium leading-tight">Net {Number(payment.baseAmount).toFixed(0)}{payment.hasKdv && ` + KDV ${Number(payment.kdvAmount).toFixed(0)}`}</span>
+                                        </div>
+                                        {!payment.isFree && (
+                                            <button onClick={() => {
+                                                setSpecificMonthEditData({
+                                                    txId: payment.txId,
+                                                    title: payment.title,
+                                                    currentAmount: payment.amount,
+                                                    newAmount: payment.amount,
+                                                    date: payment.dateObj,
+                                                    desc: `${selectedRoomDetail.name} Odası - Kira Düzenlemesi (${payment.month} ${payment.year})`
+                                                });
+                                                setIsEditSpecificMonthModalOpen(true);
+                                            }} className="bg-orange-50 hover:bg-orange-100 text-orange-500 p-1.5 rounded-lg transition-colors" title="Bu ayın kirasını düzenle"><Edit size={14}/></button>
+                                        )}
                                     </div>
                                  </div>
                               )) : (
@@ -9000,6 +8960,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <div><h4 className="text-red-800 font-bold text-lg">Müşteri Toplam Cari Bakiyesi</h4><p className="text-red-500 text-sm">Müşteriye ait tüm odaların ve ekstra hizmetlerin toplam güncel borcu.</p></div>
                               <div className="text-3xl font-extrabold text-red-600">{customerTotalBalance.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                            </div>
+
+                           {/* YENİ EKLENEN: Odanın GÜNCEL kirasıyla sözleşme indir */}
+                           {selectedRoomDetail?.customerName && (
+                             <button onClick={handlePrintRoomCurrentContract} className="mt-4 w-full bg-violet-500 hover:bg-violet-600 text-white rounded-xl py-3.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-violet-500/30">
+                                <Download size={18}/> Güncel Kira ile Sözleşme İndir
+                             </button>
+                           )}
                         </>
                      )}
                   </div>
@@ -9239,7 +9206,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                    let totalTahsilEdilen = 0;
                    let totalNakliyeTahsilati = 0; // YENİ: Nakliye için ayrı sayaç
                    let totalTahakkuk = 0;
-                   // YENİ EKLENEN: Kredi kartı (net/kesintili) ve mühür ücreti ayrı toplamlar (mevcut Nakliye Geliri sayacının YANINA eklendi)
+                   // YENİ EKLENEN: Kredi kartı (net/kesintili) ve mühür ücreti ayrı toplamlar
                    let totalKrediKartiNet = 0;   // POS kesintisi sonrası hesaba geçen net
                    let totalKrediKartiBrut = 0;  // müşteriden alınan brüt (bilgi amaçlı)
                    let totalMuhurUcreti = 0;
@@ -9255,21 +9222,23 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                            }
                        });
                        ledger.forEach(tx => {
-                           if (tx.isDummy) return;
+                           if (tx.isDummy) return; 
                            const txDate = new Date(tx.date);
                            if (txDate >= startD && txDate <= endD) {
                                if (tx.credit) {
                                    const descLower = String(tx.desc || '').toLowerCase();
-                                   // Eğer açıklama veya notta nakliye/taşıma geçiyorsa nakliye sayacına ekle
-                                   if (descLower.includes('nakliye') || descLower.includes('taşıma')) {
-                                       totalNakliyeTahsilati += tx.credit;
+                                   // Kredi kartı tahsilatı → kira tahsilatına DAHİL EDİLMEZ (ayrı gösterilir)
+                                   if (descLower.includes('kredi kart')) {
+                                       // kredi kartı; kira tahsilatına eklenmez
+                                   } else if (descLower.includes('nakliye') || descLower.includes('taşıma')) {
+                                       // Nakliye tahsilatları kaldırıldı — hiçbir toplama dahil edilmez
                                    } else {
                                        totalTahsilEdilen += tx.credit;
                                    }
                                }
                                if (tx.debt) {
                                    totalTahakkuk += tx.debt;
-                                   // YENİ EKLENEN: Mühür ücreti tahakkuklarını ayrıca topla
+                                   // Mühür ücreti tahakkuklarını ayrıca topla
                                    const dLower = String(tx.desc || '').toLowerCase();
                                    if (dLower.includes('mühür')) totalMuhurUcreti += tx.debt;
                                }
@@ -9287,10 +9256,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                            if (balance > 0) exactBalance += balance;
                        });
                        totalBekleyen = exactBalance;
-                       toplamTahsilat = totalTahsilEdilen + totalNakliyeTahsilati + totalBekleyen;
+                       toplamTahsilat = totalTahsilEdilen + totalBekleyen;
                    } else {
-                       totalBekleyen = Math.max(0, totalTahakkuk - (totalTahsilEdilen + totalNakliyeTahsilati));
-                       toplamTahsilat = totalTahsilEdilen + totalNakliyeTahsilati + totalBekleyen;
+                       totalBekleyen = Math.max(0, totalTahakkuk - totalTahsilEdilen);
+                       toplamTahsilat = totalTahsilEdilen + totalBekleyen;
                    }
 
                    let totalAskida = 0;
@@ -9363,8 +9332,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                        const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
                                        const isGifted = room.giftMonths && monthCounter < room.giftMonths;
                                        const isFree = room.isFreeRoom;
+                                       // YENİ EKLENEN: Borç ödeme gününün bir gün SONRASINDA sayılır (aynı gün çıkışta o ay alınmaz).
+                                       let dueDate = new Date(loopDate.getFullYear(), loopDate.getMonth(), loopDate.getDate() + 1);
+                                       dueDate.setHours(0, 0, 0, 0);
+                                       const isDueYet = dueDate <= today;
                                        
-                                       if (!isGifted && !isFree) {
+                                       if (isDueYet && !isGifted && !isFree) {
                                            if (room.paidMonths?.includes(key)) {
                                                tahsil += monthlyTotal;
                                            } else {
@@ -9439,12 +9412,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
                                    <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Kira Tahsilatı</h3>
                                    <div className="text-3xl font-extrabold text-[#1bc5bd]">{totalTahsilEdilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
-                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Nakliye hariç net kira tahsilatı</p>
-                               </div>
-                               <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
-                                   <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Nakliye Geliri</h3>
-                                   <div className="text-3xl font-extrabold text-teal-600">{totalNakliyeTahsilati.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
-                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Nakliye/Taşıma tahsilatları</p>
+                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Net kira tahsilatı</p>
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
                                    <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Bekleyen Tahsilat</h3>
@@ -9453,21 +9421,21 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
                                    <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Toplam Tahsilat</h3>
-                                   <div className="text-3xl font-extrabold text-indigo-500">{(totalTahsilEdilen + totalNakliyeTahsilati).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
-                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Kira ve nakliye dahil alınan</p>
+                                   <div className="text-3xl font-extrabold text-indigo-500">{totalTahsilEdilen.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
+                                   <p className="text-[10px] font-medium text-gray-400 mt-2">Toplam alınan kira tahsilatı</p>
                                </div>
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-center">
                                    <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Askıda Ödemeler</h3>
                                    <div className="text-3xl font-extrabold text-gray-700">{totalAskida.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2">{askidaCount} kayıt eşleşmeyi bekliyor</p>
                                </div>
-                               {/* YENİ EKLENEN: Kredi Kartı Tahsilatları (kesintili/net toplam) — mevcut kartların YANINA eklendi */}
+                               {/* YENİ EKLENEN: Kredi Kartı Tahsilatları (kesintili/net toplam) */}
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-amber-100 flex flex-col justify-center">
                                    <h3 className="text-[11px] font-bold text-amber-600 uppercase tracking-wider mb-2 flex items-center gap-1.5"><CreditCard size={13}/> Kredi Kartı Tahsilatları</h3>
                                    <div className="text-3xl font-extrabold text-amber-500">{totalKrediKartiNet.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
                                    <p className="text-[10px] font-medium text-gray-400 mt-2">Kesintili (hesaba geçen) net toplam{totalKrediKartiBrut > 0 ? ` • Brüt: ${totalKrediKartiBrut.toLocaleString('tr-TR', {maximumFractionDigits:0})} ₺` : ''}</p>
                                </div>
-                               {/* YENİ EKLENEN: Mühür Ücretleri (ayrı toplam) — mevcut kartların YANINA eklendi */}
+                               {/* YENİ EKLENEN: Mühür Ücretleri (ayrı toplam) */}
                                <div className="bg-white rounded-2xl p-6 shadow-sm border border-blue-100 flex flex-col justify-center">
                                    <h3 className="text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-2">Mühür Ücretleri</h3>
                                    <div className="text-3xl font-extrabold text-blue-500">{totalMuhurUcreti.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} <span className="text-lg">₺</span></div>
@@ -10138,62 +10106,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
       </div>
 
       {/* TÜM MODALLAR */}
-
-      {/* YENİ EKLENEN: GÖSTERGE PANELİ KART DETAY MODALI (yeni tıklanabilir kartlar için) */}
-      {dashboardDetail && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col animate-in fade-in zoom-in">
-             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
-                 <h3 className="text-lg font-bold text-gray-800">{dashboardDetail.title}</h3>
-                 <button onClick={() => setDashboardDetail(null)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
-             </div>
-             <div className="px-5 pt-4 flex gap-2">
-                 {['today', 'month', 'year'].map(f => (
-                     <button key={f} onClick={() => setDashboardDetailFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${dashboardDetailFilter === f ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                         {f === 'today' ? 'Bugün' : f === 'month' ? 'Bu Ay' : 'Bu Yıl'}
-                     </button>
-                 ))}
-             </div>
-             <div className="p-5 overflow-y-auto flex-1">
-                {(() => {
-                    let list = [];
-                    if (dashboardDetail.type === 'newCustomers') {
-                        list = customers.filter(c => inDashboardRange(parseAnyDate(c.createdAt), dashboardDetailFilter)).map(c => ({ name: c.name, date: c.createdAt, extra: `Müşteri No: ${c.customerNo}` }));
-                    } else if (dashboardDetail.type === 'exitedCustomers' || dashboardDetail.type === 'exitedRooms') {
-                        list = collectExits(dashboardDetailFilter).map(e => ({ name: e.customerName, date: e.date, extra: `Oda: ${e.roomName}` }));
-                    } else if (dashboardDetail.type === 'enteredRooms') {
-                        list = collectEntries(dashboardDetailFilter).map(e => ({ name: e.customerName, date: e.date, extra: `Oda: ${e.roomName}` }));
-                    } else if (dashboardDetail.type === 'overdueMovements') {
-                        list = [...collectEntries(dashboardDetailFilter), ...collectExits(dashboardDetailFilter)].map(e => ({ name: e.customerName, date: e.date, extra: `Oda: ${e.roomName}` }));
-                    }
-                    const visible = dashboardDetailShowAll ? list : list.slice(0, 20);
-                    if (list.length === 0) {
-                        return <div className="text-center text-gray-400 py-10 font-medium">Bu aralıkta kayıt bulunmuyor.</div>;
-                    }
-                    return (
-                        <>
-                            <div className="flex flex-col gap-2">
-                                {visible.map((item, idx) => (
-                                    <div key={idx} className="flex items-center justify-between border border-gray-100 rounded-xl px-4 py-2.5 bg-slate-50/50">
-                                        <div>
-                                            <div className="font-bold text-sm text-gray-800">{item.name || '-'}</div>
-                                            <div className="text-[11px] text-gray-400">{item.extra}</div>
-                                        </div>
-                                        <div className="text-xs font-semibold text-gray-500">{item.date}</div>
-                                    </div>
-                                ))}
-                            </div>
-                            {list.length > 20 && !dashboardDetailShowAll && (
-                                <button onClick={() => setDashboardDetailShowAll(true)} className="mt-4 w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-bold transition-colors">Tümünü Göster ({list.length})</button>
-                            )}
-                        </>
-                    );
-                })()}
-             </div>
-          </div>
-        </div>
-      )}
-
+      
       {/* SÖZLEŞME ÖNİZLEME VE İNDİR MODALI */}
       {isContractModalOpen && contractCustomer && (
         <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 lg:p-8">
@@ -10240,20 +10153,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                     })}
                                 </div>
                             ))}
-
-                            {/* YENİ EKLENEN: Odaların giriş tarihine göre gruplanmış KDV dahil kira dökümü */}
-                            {getContractRoomBreakdown(contractRooms).length > 0 && (
-                                <div style={{ marginBottom: '16px' }}>
-                                    <h3 style={{ fontSize: '10.5pt', fontWeight: 'bold', color: '#111', margin: '0 0 5px 0' }}>Depolanan Odalar ve Aylık Kira Bedelleri (KDV Dahil)</h3>
-                                    {getContractRoomBreakdown(contractRooms).map((g, gi) => (
-                                        <div key={gi} style={{ marginBottom: '8px' }}>
-                                            <p style={{ margin: '0 0 3px 0', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}><strong>Giriş Tarihi:</strong> {g.dateStr}</p>
-                                            <p style={{ margin: '0 0 3px 0', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}><strong>Oda/Odalar:</strong> {g.rooms.map(r => r.name).join(', ')} ({g.rooms.length} adet)</p>
-                                            <p style={{ margin: '0 0 3px 0', color: '#333', fontSize: '10pt', lineHeight: '1.55' }}><strong>Aylık Toplam Kira (KDV Dahil):</strong> {g.total.toLocaleString('tr-TR')} TL</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
                         </div>
                     </div>
 
@@ -10341,8 +10240,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                    </div>
                    {rentData.broughtBy === 'sembol' && (
                      <div className="mt-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                       <div className="flex flex-col gap-1.5"><label className="text-[11px] font-bold text-teal-600 uppercase tracking-wider">Görevli Ekip Listesi (Aralarına virgül koyarak yazın)</label><textarea rows="2" placeholder="Örn: Mehmet Şen, Şenol Beşinci..." value={rentData.teamList} onChange={(e) => setRentData({...rentData, teamList: e.target.value})} className="border-2 border-teal-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[#1bc5bd] resize-none font-medium text-teal-900 bg-white shadow-sm"></textarea></div>
-                       
                        <div className="flex flex-col gap-1.5 p-3 bg-white rounded-lg border border-teal-100 shadow-sm">
                          <label className="text-[11px] font-bold text-teal-600 uppercase tracking-wider">Eşyada Hasar Var Mı?</label>
                          <div className="flex gap-4 mt-1">
@@ -10353,29 +10250,38 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                            <div className="mt-3"><label className="text-[11px] font-bold text-orange-500 uppercase tracking-wider block mb-1">Hasar Nedeni / Açıklaması</label><textarea rows="2" placeholder="Hasarın detayını yazın..." value={rentData.damageDescription} onChange={(e) => setRentData({...rentData, damageDescription: e.target.value})} className="w-full border border-orange-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400 resize-none font-medium text-gray-700 bg-orange-50/30"></textarea></div>
                          )}
                        </div>
-
-                       <div className="flex flex-col gap-1.5 p-3 bg-white rounded-lg border border-teal-100 shadow-sm">
-                         <label className="text-[11px] font-bold text-teal-600 uppercase tracking-wider">Nakliye Fiyatı (İsteğe Bağlı)</label>
-                         <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
-                           <input type="number" placeholder="Örn: 2500" value={rentData.transportPrice} onChange={(e) => setRentData({...rentData, transportPrice: e.target.value})} className="w-full sm:w-1/2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#1bc5bd] font-bold text-slate-700" />
-                           <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={rentData.transportHasKdv} onChange={(e) => setRentData({...rentData, transportHasKdv: e.target.checked})} className="w-4 h-4 text-[#1bc5bd] rounded focus:ring-[#1bc5bd]"/><span className="text-sm font-medium text-gray-700">+ %20 KDV Uygula</span></label>
-                         </div>
-                         {rentData.transportPrice && (
-                           <p className="text-[11px] font-medium text-gray-500 mt-1">Bu tutar müşterinin cari hesabına nakliye bedeli olarak eklenecektir. (Cariye yansıyacak tutar: <span className="font-bold text-gray-700">{rentData.transportHasKdv ? (Number(rentData.transportPrice) * 1.2).toFixed(0) : Number(rentData.transportPrice)} TL</span>)</p>
-                         )}
-                       </div>
                      </div>
                    )}
                  </div>
                </div>
 
                <div className="mb-4">
-                 <div className="flex items-center gap-2 mb-4"><div className="w-6 h-6 rounded-full bg-[#1bc5bd] text-white flex items-center justify-center text-xs font-bold">4</div><h4 className="font-bold text-gray-800">Giriş Görseli / Videosu Ekle (İsteğe Bağlı)</h4></div>
+                 <div className="flex items-center gap-2 mb-4"><div className="w-6 h-6 rounded-full bg-[#1bc5bd] text-white flex items-center justify-center text-xs font-bold">4</div><h4 className="font-bold text-gray-800">Giriş Görseli Ekle (İsteğe Bağlı)</h4></div>
                  <div className="bg-slate-50 p-5 rounded-xl border border-gray-200">
-                    <MediaEkleAlani value={rentData.entryPhoto} onSelect={(url) => setRentData({...rentData, entryPhoto: url})} />
+                    <label className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-white hover:border-[#1bc5bd] transition-colors cursor-pointer group bg-white/50">
+                     {rentData.entryPhoto ? (
+                       <div className="text-[#1bc5bd] font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Görsel Eklendi</span><img src={rentData.entryPhoto} alt="Önizleme" className="h-16 w-16 object-cover rounded mt-2 border border-gray-200"/></div>
+                     ) : (
+                       <><Upload size={20} className="text-gray-400 mb-2 group-hover:text-[#1bc5bd] transition-colors" /><span className="text-xs text-gray-500 font-medium">Depoya yerleşim yapıldıktan sonraki fotoğrafı yükleyin</span><span className="text-[10px] text-gray-400 mt-1">PNG, JPG formatlarında</span></>
+                     )}
+<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url}); } }}/>                   </label>
                  </div>
                </div>
                
+               {/* YENİ EKLENEN: Müşteri Sözleşmesi (yazdır / WhatsApp paylaş / imzalı halini cariye yükle) */}
+               <div className="mt-6 border border-violet-200 rounded-xl p-4 bg-violet-50/50">
+                   <h4 className="text-sm font-bold text-violet-700 mb-1 flex items-center gap-2"><FileTextIcon size={16}/> Müşteri Sözleşmesi & Ödeme Bilgilendirmesi</h4>
+                   <p className="text-[11px] text-gray-500 mb-3">Yukarıda girdiğiniz oda ve ödeme bilgileriyle, cari sözleşme şablonunu kullanarak müşteri sözleşmesini hazırlar. Yazdırıp imzalatabilir, WhatsApp'tan paylaşabilir ve imzalı halini müşterinin cari Sözleşmeler bölümüne yükleyebilirsiniz.</p>
+                   <div className="flex flex-col sm:flex-row gap-2">
+                     <button type="button" onClick={handlePrintRentalContract} className="flex-1 border-2 border-violet-200 text-violet-700 hover:bg-violet-100 rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"><FileTextIcon size={14}/> Sözleşme Yazdır</button>
+                     <button type="button" onClick={handleShareRentalContract} className="flex-1 bg-green-500 hover:bg-green-600 text-white rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"><MessageCircle size={14}/> WhatsApp'tan Paylaş</button>
+                   </div>
+                   <label className="mt-2 flex items-center justify-center gap-1.5 border-2 border-dashed border-violet-200 text-violet-700 hover:bg-violet-100 rounded-lg py-2 text-xs font-bold cursor-pointer transition-colors">
+                     <Upload size={14}/> İmzalı Sözleşmeyi Cariye Yükle
+                     <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async (e) => { const file = e.target.files[0]; const cust = customers.find(c => c.name === rentData.customerName); if(file && cust) await uploadSignedDocToCustomer(cust.id, file, 'Kiralama Sözleşmesi'); else if(file && !cust) alert('İmzalı sözleşmeyi yüklemek için kayıtlı bir müşteri seçili olmalı.'); e.target.value=''; }}/>
+                   </label>
+               </div>
+
                <div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-6"><button onClick={() => setIsRentRoomModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-xl font-bold transition-colors text-sm">İptal Et</button><button onClick={handleRentRoom} disabled={!rentData.customerName || !rentData.monthlyFee} className="bg-[#1bc5bd] hover:bg-teal-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold transition-colors flex items-center gap-2 shadow-lg shadow-teal-500/30"><Check strokeWidth={3} size={20} /> Kiralama Kaydını Tamamla</button></div>
              </div>
           </div>
@@ -10509,9 +10415,27 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
              <div className="p-8">
                <div className="flex flex-col gap-4 mb-6">
                  <div className="flex flex-col gap-2"><label className="text-xs font-semibold text-gray-600">Çıkış Tarihi</label><input type="date" value={endRentData.exitDate} onChange={(e) => setEndRentData({...endRentData, exitDate: e.target.value})} className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-cyan-500" /></div>
-                 <div className="flex flex-col gap-2 mt-2">
+                 <div className="flex flex-col gap-2 mt-2 relative">
                    <label className="text-xs font-semibold text-gray-600">Boş Depo Görseli / Videosu (İsteğe Bağlı)</label>
-                   <MediaEkleAlani value={endRentData.photo} onSelect={(url) => setEndRentData({...endRentData, photo: url})} />
+                   <button type="button" onClick={() => setEndRentUploadMenu(!endRentUploadMenu)} className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 transition-colors cursor-pointer group w-full">
+                     {endRentData.photo ? (<div className="text-green-500 font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Dosya Eklendi</span></div>) : (<><Upload size={20} className="text-gray-400 mb-2 group-hover:text-cyan-500 transition-colors" /><span className="text-xs text-gray-500 font-bold">Yükle</span></>)}
+                   </button>
+                   {endRentUploadMenu && (
+                     <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-2xl border border-gray-100 z-30 overflow-hidden">
+                       <label className="flex items-center gap-2 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-cyan-50 cursor-pointer border-b border-gray-100">
+                         <Upload size={15} className="text-cyan-500"/> Şimdi Çek
+                         <input type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const url = await uploadImageToServer(file); setEndRentData(prev => ({...prev, photo: url})); } setEndRentUploadMenu(false); }}/>
+                       </label>
+                       <label className="flex items-center gap-2 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-cyan-50 cursor-pointer border-b border-gray-100">
+                         <FileTextIcon size={15} className="text-cyan-500"/> Galeriden Seç
+                         <input type="file" accept="image/*,video/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const url = await uploadImageToServer(file); setEndRentData(prev => ({...prev, photo: url})); } setEndRentUploadMenu(false); }}/>
+                       </label>
+                       <label className="flex items-center gap-2 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-cyan-50 cursor-pointer">
+                         <FileTextIcon size={15} className="text-cyan-500"/> Dosyadan Seç
+                         <input type="file" accept="image/*,video/*,application/pdf" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const url = await uploadImageToServer(file); setEndRentData(prev => ({...prev, photo: url})); } setEndRentUploadMenu(false); }}/>
+                       </label>
+                     </div>
+                   )}
                  </div>
 
                  {/* YENİ EKLENEN: TESLİM TUTANAĞI (Müşteri kendisi teslim alırsa) */}
@@ -10536,12 +10460,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                    <div className="grid grid-cols-1 gap-2 mb-3">
                      <input type="text" value={endRentData.carrierName} onChange={(e) => setEndRentData({...endRentData, carrierName: e.target.value})} placeholder="Nakliye Firması Ünvanı" className="border border-gray-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-orange-400 font-medium text-slate-700" />
                      <input type="text" value={endRentData.carrierVkn} onChange={(e) => setEndRentData({...endRentData, carrierVkn: e.target.value})} placeholder="Nakliye Firması VKN" className="border border-gray-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-orange-400 font-medium text-slate-700" />
-                     <input type="text" value={endRentData.carrierAuthorized} onChange={(e) => setEndRentData({...endRentData, carrierAuthorized: e.target.value})} placeholder="Yetkili Ad Soyad (İsteğe Bağlı)" className="border border-gray-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-orange-400 font-medium text-slate-700" />
+                     <input type="text" value={endRentData.carrierAuthorized} onChange={(e) => setEndRentData({...endRentData, carrierAuthorized: e.target.value})} placeholder="Yetkili Kişi Ad Soyad" className="border border-gray-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-orange-400 font-medium text-slate-700" />
                    </div>
                    <div className="flex flex-col sm:flex-row gap-2">
-                     <button type="button" onClick={() => handlePrintExitProtocol('nakliye')} className="flex-1 border-2 border-orange-200 text-orange-700 hover:bg-orange-50 rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"><FileTextIcon size={14}/> Nakliye Hasar Tutanağı Yazdır</button>
+                     <button type="button" onClick={() => handlePrintExitProtocol('nakliye')} className="flex-1 border-2 border-orange-200 text-orange-700 hover:bg-orange-50 rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"><FileTextIcon size={14}/> Hasar Tutanağı Yazdır</button>
                      <button type="button" onClick={() => handleShareExitProtocol('nakliye')} className="flex-1 bg-green-500 hover:bg-green-600 text-white rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"><MessageCircle size={14}/> WhatsApp'tan Paylaş</button>
                    </div>
+                   {/* YENİ EKLENEN: İmzalı Nakliye Hasar Tutanağını cari Sözleşmeler'e yükle */}
                    <label className="mt-2 flex items-center justify-center gap-1.5 border-2 border-dashed border-orange-200 text-orange-700 hover:bg-orange-50 rounded-lg py-2 text-xs font-bold cursor-pointer transition-colors">
                      <Upload size={14}/> İmzalı Tutanağı Cariye Yükle
                      <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async (e) => { const file = e.target.files[0]; const room = rooms.find(r => String(r.id) === String(selectedRoomId)); const cust = customers.find(c => c.name === room?.customerName); if(file && cust) await uploadSignedDocToCustomer(cust.id, file, 'Nakliye Hasar Tutanağı'); e.target.value=''; }}/>
@@ -10563,7 +10488,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <button onClick={() => setIsApplyIncreaseModalOpen(false)} className="text-indigo-400 hover:text-indigo-600 bg-white p-1 rounded shadow-sm"><X size={20} /></button>
              </div>
              <div className="p-6 md:p-8">
-               <p className="text-sm text-gray-500 mb-6 text-center"><strong>{increaseModalData.customerName}</strong> müşterisinin <strong>{increaseModalData.targetYear}</strong> yılı zammını uygulamak üzeresiniz. Mevcut Kira: <strong>{increaseModalData.monthlyFee} TL</strong></p>
+               <p className="text-sm text-gray-500 mb-6 text-center"><strong>{increaseModalData.customerName}</strong> müşterisinin <strong>{increaseModalData.targetYear}</strong> yılı zammını uygulamak üzeresiniz. Zam Baz Alınan Kira (Bir Önceki Ay): <strong>{Math.round(Number(increaseModalData.increaseBaseFee ?? increaseModalData.monthlyFee)).toLocaleString('tr-TR')} TL</strong></p>
                
                <div className="flex gap-4 mb-6 border-b border-gray-200 pb-4">
                    <label className="flex items-center gap-2 cursor-pointer">
@@ -10590,13 +10515,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                          <input type="number" disabled={increaseMode !== 'manual'} value={newRentAmount} onChange={(e) => handleAmountInput(e.target.value)} className={`w-full border-2 rounded-xl px-4 py-3 text-lg font-bold focus:outline-none transition-colors ${increaseMode === 'manual' ? 'border-indigo-300 focus:border-indigo-500 bg-white text-indigo-900' : 'border-gray-200 bg-gray-50 text-gray-400'}`} />
                          <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-gray-400">TL</span>
                      </div>
-                 </div>
-
-                 {/* YENİ EKLENEN: Zammın geçerli olacağı tarih (varsayılan yıldönümü). Bu tarihten bugüne kadarki aylar yeni kiraya güncellenir. */}
-                 <div className="flex flex-col gap-2 bg-amber-50 border border-amber-200 rounded-xl p-4">
-                     <label className="text-xs font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1"><Calendar size={14}/> Zammın Geçerlilik Tarihi</label>
-                     <input type="date" value={increaseEffectiveDate} onChange={(e) => setIncreaseEffectiveDate(e.target.value)} className="w-full border-2 border-amber-300 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-amber-500 bg-white text-amber-900" />
-                     <p className="text-[11px] text-amber-600 leading-relaxed">Zam oranı ayın 3-4'ünde açıklandığı için, bu tarih (yıldönümü) ile bugün arasındaki tüm ayların kirası <strong>{newRentAmount || 0} TL</strong> olarak geçmişe dönük güncellenecektir.</p>
                  </div>
                </div>
                
@@ -10836,62 +10754,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
       )}
 
       {/* HEDİYE AY VER MODALI */}
-      {/* YENİ EKLENEN: ODA DETAYINDAN RANDEVU OLUŞTUR MODALI */}
-      {roomAppointmentModal && selectedRoomDetail && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
-             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-emerald-50 rounded-t-2xl">
-                 <h3 className="text-lg font-bold text-emerald-700 flex items-center gap-2"><Calendar size={18} /> Randevu Oluştur</h3>
-                 <button onClick={() => setRoomAppointmentModal(false)}><X size={20} className="text-emerald-400 hover:text-emerald-600"/></button>
-             </div>
-             <div className="p-6 flex flex-col gap-4">
-                <p className="text-sm text-gray-500">Oda <strong>{selectedRoomDetail.name}</strong> — Müşteri: <strong>{selectedRoomDetail.customerName || '-'}</strong></p>
-                <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-gray-600 uppercase">Tarih</label>
-                    <input type="date" value={roomAppointmentData.date} onChange={(e) => setRoomAppointmentData({...roomAppointmentData, date: e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-400" />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-gray-600 uppercase">Saat Aralığı</label>
-                    <input type="text" value={roomAppointmentData.time} onChange={(e) => setRoomAppointmentData({...roomAppointmentData, time: e.target.value})} placeholder="Örn: 10:00 - 11:00" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-400" />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-gray-600 uppercase">Randevu Amacı</label>
-                    <select value={roomAppointmentData.purpose} onChange={(e) => setRoomAppointmentData({...roomAppointmentData, purpose: e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-400 bg-white">
-                        {Object.entries(appointmentPurposes).map(([key, val]) => <option key={key} value={key}>{val.label}</option>)}
-                    </select>
-                </div>
-                <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-gray-100 mt-2">
-                  <button onClick={() => setRoomAppointmentModal(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors">İptal</button>
-                  <button onClick={() => { handleSaveRoomAppointment(); setRoomAppointmentModal(false); }} className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center justify-center gap-1.5"><Check size={16}/> Kaydet</button>
-                  <button onClick={() => { handleSaveRoomAppointment(); handleShareRoomAppointmentWhatsApp(); setRoomAppointmentModal(false); }} className="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center justify-center gap-1.5"><MessageCircle size={16}/> Kaydet ve Bilgilendir</button>
-                </div>
-             </div>
-          </div>
-        </div>
-      )}
-
-      {/* YENİ EKLENEN: MÜŞTERİ BİLGİLENDİRME (Yazdır / WhatsApp Paylaş) MODALI */}
-      {infoNotifyModal && selectedRoomDetail && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
-             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-sky-50 rounded-t-2xl">
-                 <h3 className="text-lg font-bold text-sky-700 flex items-center gap-2"><MessageCircle size={18} /> {getInfoNotifyContent(infoNotifyModal).title}</h3>
-                 <button onClick={() => setInfoNotifyModal(null)}><X size={20} className="text-sky-400 hover:text-sky-600"/></button>
-             </div>
-             <div className="p-6">
-                <p className="text-sm text-gray-500 mb-5">Oda <strong>{selectedRoomDetail.name}</strong> için bu bilgilendirmeyi yazdırıp imzalatabilir veya doğrudan müşteriye WhatsApp'tan gönderebilirsiniz.</p>
-                <div className="flex flex-col sm:flex-row gap-3">
-                   <button onClick={() => handlePrintInfoNotify(infoNotifyModal)} className="flex-1 border-2 border-sky-200 text-sky-700 hover:bg-sky-50 rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors"><FileTextIcon size={16}/> Yazdır</button>
-                   <button onClick={() => handleShareInfoNotify(infoNotifyModal)} className="flex-1 bg-green-500 hover:bg-green-600 text-white rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"><MessageCircle size={16}/> WhatsApp'tan Paylaş</button>
-                </div>
-                <div className="mt-4 flex justify-end">
-                  <button onClick={() => setInfoNotifyModal(null)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2 rounded-xl text-sm font-bold transition-colors">Kapat</button>
-                </div>
-             </div>
-          </div>
-        </div>
-      )}
-
       {isGiftModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in">
@@ -10949,7 +10811,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                <div className="flex flex-col gap-4">
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Müşteri Ad Soyad</label><input type="text" value={reserveData.name} onChange={(e) => setReserveData({...reserveData, name: e.target.value.toUpperCase()})} placeholder="Örn: AHMET YILMAZ" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Telefon Numarası</label><input type="text" value={reserveData.phone} onChange={(e) => setReserveData({...reserveData, phone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700" /></div>
-                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Rezerve Süresi (Gün)</label><input type="number" min="1" value={reserveData.days} onChange={(e) => setReserveData({...reserveData, days: e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700" /><p className="text-[10px] text-gray-400 mt-1">Sistem, belirtilen gün dolduğunda odayı otomatik olarak tekrar boş konuma düşürür.</p></div>
+                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Rezerve Süresi (Maks 10 Gün)</label><input type="number" min="1" max="10" value={reserveData.days} onChange={(e) => setReserveData({...reserveData, days: e.target.value > 10 ? 10 : e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-500 font-medium text-slate-700" /><p className="text-[10px] text-gray-400 mt-1">Sistem, belirtilen gün dolduğunda odayı otomatik olarak tekrar boş konuma düşürür.</p></div>
                </div>
                <div className="mt-8 flex justify-end gap-3"><button onClick={() => setIsReserveRoomModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl font-bold transition-colors text-sm">İptal</button><button onClick={handleReserveRoom} disabled={!reserveData.name || !reserveData.phone || !reserveData.days} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-orange-500/30 flex items-center gap-2"><Check size={18} /> Rezerveyi Kaydet</button></div>
              </div>
@@ -11007,15 +10869,65 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     <input type="text" value={entryExitData.newSealNo} onChange={(e) => setEntryExitData({...entryExitData, newSealNo: e.target.value.toUpperCase()})} placeholder="Örn: YM-54321" className="border-2 border-indigo-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 font-bold text-slate-700 uppercase" />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                    <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col gap-1.5 relative">
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Giriş-Çıkış Tutanağı</label>
-                      <MediaEkleAlani compact value={entryExitData.protocolPhoto} onSelect={(url) => setEntryExitData({...entryExitData, protocolPhoto: url})} />
+                      <button type="button" onClick={() => setEntryExitUploadMenu(entryExitUploadMenu === 'protocol' ? null : 'protocol')} className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24 w-full">
+                        {entryExitData.protocolPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500 font-bold">Yükle</span></>)}
+                      </button>
+                      {entryExitUploadMenu === 'protocol' && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-2xl border border-gray-100 z-30 overflow-hidden">
+                          <label className="flex items-center gap-2 px-3 py-2.5 text-sm font-bold text-gray-700 hover:bg-indigo-50 cursor-pointer border-b border-gray-100">
+                            <Upload size={15} className="text-indigo-500"/> Şimdi Çek
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const url = await uploadImageToServer(file); setEntryExitData(prev => ({...prev, protocolPhoto: url})); } setEntryExitUploadMenu(null); }}/>
+                          </label>
+                          <label className="flex items-center gap-2 px-3 py-2.5 text-sm font-bold text-gray-700 hover:bg-indigo-50 cursor-pointer border-b border-gray-100">
+                            <FileTextIcon size={15} className="text-indigo-500"/> Galeriden Seç
+                            <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const url = await uploadImageToServer(file); setEntryExitData(prev => ({...prev, protocolPhoto: url})); } setEntryExitUploadMenu(null); }}/>
+                          </label>
+                          <label className="flex items-center gap-2 px-3 py-2.5 text-sm font-bold text-gray-700 hover:bg-indigo-50 cursor-pointer">
+                            <FileTextIcon size={15} className="text-indigo-500"/> Dosyadan Seç
+                            <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const url = await uploadImageToServer(file); setEntryExitData(prev => ({...prev, protocolPhoto: url})); } setEntryExitUploadMenu(null); }}/>
+                          </label>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col gap-1.5 relative">
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Depo Son Hali</label>
-                      <MediaEkleAlani compact value={entryExitData.finalPhoto} onSelect={(url) => setEntryExitData({...entryExitData, finalPhoto: url})} />
+                      <button type="button" onClick={() => setEntryExitUploadMenu(entryExitUploadMenu === 'final' ? null : 'final')} className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 cursor-pointer h-24 w-full">
+                        {entryExitData.finalPhoto ? (<div className="text-indigo-500 font-bold flex items-center gap-1"><Check size={16}/> Eklendi</div>) : (<><Upload size={16} className="text-gray-400 mb-1"/><span className="text-[10px] text-gray-500 font-bold">Yükle</span></>)}
+                      </button>
+                      {entryExitUploadMenu === 'final' && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-2xl border border-gray-100 z-30 overflow-hidden">
+                          <label className="flex items-center gap-2 px-3 py-2.5 text-sm font-bold text-gray-700 hover:bg-indigo-50 cursor-pointer border-b border-gray-100">
+                            <Upload size={15} className="text-indigo-500"/> Şimdi Çek
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const url = await uploadImageToServer(file); setEntryExitData(prev => ({...prev, finalPhoto: url})); } setEntryExitUploadMenu(null); }}/>
+                          </label>
+                          <label className="flex items-center gap-2 px-3 py-2.5 text-sm font-bold text-gray-700 hover:bg-indigo-50 cursor-pointer border-b border-gray-100">
+                            <FileTextIcon size={15} className="text-indigo-500"/> Galeriden Seç
+                            <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const url = await uploadImageToServer(file); setEntryExitData(prev => ({...prev, finalPhoto: url})); } setEntryExitUploadMenu(null); }}/>
+                          </label>
+                          <label className="flex items-center gap-2 px-3 py-2.5 text-sm font-bold text-gray-700 hover:bg-indigo-50 cursor-pointer">
+                            <FileTextIcon size={15} className="text-indigo-500"/> Dosyadan Seç
+                            <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const url = await uploadImageToServer(file); setEntryExitData(prev => ({...prev, finalPhoto: url})); } setEntryExitUploadMenu(null); }}/>
+                          </label>
+                        </div>
+                      )}
                     </div>
                   </div>
+                  {/* YENİ EKLENEN: Giriş-Çıkış Tutanağını yazdır / WhatsApp ile paylaş */}
+                  <div className="mt-2 flex flex-col sm:flex-row gap-2">
+                      <button type="button" onClick={handlePrintEntryExitProtocol} className="flex-1 border-2 border-indigo-200 text-indigo-600 hover:bg-indigo-50 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors">
+                        <FileTextIcon size={16}/> Tutanağı Yazdır
+                      </button>
+                      <button type="button" onClick={handleShareEntryExitProtocol} className="flex-1 bg-green-500 hover:bg-green-600 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm">
+                        <MessageCircle size={16}/> WhatsApp'tan Paylaş
+                      </button>
+                  </div>
+                  {/* YENİ EKLENEN: İmzalı Giriş-Çıkış Tutanağını cari Sözleşmeler'e yükle */}
+                  <label className="mt-2 flex items-center justify-center gap-1.5 border-2 border-dashed border-indigo-200 text-indigo-600 hover:bg-indigo-50 rounded-lg py-2 text-xs font-bold cursor-pointer transition-colors">
+                    <Upload size={14}/> İmzalı Tutanağı Cariye Yükle
+                    <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async (e) => { const file = e.target.files[0]; const room = rooms.find(r => r.id === selectedRoomId); const cust = customers.find(c => c.name === room?.customerName); if(file && cust) await uploadSignedDocToCustomer(cust.id, file, 'Giriş-Çıkış Tutanağı'); e.target.value=''; }}/>
+                  </label>
                 </div>
                 <div className="mt-8 pt-4 border-t border-gray-100 flex justify-end gap-3">
                   <button onClick={() => setIsEntryExitModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-lg text-sm font-bold">İptal</button>
@@ -11112,31 +11024,173 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
         </div>
       )}
 
+      {/* YENİ EKLENEN: DEPO (ŞUBE) / BLOK FOTOĞRAFI GÖRÜNTÜLEME / YÜKLEME PENCERESİ */}
+      {entityPhotoViewer !== null && (() => {
+          const isWh = entityPhotoViewer.type === 'warehouse';
+          const ent = isWh ? warehouses.find(w => w.id === entityPhotoViewer.id) : blocks.find(b => b.id === entityPhotoViewer.id);
+          if (!ent) return null;
+          const label = isWh ? 'Depo' : 'Blok';
+          return (
+            <div className="fixed inset-0 bg-black/70 z-[80] flex items-center justify-center p-4" onClick={() => setEntityPhotoViewer(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in" onClick={(e) => e.stopPropagation()}>
+                 <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-slate-50">
+                    <h3 className="text-base font-bold text-slate-800 flex items-center gap-2"><Eye size={18} className="text-[#1bc5bd]"/> {ent.name} — {label} Fotoğrafı</h3>
+                    <button onClick={() => setEntityPhotoViewer(null)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-full shadow-sm"><X size={20}/></button>
+                 </div>
+                 <div className="p-5">
+                    {ent.listPhoto ? (
+                       <div className="flex flex-col gap-4">
+                          <a href={ent.listPhoto} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-gray-200 shadow-sm">
+                             <img src={ent.listPhoto} alt={`${ent.name} fotoğrafı`} className="w-full max-h-80 object-contain bg-gray-50" />
+                          </a>
+                          <div className="flex gap-2">
+                             <label className="flex-1 bg-[#1bc5bd] hover:bg-teal-500 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                                <RefreshCcw size={15}/> Değiştir
+                                <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files[0]; if(f) await handleSetEntityPhoto(entityPhotoViewer.type, entityPhotoViewer.id, f); e.target.value=''; }}/>
+                             </label>
+                             <button onClick={async () => { await handleRemoveEntityPhoto(entityPhotoViewer.type, entityPhotoViewer.id); }} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors border border-red-100">
+                                <Trash2 size={15}/> Sil
+                             </button>
+                          </div>
+                       </div>
+                    ) : (
+                       <div className="flex flex-col items-center gap-4 py-4">
+                          <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center">{isWh ? <Home size={28} className="text-gray-300"/> : <LayoutDashboard size={28} className="text-gray-300"/>}</div>
+                          <p className="text-sm text-gray-500 font-medium text-center">Bu {label.toLowerCase()} için henüz bir fotoğraf eklenmemiş.</p>
+                          <label className="w-full bg-[#1bc5bd] hover:bg-teal-500 text-white rounded-lg py-3 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-sm">
+                             <Upload size={16}/> {label} Fotoğrafı Ekle
+                             <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files[0]; if(f) await handleSetEntityPhoto(entityPhotoViewer.type, entityPhotoViewer.id, f); e.target.value=''; }}/>
+                          </label>
+                       </div>
+                    )}
+                 </div>
+              </div>
+            </div>
+          );
+      })()}
+
+      {/* YENİ EKLENEN: ODA DETAYINDAN RANDEVU OLUŞTUR MODALI */}
+      {roomAppointmentModal && selectedRoomDetail && (
+        <div className="fixed inset-0 bg-black/70 z-[80] flex items-center justify-center p-4" onClick={() => setRoomAppointmentModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in" onClick={(e) => e.stopPropagation()}>
+             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-emerald-50">
+                <h3 className="text-base font-bold text-emerald-800 flex items-center gap-2"><Calendar size={18}/> Randevu Oluştur — {selectedRoomDetail.name}</h3>
+                <button onClick={() => setRoomAppointmentModal(false)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-full shadow-sm"><X size={20}/></button>
+             </div>
+             <div className="p-5 flex flex-col gap-4">
+                <div className="bg-slate-50 rounded-xl p-3 text-xs text-slate-600 font-medium">
+                   <b>{selectedRoomDetail.customerName}</b> için randevu. Kaydedince takvime eklenir ve WhatsApp mesajı hazırlanır.
+                </div>
+                <div className="flex flex-col gap-1.5">
+                   <label className="text-xs font-bold text-gray-600">Randevu Tarihi</label>
+                   <input type="date" value={roomAppointmentData.date} onChange={(e) => setRoomAppointmentData({...roomAppointmentData, date: e.target.value})} className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 font-medium" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                   <label className="text-xs font-bold text-gray-600">Saat Aralığı</label>
+                   <select value={roomAppointmentData.time} onChange={(e) => setRoomAppointmentData({...roomAppointmentData, time: e.target.value})} className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 font-medium bg-white">
+                      {['09:00 - 10:00','10:00 - 11:00','11:00 - 12:00','12:00 - 13:00','13:00 - 14:00','14:00 - 15:00','15:00 - 16:00','16:00 - 17:00','17:00 - 18:00'].map(t => <option key={t} value={t}>{t}</option>)}
+                   </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                   <label className="text-xs font-bold text-gray-600">İşlem Türü</label>
+                   <div className="flex flex-col gap-2">
+                      <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${roomAppointmentData.purpose === 'giris-cikis' ? 'border-blue-400 bg-blue-50/40' : 'border-gray-200 bg-white hover:border-blue-200'}`}>
+                         <input type="radio" name="roomApptPurpose" checked={roomAppointmentData.purpose === 'giris-cikis'} onChange={() => setRoomAppointmentData({...roomAppointmentData, purpose: 'giris-cikis'})} className="w-4 h-4 accent-blue-500" />
+                         <span className="text-sm font-bold text-blue-700">Odadan Giriş - Çıkış</span>
+                      </label>
+                      <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${roomAppointmentData.purpose === 'tahliye' ? 'border-red-400 bg-red-50/40' : 'border-gray-200 bg-white hover:border-red-200'}`}>
+                         <input type="radio" name="roomApptPurpose" checked={roomAppointmentData.purpose === 'tahliye'} onChange={() => setRoomAppointmentData({...roomAppointmentData, purpose: 'tahliye'})} className="w-4 h-4 accent-red-500" />
+                         <span className="text-sm font-bold text-red-700">Odadan Tüm Eşyaları Kendisi Çıkaracak</span>
+                      </label>
+                   </div>
+                </div>
+                <div className="flex flex-col gap-2 pt-2">
+                   <button onClick={() => { handleSaveRoomAppointment(); handleShareRoomAppointmentWhatsApp(); setRoomAppointmentModal(false); }} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-emerald-500/30">
+                      <MessageCircle size={16}/> Randevu Oluştur ve WhatsApp'tan Paylaş
+                   </button>
+                   <button onClick={() => { handleSaveRoomAppointment(); setRoomAppointmentModal(false); }} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl py-2.5 text-sm font-bold transition-colors">
+                      Sadece Takvime Kaydet
+                   </button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* YENİ EKLENEN: ODA FOTOĞRAFI GÖRÜNTÜLEME / YÜKLEME PENCERESİ (göz ikonu) */}
+      {roomPhotoViewer !== null && (() => {
+          const oda = rooms.find(r => r.id === roomPhotoViewer);
+          if (!oda) return null;
+          return (
+            <div className="fixed inset-0 bg-black/70 z-[80] flex items-center justify-center p-4" onClick={() => setRoomPhotoViewer(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in" onClick={(e) => e.stopPropagation()}>
+                 <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-slate-50">
+                    <h3 className="text-base font-bold text-slate-800 flex items-center gap-2"><Eye size={18} className="text-[#1bc5bd]"/> {oda.name} — Oda Fotoğrafı</h3>
+                    <button onClick={() => setRoomPhotoViewer(null)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-full shadow-sm"><X size={20}/></button>
+                 </div>
+                 <div className="p-5">
+                    {oda.roomListPhoto ? (
+                       <div className="flex flex-col gap-4">
+                          <a href={oda.roomListPhoto} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-gray-200 shadow-sm">
+                             <img src={oda.roomListPhoto} alt={`${oda.name} fotoğrafı`} className="w-full max-h-80 object-contain bg-gray-50" />
+                          </a>
+                          <div className="flex gap-2">
+                             <label className="flex-1 bg-[#1bc5bd] hover:bg-teal-500 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                                <RefreshCcw size={15}/> Değiştir
+                                <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files[0]; if(f) await handleSetRoomListPhoto(oda.id, f); e.target.value=''; }}/>
+                             </label>
+                             <button onClick={async () => { await handleRemoveRoomListPhoto(oda.id); }} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors border border-red-100">
+                                <Trash2 size={15}/> Sil
+                             </button>
+                          </div>
+                       </div>
+                    ) : (
+                       <div className="flex flex-col items-center gap-4 py-4">
+                          <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center"><Box size={28} className="text-gray-300"/></div>
+                          <p className="text-sm text-gray-500 font-medium text-center">Bu oda için henüz bir fotoğraf eklenmemiş.</p>
+                          <label className="w-full bg-[#1bc5bd] hover:bg-teal-500 text-white rounded-lg py-3 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-sm">
+                             <Upload size={16}/> Oda Fotoğrafı Ekle
+                             <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files[0]; if(f) await handleSetRoomListPhoto(oda.id, f); e.target.value=''; }}/>
+                          </label>
+                       </div>
+                    )}
+                 </div>
+              </div>
+            </div>
+          );
+      })()}
+
       {/* YENİ EKLENEN: MÜŞTERİ SÖZLEŞMELERİ MODALI */}
       {isContractsModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in">
-             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
-                 <h3 className="text-lg font-bold text-violet-600 flex items-center gap-2"><FileTextIcon size={20} /> Müşteri Sözleşmeleri / Tutanakları</h3>
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-violet-50 rounded-t-2xl">
+                 <h3 className="text-lg font-bold text-violet-700 flex items-center gap-2"><FileTextIcon size={20} /> Müşteri Sözleşmeleri / Tutanakları</h3>
                  <button onClick={() => setIsContractsModalOpen(false)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
              </div>
              <div className="p-6 overflow-y-auto flex-1 bg-white">
                 <div className="bg-violet-50 border border-violet-100 rounded-xl p-4 mb-6">
                     <h4 className="text-xs font-bold text-violet-800 uppercase mb-3">Yeni Sözleşme / Tutanak Ekle</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
-                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Belge Adı</label>
-                            <input type="text" value={newContract.label} onChange={(e) => setNewContract({...newContract, label: e.target.value})} placeholder="Örn: Kiralama Sözleşmesi" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500" />
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Belge Türü</label>
+                            <select value={newContract.label} onChange={(e) => setNewContract({...newContract, label: e.target.value})} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500 bg-white">
+                                <option>Kiralama Sözleşmesi</option>
+                                <option>Giriş-Çıkış Tutanağı</option>
+                                <option>Teslim Tutanağı</option>
+                                <option>Nakliye Hasar Tutanağı</option>
+                                <option>Sözleşme</option>
+                            </select>
                         </div>
                         <div>
                             <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Tarih</label>
                             <input type="date" value={newContract.date} onChange={(e) => setNewContract({...newContract, date: e.target.value})} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500" />
                         </div>
-                        <div className="sm:col-span-2">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Sözleşme/Tutanak Görseli veya PDF'i (Zorunlu)</label>
-                            <input type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setNewContract(prev => ({...prev, file: url})); } else { setNewContract(prev => ({...prev, file: null})); } }} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100" />
+                        <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Dosya (Zorunlu)</label>
+                            <input type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewContract({...newContract, file: reader.result}); reader.readAsDataURL(file); } else { setNewContract({...newContract, file: null}); } }} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100" />
                         </div>
-                        <div className="sm:col-span-2 flex justify-end mt-1">
+                        <div className="sm:col-span-3 flex justify-end mt-1">
                             <button onClick={handleAddContract} disabled={!newContract.date || !newContract.file} className="bg-violet-500 hover:bg-violet-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors whitespace-nowrap">Ekle</button>
                         </div>
                     </div>
@@ -11146,28 +11200,19 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <div className="border border-gray-200 rounded-xl overflow-hidden">
                     <table className="w-full text-left text-sm text-gray-600">
                         <thead className="bg-gray-50 border-b border-gray-200 font-bold text-gray-700 text-xs">
-                            <tr>
-                                <th className="p-3">Belge Adı</th>
-                                <th className="p-3">Tarih</th>
-                                <th className="p-3 text-center">Dosya</th>
-                                <th className="p-3 text-center">İşlem</th>
-                            </tr>
+                            <tr><th className="p-3">Belge Türü</th><th className="p-3">Tarih</th><th className="p-3 text-center">Dosya</th><th className="p-3 text-center">İşlem</th></tr>
                         </thead>
                         <tbody>
                             {(() => {
                                 const cust = customers.find(c => c.id === selectedCustomerId);
-                                const cts = cust?.contracts || [];
-                                if (cts.length === 0) return <tr><td colSpan="4" className="p-6 text-center text-gray-400">Henüz sözleşme veya tutanak eklenmemiş.</td></tr>;
-                                return [...cts].sort((a,b)=>b.id-a.id).map(ct => (
-                                    <tr key={ct.id} className="border-b border-gray-100 hover:bg-gray-50">
-                                        <td className="p-3 font-medium text-gray-800">{ct.label || 'Sözleşme'}</td>
-                                        <td className="p-3 font-medium text-gray-600">{ct.date ? new Date(ct.date).toLocaleDateString('tr-TR') : '-'}</td>
-                                        <td className="p-3 text-center">
-                                            {ct.file ? <a href={ct.file} target="_blank" rel="noreferrer" className="text-indigo-500 hover:underline font-medium text-xs">İncele</a> : <span className="text-gray-400 text-xs">-</span>}
-                                        </td>
-                                        <td className="p-3 text-center">
-                                            <button onClick={() => handleDeleteContract(ct.id)} className="text-red-500 hover:text-red-700 p-1 rounded transition-colors"><Trash2 size={16}/></button>
-                                        </td>
+                                const list = cust?.contracts || [];
+                                if (list.length === 0) return <tr><td colSpan="4" className="p-6 text-center text-gray-400">Henüz sözleşme veya tutanak eklenmemiş.</td></tr>;
+                                return [...list].sort((a,b) => b.id - a.id).map(item => (
+                                    <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50">
+                                        <td className="p-3 font-semibold text-gray-800">{item.label || 'Sözleşme'}</td>
+                                        <td className="p-3 font-medium text-gray-600">{new Date(item.date).toLocaleDateString('tr-TR')}</td>
+                                        <td className="p-3 text-center">{item.file ? <a href={item.file} target="_blank" rel="noreferrer" className="text-violet-600 hover:underline font-medium text-xs">İncele</a> : <span className="text-gray-400 text-xs">-</span>}</td>
+                                        <td className="p-3 text-center"><button onClick={() => handleDeleteContract(item.id)} className="text-red-500 hover:text-red-700 p-1 rounded transition-colors"><Trash2 size={16}/></button></td>
                                     </tr>
                                 ));
                             })()}
@@ -11178,6 +11223,43 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
           </div>
         </div>
       )}
+
+      {/* YENİ EKLENEN: BİLGİLENDİRME GÖNDER MODALI (3 tür) */}
+      {infoNotifyModal && (() => {
+          const c = getInfoNotifyContent(infoNotifyModal);
+          const room = selectedRoomDetail;
+          const customer = customers.find(cu => cu.name === room?.customerName);
+          return (
+            <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4" onClick={() => setInfoNotifyModal(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[88vh] flex flex-col animate-in fade-in zoom-in" onClick={(e) => e.stopPropagation()}>
+                 <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-2xl">
+                     <div>
+                        <h3 className="text-base font-bold text-blue-700 flex items-center gap-2"><MessageCircle size={18}/> {c.title}</h3>
+                        <p className="text-[11px] text-gray-500 mt-0.5">{customer?.name || room?.customerName} • Oda {room?.name}</p>
+                     </div>
+                     <button onClick={() => setInfoNotifyModal(null)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
+                 </div>
+                 <div className="p-5 overflow-y-auto flex-1">
+                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">{c.heading}</h4>
+                     <ol className="list-decimal pl-5 space-y-2 text-[13px] text-gray-700">
+                         {c.rules.map((r, i) => <li key={i}>{r}</li>)}
+                     </ol>
+                 </div>
+                 <div className="p-4 border-t border-gray-100 flex flex-col gap-2">
+                     <div className="flex flex-col sm:flex-row gap-2">
+                         <button onClick={() => handlePrintInfoNotify(infoNotifyModal)} className="flex-1 border-2 border-blue-200 text-blue-700 hover:bg-blue-50 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors"><FileTextIcon size={15}/> Yazdır</button>
+                         <button onClick={() => handleShareInfoNotify(infoNotifyModal)} className="flex-1 bg-green-500 hover:bg-green-600 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"><MessageCircle size={15}/> WhatsApp'tan Paylaş</button>
+                     </div>
+                     <label className="flex items-center justify-center gap-1.5 border-2 border-dashed border-violet-200 text-violet-700 hover:bg-violet-50 rounded-lg py-2 text-xs font-bold cursor-pointer transition-colors">
+                         <Upload size={14}/> İmzalı Bilgilendirmeyi Cariye Yükle
+                         <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file && customer) await uploadSignedDocToCustomer(customer.id, file, c.title); else if(file && !customer) alert('Yüklemek için kayıtlı müşteri gerekli.'); e.target.value=''; }}/>
+                     </label>
+                 </div>
+              </div>
+            </div>
+          );
+      })()}
+
 
       {/* MÜŞTERİ DÜZENLE MODALI */}
       {isEditCustomerModalOpen && editCustomerData && (
@@ -11198,9 +11280,20 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     <input type="text" readOnly value={editCustomerData.customerNo} className="border-2 border-[#1bc5bd]/20 bg-teal-50/50 rounded-xl px-4 py-2.5 text-sm focus:outline-none font-semibold text-teal-700 cursor-not-allowed" />
                   </div>
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{editCustomerData.type === 'bireysel' ? 'Ad Soyad' : 'Firma Adı / Yetkili Kişi'}</label><input type="text" value={editCustomerData.name} onChange={(e) => setEditCustomerData({...editCustomerData, name: e.target.value})} placeholder={editCustomerData.type === 'bireysel' ? 'Ad Soyad' : 'Firma Adı'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
-                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{editCustomerData.type === 'bireysel' ? 'TC Kimlik Numarası' : 'Vergi Numarası / Dairesi'}</label><input type="text" value={editCustomerData.tc} onChange={(e) => setEditCustomerData({...editCustomerData, tc: e.target.value})} placeholder={editCustomerData.type === 'bireysel' ? 'TC Kimlik No' : 'Vergi No'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
+                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{editCustomerData.type === 'bireysel' ? 'TC Kimlik Numarası' : 'Vergi Numarası'}</label><input type="text" value={editCustomerData.tc} onChange={(e) => setEditCustomerData({...editCustomerData, tc: e.target.value})} placeholder={editCustomerData.type === 'bireysel' ? 'TC Kimlik No' : 'Vergi No'} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
+                  {/* YENİ EKLENEN: Kurumsal müşteride Vergi Dairesi alanı */}
+                  {editCustomerData.type === 'kurumsal' && (
+                      <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Vergi Dairesi</label><input type="text" value={editCustomerData.taxOffice || ''} onChange={(e) => setEditCustomerData({...editCustomerData, taxOffice: e.target.value})} placeholder="Örn: Pendik Vergi Dairesi" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
+                  )}
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Telefon Numarası</label><input type="text" value={editCustomerData.phone} onChange={(e) => setEditCustomerData({...editCustomerData, phone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Alternatif Telefon</label><input type="text" value={editCustomerData.altPhone} onChange={(e) => setEditCustomerData({...editCustomerData, altPhone: e.target.value})} placeholder="Örn: 0555 555 55 55" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
+                  {/* YENİ EKLENEN: İl (seçilebilir, 81 il) ve İlçe (elle yazılabilir) — Bireysel ve Kurumsalda aynı */}
+                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">İl</label>
+                      <select value={editCustomerData.city || 'İstanbul'} onChange={(e) => setEditCustomerData({...editCustomerData, city: e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700 bg-white">
+                          {turkiyeIlleri.map(il => <option key={il} value={il}>{il}</option>)}
+                      </select>
+                  </div>
+                  <div className="flex flex-col gap-1.5"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">İlçe</label><input type="text" value={editCustomerData.district || ''} onChange={(e) => setEditCustomerData({...editCustomerData, district: e.target.value})} placeholder="Örn: Pendik" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Müşteri Adresi</label><input type="text" value={editCustomerData.address} onChange={(e) => setEditCustomerData({...editCustomerData, address: e.target.value})} placeholder="Tam Adres" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#1bc5bd] font-medium text-slate-700" /></div>
                   <div className="flex flex-col gap-1.5 md:col-span-2 mt-2">
                       <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">{editCustomerData.type === 'bireysel' ? 'Kimlik Fotoğrafı (Ön ve Arka Yüz)' : 'Kurumsal Belgeler'}</label>
@@ -11368,13 +11461,14 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     <span className="text-xs font-bold text-amber-700 flex items-center gap-1.5"><CreditCard size={14}/> Kredi Kartıyla Tahsilat</span>
                   </label>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-gray-600">{newPaymentData.isCreditCard ? 'Müşteriden Alınan Tutar (Cariye)' : 'Ödenen Tutar (TL)'}</label>
-                    <input type="number" value={newPaymentData.amount} onChange={(e) => setNewPaymentData({...newPaymentData, amount: e.target.value})} placeholder="Örn: 6600" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 font-bold" />
+                    <label className="text-xs font-bold text-gray-600">{newPaymentData.isCreditCard ? 'Müşteriden Alınan Tutar (Cariye İşlenecek)' : 'Ödenen Tutar (TL)'}</label>
+                    <input type="number" value={newPaymentData.amount} onChange={(e) => setNewPaymentData({...newPaymentData, amount: e.target.value})} placeholder="Örn: 30000" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 font-bold" />
                   </div>
                   {newPaymentData.isCreditCard && (
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-bold text-amber-700">Kesintili Tutar (Hesaba Geçen Net)</label>
-                      <input type="number" value={newPaymentData.netAmount} onChange={(e) => setNewPaymentData({...newPaymentData, netAmount: e.target.value})} placeholder="Örn: 6400" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 font-bold bg-amber-50/40" />
+                      <input type="number" value={newPaymentData.netAmount} onChange={(e) => setNewPaymentData({...newPaymentData, netAmount: e.target.value})} placeholder="Örn: 28450" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 font-bold bg-amber-50/40" />
+                      <span className="text-[10px] text-gray-400">Cariye <b>müşteriden alınan</b> tutar işlenir; rapora <b>kesintili</b> tutar yansır.</span>
                     </div>
                   )}
                   <div className="flex flex-col gap-1.5">
@@ -11394,57 +11488,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
           </div>
         </div>
       )}
-
-      {/* YENİ EKLENEN: MÜŞTERİ BİLGİLENDİRME MODALI (Müşteri No + IBAN) */}
-      {infoModalCustomer && (() => {
-          // Müşteriye iletilecek bilgilendirme metni (kopyalanabilir / WhatsApp ile gönderilebilir)
-          const infoText = `Sayın ${infoModalCustomer.name},\n\nÖdeme bilgileriniz aşağıda yer almaktadır. Ödeme yaparken açıklama kısmına mutlaka Müşteri Numaranızı yazmanız gerekmektedir.\n\n🔢 Müşteri Numarası: ${infoModalCustomer.customerNo}\n\n🏦 Banka: ${contractSettings.bankFullName}\n👤 Alıcı: ${contractSettings.accountHolder}\n💳 IBAN: ${contractSettings.iban}\n\n⚠️ ÖNEMLİ: Ödemenizin doğru hesabınıza işlenebilmesi için açıklama kısmına ${infoModalCustomer.customerNo} numaralı Müşteri Numaranızı yazmayı unutmayınız.\n\nİyi günler dileriz.`;
-          return (
-            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
-                 <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-emerald-50 rounded-t-2xl">
-                     <h3 className="text-lg font-bold text-emerald-700 flex items-center gap-2"><Info size={20} /> Müşteri Bilgilendirme</h3>
-                     <button onClick={() => setInfoModalCustomer(null)} className="text-emerald-400 hover:text-emerald-600 bg-white p-1 rounded shadow-sm"><X size={20} /></button>
-                 </div>
-                 <div className="p-6">
-                    <p className="text-sm text-gray-500 mb-4">Aşağıdaki bilgileri müşteriye iletebilirsiniz. Müşterinin ödeme açıklamasına <strong>Müşteri Numarasını</strong> yazması gerekmektedir.</p>
-
-                    <div className="flex flex-col gap-3 mb-5">
-                        <div className="bg-slate-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between">
-                            <div>
-                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Müşteri Numarası</div>
-                                <div className="text-xl font-black text-slate-800 tracking-wide">{infoModalCustomer.customerNo}</div>
-                            </div>
-                            <button onClick={() => { try { navigator.clipboard.writeText(infoModalCustomer.customerNo); } catch(e){} }} className="text-xs bg-white border border-gray-200 hover:bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg font-bold shadow-sm">Kopyala</button>
-                        </div>
-                        <div className="bg-slate-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">IBAN ({contractSettings.bankShortName})</div>
-                                <div className="text-sm font-black text-slate-800 tracking-wide break-all">{contractSettings.iban}</div>
-                                <div className="text-[11px] text-gray-500 mt-0.5">{contractSettings.accountHolder}</div>
-                            </div>
-                            <button onClick={() => { try { navigator.clipboard.writeText(contractSettings.iban); } catch(e){} }} className="text-xs bg-white border border-gray-200 hover:bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg font-bold shadow-sm shrink-0">Kopyala</button>
-                        </div>
-                    </div>
-
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-6 flex items-start gap-2">
-                        <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" />
-                        <p className="text-[12px] text-amber-700 font-medium leading-relaxed">Müşteriye hatırlatın: Ödeme yaparken açıklama kısmına <strong>{infoModalCustomer.customerNo}</strong> numaralı Müşteri Numarasını yazmalıdır.</p>
-                    </div>
-
-                    <div className="flex flex-col gap-3">
-                        <a href={`https://wa.me/90${infoModalCustomer.phone}?text=${encodeURIComponent(infoText)}`} target="_blank" rel="noreferrer" onClick={() => setInfoModalCustomer(null)} className="bg-emerald-500 hover:bg-emerald-600 text-white w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors shadow-sm shadow-emerald-500/30">
-                            <MessageCircle size={20} /> WhatsApp İle Gönder
-                        </a>
-                        <button onClick={() => { try { navigator.clipboard.writeText(infoText); } catch(e){} }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
-                            <FileTextIcon size={18} /> Tüm Metni Kopyala
-                        </button>
-                    </div>
-                 </div>
-              </div>
-            </div>
-          );
-      })()}
 
       {/* MESAJ GÖNDERİM TERCİHİ MODALI */}
       {messageModalData && (
@@ -11710,7 +11753,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50">
                      <div className="flex flex-col">
                          <h3 className="text-lg font-bold text-blue-800 flex items-center gap-2">
-                             <FileTextIcon size={18} /> Otomatik E-Fatura Kes
+                             <FileTextIcon size={18} /> Faturayı Başlat
                          </h3>
                          <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mt-0.5">PARAŞÜT E-FATURA ENTEGRASYONU</span>
                      </div>
@@ -11764,7 +11807,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             {!customer?.tc && (
                                 <div className="mb-4 bg-red-50 border border-red-100 text-red-600 text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-2">
                                     <AlertCircle size={16} className="shrink-0" />
-                                    <span>Uyarı: Müşterinin TCKN/VKN bilgisi eksik görünüyor. MBT Portalı e-fatura kesimi için 11111111111 olarak varsayılan atayacaktır.</span>
+                                    <span>Uyarı: Müşterinin TCKN/VKN bilgisi eksik görünüyor. Paraşüt'e aktarım için 11111111111 olarak varsayılan atanacaktır.</span>
                                 </div>
                             )}
 
@@ -11781,9 +11824,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 </button>
                                 <button onClick={handleSendEInvoice} disabled={isSendingEInvoice} className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-lg shadow-blue-500/30 transition-colors flex items-center gap-2">
                                     {isSendingEInvoice ? (
-                                        <><RefreshCcw size={16} className="animate-spin" /> MBT'ye Gönderiliyor...</>
+                                        <><RefreshCcw size={16} className="animate-spin" /> Paraşüt'e Aktarılıyor...</>
                                     ) : (
-                                        <><Check strokeWidth={3} size={18} /> Faturayı Resmileştir</>
+                                        <><Check strokeWidth={3} size={18} /> Paraşüt'e Aktar</>
                                     )}
                                 </button>
                             </div>
@@ -11795,131 +11838,181 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
           );
       })()}
 
-      {/* YENİ EKLENEN: FATURA AKTARILDI BİLGİLENDİRME PENCERESİ */}
+      {/* YENİ EKLENEN: PARAŞÜT'E AKTARILDI BİLGİLENDİRME PENCERESİ */}
       {eInvoiceStartedInfo && (
         <div className="fixed inset-0 bg-black/60 z-[75] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
-             <div className="p-6 text-center">
-                <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4"><Check size={28} className="text-emerald-500" strokeWidth={3}/></div>
-                <h3 className="text-lg font-bold text-gray-800 mb-1">Fatura Bilgileri Aktarıldı</h3>
-                <p className="text-sm text-gray-500 mb-1">Fatura no: <strong>{eInvoiceStartedInfo.invoiceNo}</strong></p>
-                <p className="text-xs text-gray-400 mb-6">Faturayı kestikten sonra "Faturayı Yükle" ile cariye yükleyebilir, ardından müşteriyle paylaşabilirsiniz.</p>
-                <button onClick={() => setEInvoiceStartedInfo(null)} className="w-full bg-[#1bc5bd] hover:bg-teal-500 text-white py-2.5 rounded-xl text-sm font-bold transition-colors">Tamam</button>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in overflow-hidden">
+             <div className="p-6 bg-gradient-to-r from-emerald-500 to-teal-500 flex justify-center">
+                 <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg">
+                     <Check size={40} className="text-emerald-600" strokeWidth={3} />
+                 </div>
+             </div>
+             <div className="p-8 text-center">
+                 <h3 className="text-xl font-black text-gray-800 mb-3 tracking-tight">Fatura Bilgileri Paraşüt'e Aktarıldı</h3>
+                 <p className="text-sm text-gray-600 mb-4 font-medium leading-relaxed">
+                     <strong>{eInvoiceStartedInfo.customerName}</strong> müşterisinin <strong>{eInvoiceStartedInfo.amount?.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</strong> tutarındaki fatura bilgileri Paraşüt uygulamasına başarıyla aktarıldı.
+                 </p>
+                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6 text-left flex items-start gap-2">
+                     <Info size={18} className="text-blue-500 shrink-0 mt-0.5" />
+                     <p className="text-[13px] text-blue-700 font-medium leading-relaxed">
+                         Faturanın <strong>orijinalini Paraşüt uygulamasından</strong> onaylayıp indirebilir, dilerseniz üzerinde iyileştirme (düzenleme) yapabilirsiniz. Onayladıktan sonra "Faturayı Yükle" butonuyla kesilen faturayı müşterinin cari profiline kaydedebilirsiniz.
+                     </p>
+                 </div>
+                 <button onClick={() => setEInvoiceStartedInfo(null)} className="w-full bg-gray-800 hover:bg-gray-900 text-white py-3.5 rounded-xl font-bold transition-colors">Anladım, Kapat</button>
              </div>
           </div>
         </div>
       )}
 
-      {/* YENİ EKLENEN: FATURAYI YÜKLE MODALI */}
+      {/* YENİ EKLENEN: FATURAYI YÜKLE MODALI (Paraşüt'te kesilen faturayı cariye kaydet) */}
       {uploadInvoiceData && (
         <div className="fixed inset-0 bg-black/60 z-[75] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
              <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-indigo-50 rounded-t-2xl">
-                 <h3 className="text-lg font-bold text-indigo-700 flex items-center gap-2"><Upload size={18} /> Faturayı Yükle</h3>
-                 <button onClick={() => setUploadInvoiceData(null)}><X size={20} className="text-indigo-400 hover:text-indigo-600"/></button>
+                 <h3 className="text-lg font-bold text-indigo-700 flex items-center gap-2"><Upload size={20} /> Faturayı Yükle</h3>
+                 <button onClick={() => !isUploadingInvoiceFile && setUploadInvoiceData(null)} disabled={isUploadingInvoiceFile} className="text-indigo-400 hover:text-indigo-600 bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
              </div>
              <div className="p-6">
-                <p className="text-sm text-gray-500 mb-4">Kestiğiniz faturanın görselini/PDF'ini seçin; müşterinin cari profilindeki Faturalar bölümüne kaydedilecektir.</p>
-                <label className={`border-2 border-dashed border-gray-300 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:bg-gray-50 transition-colors cursor-pointer ${isUploadingInvoiceFile ? 'opacity-50 pointer-events-none' : ''}`}>
-                    {isUploadingInvoiceFile ? <RefreshCcw size={24} className="text-indigo-400 animate-spin mb-2" /> : <Upload size={24} className="text-indigo-400 mb-2" />}
-                    <span className="text-xs font-bold text-gray-600">{isUploadingInvoiceFile ? 'Yükleniyor...' : 'Fatura dosyasını seçin'}</span>
-                    <input type="file" accept=".jpg,.jpeg,.png,.pdf" className="hidden" onChange={handleUploadInvoiceFile} disabled={isUploadingInvoiceFile} />
+                <p className="text-sm text-gray-500 mb-5">Paraşüt'te onaylayıp indirdiğiniz faturayı buradan seçin. Dosya, <strong>{uploadInvoiceData.customerName}</strong> müşterisinin cari profilindeki <strong>Faturalar</strong> bölümüne kaydedilecektir.</p>
+                
+                <div className="bg-slate-50 border border-gray-200 rounded-xl p-4 mb-5 grid grid-cols-2 gap-y-2 text-sm">
+                    <div className="text-gray-500 font-medium">Müşteri:</div>
+                    <div className="font-bold text-gray-800 text-right">{uploadInvoiceData.customerName}</div>
+                    <div className="text-gray-500 font-medium">Tutar:</div>
+                    <div className="font-bold text-green-600 text-right">{uploadInvoiceData.amount?.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
+                    {uploadInvoiceData.eInvoiceNo && (<><div className="text-gray-500 font-medium">Fatura No:</div><div className="font-bold text-gray-800 text-right">{uploadInvoiceData.eInvoiceNo}</div></>)}
+                </div>
+
+                <label className={`border-2 border-dashed border-indigo-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-indigo-50 hover:border-indigo-400 transition-colors cursor-pointer bg-white group ${isUploadingInvoiceFile ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <div className="w-14 h-14 bg-indigo-50 rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                        {isUploadingInvoiceFile ? <RefreshCcw size={24} className="text-indigo-500 animate-spin" /> : <Upload size={24} className="text-indigo-500" />}
+                    </div>
+                    <p className="text-sm text-gray-600 mb-1 font-medium"><span className="text-indigo-600">{isUploadingInvoiceFile ? 'Yükleniyor...' : 'Fatura dosyası seçin'}</span></p>
+                    <p className="text-xs text-gray-400">PDF, PNG veya JPG</p>
+                    <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={handleUploadInvoiceFile} disabled={isUploadingInvoiceFile} />
                 </label>
-                <div className="mt-4 flex justify-end">
-                  <button onClick={() => setUploadInvoiceData(null)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2 rounded-xl text-sm font-bold transition-colors">İptal</button>
+
+                <div className="mt-6 flex justify-end">
+                    <button onClick={() => setUploadInvoiceData(null)} disabled={isUploadingInvoiceFile} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-lg text-sm font-bold transition-colors disabled:opacity-50">İptal</button>
                 </div>
              </div>
           </div>
         </div>
       )}
 
-      {/* YENİ EKLENEN: FATURAYI PAYLAŞ MODALI */}
+      {/* YENİ EKLENEN: GÖSTERGE PANELİ DETAY PENCERESİ */}
+      {dashboardDetail && (() => {
+          const range = dashboardDetailFilter;
+          let items = [];
+          if (dashboardDetail.type === 'newCustomers') {
+              items = customers
+                  .filter(c => inDashboardRange(parseAnyDate(c.createdAt), range))
+                  .map(c => ({ id: c.id, name: c.name, sub: `No: ${c.customerNo}`, date: c.createdAt, dateObj: parseAnyDate(c.createdAt), customerId: c.id }));
+          } else if (dashboardDetail.type === 'exitedCustomers' || dashboardDetail.type === 'exitedRooms') {
+              items = collectExits(range).map(x => {
+                  const cust = customers.find(c => c.name === x.customerName);
+                  return { id: `${x.roomName}-${x.date}`, name: x.name, sub: `${x.roomName} • Çıkış`, date: x.date, dateObj: x.dateObj, customerId: cust?.id || null };
+              });
+          } else if (dashboardDetail.type === 'enteredRooms') {
+              items = collectEntries(range).map(x => {
+                  const cust = customers.find(c => c.name === x.customerName);
+                  return { id: `${x.roomName}-${x.date}`, name: x.name, sub: `${x.roomName} • Giriş`, date: x.date, dateObj: x.dateObj, customerId: cust?.id || null };
+              });
+          } else if (dashboardDetail.type === 'overdueMovements') {
+              const entries = collectEntries(range).map(x => ({ ...x, hareket: 'Giriş' }));
+              const exits = collectExits(range).map(x => ({ ...x, hareket: 'Çıkış' }));
+              items = [...entries, ...exits].map(x => {
+                  const cust = customers.find(c => c.name === x.customerName);
+                  return { id: `${x.roomName}-${x.date}-${x.hareket}`, name: x.name, sub: `${x.roomName} • ${x.hareket}`, date: x.date, dateObj: x.dateObj, customerId: cust?.id || null };
+              });
+          }
+          // En yeniden en eskiye sırala
+          items.sort((a, b) => (b.dateObj?.getTime() || 0) - (a.dateObj?.getTime() || 0));
+          const totalCount = items.length;
+          const shownItems = dashboardDetailShowAll ? items : items.slice(0, 20);
+
+          return (
+            <div className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center p-4" onClick={() => setDashboardDetail(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col animate-in fade-in zoom-in" onClick={(e) => e.stopPropagation()}>
+                 <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
+                     <div>
+                        <h3 className="text-lg font-bold text-slate-800">{dashboardDetail.title}</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">Toplam {totalCount} kayıt • en yeniden en eskiye</p>
+                     </div>
+                     <button onClick={() => setDashboardDetail(null)} className="text-gray-400 hover:text-gray-600 bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
+                 </div>
+                 <div className="p-4 border-b border-gray-100 flex gap-2">
+                     {[['today','Bugün'],['month','Bu Ay'],['year','Bu Sene']].map(([val,label]) => (
+                         <button key={val} onClick={() => { setDashboardDetailFilter(val); setDashboardDetailShowAll(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${range === val ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{label}</button>
+                     ))}
+                 </div>
+                 <div className="flex-1 overflow-y-auto p-4">
+                     {shownItems.length === 0 ? (
+                         <div className="text-center py-12 text-gray-500 font-medium text-sm">Bu dönemde kayıt bulunamadı.</div>
+                     ) : (
+                         <div className="flex flex-col gap-2">
+                             {shownItems.map(item => (
+                                 <div key={item.id} onClick={() => { if (item.customerId) { setSelectedCustomerId(item.customerId); setDashboardDetail(null); } }} className={`flex items-center justify-between p-3 rounded-xl border border-gray-100 ${item.customerId ? 'cursor-pointer hover:bg-indigo-50 hover:border-indigo-200' : ''} transition-colors`}>
+                                     <div>
+                                         <div className={`font-bold text-sm ${item.customerId ? 'text-indigo-700' : 'text-gray-700'}`}>{item.name}</div>
+                                         <div className="text-[11px] text-gray-400 mt-0.5">{item.sub}</div>
+                                     </div>
+                                     <div className="text-xs font-semibold text-gray-500 whitespace-nowrap">{item.date}</div>
+                                 </div>
+                             ))}
+                         </div>
+                     )}
+                 </div>
+                 {totalCount > 20 && (
+                     <div className="p-4 border-t border-gray-100 text-center">
+                         <button onClick={() => setDashboardDetailShowAll(!dashboardDetailShowAll)} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">
+                             {dashboardDetailShowAll ? 'Daha Az Göster' : `Tümünü Göster (${totalCount})`}
+                         </button>
+                     </div>
+                 )}
+              </div>
+            </div>
+          );
+      })()}
+
+      {/* YENİ EKLENEN: FATURAYI PAYLAŞ SEÇENEKLERİ MODALI */}
       {shareInvoiceData && (
-        <div className="fixed inset-0 bg-black/60 z-[75] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in">
+        <div className="fixed inset-0 bg-black/60 z-[75] flex items-center justify-center p-4" onClick={() => setShareInvoiceData(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in" onClick={(e) => e.stopPropagation()}>
              <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-green-50 rounded-t-2xl">
-                 <h3 className="text-lg font-bold text-green-700 flex items-center gap-2"><Share2 size={18} /> Faturayı Paylaş</h3>
-                 <button onClick={() => setShareInvoiceData(null)}><X size={20} className="text-green-400 hover:text-green-600"/></button>
+                 <h3 className="text-lg font-bold text-green-700 flex items-center gap-2"><Share2 size={20} /> Faturayı Paylaş</h3>
+                 <button onClick={() => setShareInvoiceData(null)} className="text-green-400 hover:text-green-600 bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
              </div>
-             <div className="p-6 flex flex-col gap-3">
-                <p className="text-sm text-gray-500 mb-1">{shareInvoiceData.customer?.name} müşterisine faturayı hangi kanaldan göndermek istersiniz?</p>
-                <button onClick={() => handleShareInvoice('whatsapp')} className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors shadow-sm"><MessageCircle size={16}/> WhatsApp</button>
-                <button onClick={() => handleShareInvoice('gmail')} className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-red-500 hover:bg-red-600 transition-colors shadow-sm"><Mail size={16}/> Gmail (E-posta)</button>
-                <button onClick={() => handleShareInvoice('sms')} className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-500 hover:bg-blue-600 transition-colors shadow-sm"><Phone size={16}/> SMS</button>
+             <div className="p-6">
+                <p className="text-sm text-gray-500 mb-5"><strong>{shareInvoiceData.customer?.name}</strong> müşterisine yüklenen faturayı hangi kanaldan göndermek istersiniz?</p>
+                <div className="flex flex-col gap-3">
+                    <button onClick={() => handleShareInvoice('whatsapp')} className="w-full flex items-center gap-3 bg-green-50 hover:bg-green-100 text-green-700 px-4 py-3.5 rounded-xl font-bold transition-colors">
+                        <div className="w-10 h-10 rounded-full bg-green-500 text-white flex items-center justify-center shrink-0"><MessageCircle size={20} /></div>
+                        <div className="text-left">
+                            <div className="text-sm">WhatsApp</div>
+                            <div className="text-[11px] text-gray-500 font-medium">{shareInvoiceData.customer?.phone ? `0${shareInvoiceData.customer.phone}` : 'Numara yok'}</div>
+                        </div>
+                    </button>
+                    <button onClick={() => handleShareInvoice('gmail')} className="w-full flex items-center gap-3 bg-red-50 hover:bg-red-100 text-red-600 px-4 py-3.5 rounded-xl font-bold transition-colors">
+                        <div className="w-10 h-10 rounded-full bg-red-500 text-white flex items-center justify-center shrink-0"><Mail size={20} /></div>
+                        <div className="text-left">
+                            <div className="text-sm">Gmail</div>
+                            <div className="text-[11px] text-gray-500 font-medium">{shareInvoiceData.customer?.email || 'E-posta yok'}</div>
+                        </div>
+                    </button>
+                    <button onClick={() => handleShareInvoice('sms')} className="w-full flex items-center gap-3 bg-blue-50 hover:bg-blue-100 text-blue-600 px-4 py-3.5 rounded-xl font-bold transition-colors">
+                        <div className="w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0"><Phone size={20} /></div>
+                        <div className="text-left">
+                            <div className="text-sm">Mesaj (SMS)</div>
+                            <div className="text-[11px] text-gray-500 font-medium">{shareInvoiceData.customer?.phone ? `0${shareInvoiceData.customer.phone}` : 'Numara yok'}</div>
+                        </div>
+                    </button>
+                </div>
              </div>
           </div>
         </div>
       )}
 
-      {/* YENİ EKLENEN: ODA FOTOĞRAFI GÖRÜNTÜLEME/YÜKLEME MODALI (Oda Listesi göz ikonu) */}
-      {roomPhotoViewer && (() => {
-          const room = rooms.find(r => r.id === roomPhotoViewer);
-          if (!room) return null;
-          return (
-            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in">
-                 <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
-                     <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Eye size={18} /> {room.name} - Oda Fotoğrafı</h3>
-                     <button onClick={() => setRoomPhotoViewer(null)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
-                 </div>
-                 <div className="p-6 flex flex-col gap-4">
-                    {room.roomListPhoto ? (
-                        <img src={room.roomListPhoto} alt={room.name} className="w-full h-48 object-cover rounded-xl border border-gray-200" />
-                    ) : (
-                        <div className="w-full h-48 flex flex-col items-center justify-center bg-slate-50 border border-dashed border-gray-300 rounded-xl text-gray-400">
-                            <Box size={28} className="mb-2" />
-                            <span className="text-xs font-medium">Henüz oda fotoğrafı eklenmemiş</span>
-                        </div>
-                    )}
-                    <label className="flex items-center justify-center gap-1.5 border-2 border-dashed border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg py-2.5 text-xs font-bold cursor-pointer transition-colors">
-                        <Upload size={14}/> {room.roomListPhoto ? 'Fotoğrafı Değiştir' : 'Fotoğraf Ekle'}
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if (file) handleSetRoomListPhoto(room.id, file); }} />
-                    </label>
-                    {room.roomListPhoto && (
-                        <button onClick={() => handleRemoveRoomListPhoto(room.id)} className="text-xs font-bold text-red-500 hover:text-red-600">Fotoğrafı Kaldır</button>
-                    )}
-                 </div>
-              </div>
-            </div>
-          );
-      })()}
-
-      {/* YENİ EKLENEN: DEPO (ŞUBE) / BLOK FOTOĞRAFI GÖRÜNTÜLEME/YÜKLEME MODALI */}
-      {entityPhotoViewer && (() => {
-          const entity = entityPhotoViewer.type === 'warehouse'
-              ? warehouses.find(w => w.id === entityPhotoViewer.id)
-              : blocks.find(b => b.id === entityPhotoViewer.id);
-          if (!entity) return null;
-          return (
-            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in">
-                 <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
-                     <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Eye size={18} /> {entity.name} - Fotoğraf</h3>
-                     <button onClick={() => setEntityPhotoViewer(null)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
-                 </div>
-                 <div className="p-6 flex flex-col gap-4">
-                    {entity.listPhoto ? (
-                        <img src={entity.listPhoto} alt={entity.name} className="w-full h-48 object-cover rounded-xl border border-gray-200" />
-                    ) : (
-                        <div className="w-full h-48 flex flex-col items-center justify-center bg-slate-50 border border-dashed border-gray-300 rounded-xl text-gray-400">
-                            <Home size={28} className="mb-2" />
-                            <span className="text-xs font-medium">Henüz fotoğraf eklenmemiş</span>
-                        </div>
-                    )}
-                    <label className="flex items-center justify-center gap-1.5 border-2 border-dashed border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg py-2.5 text-xs font-bold cursor-pointer transition-colors">
-                        <Upload size={14}/> {entity.listPhoto ? 'Fotoğrafı Değiştir' : 'Fotoğraf Ekle'}
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files[0]; if (file) handleSetEntityPhoto(entityPhotoViewer.type, entityPhotoViewer.id, file); }} />
-                    </label>
-                    {entity.listPhoto && (
-                        <button onClick={() => handleRemoveEntityPhoto(entityPhotoViewer.type, entityPhotoViewer.id)} className="text-xs font-bold text-red-500 hover:text-red-600">Fotoğrafı Kaldır</button>
-                    )}
-                 </div>
-              </div>
-            </div>
-          );
-      })()}
-
-      {/* PROFİL AYARLARI MODALI */}
       {isProfileModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center p-4">
            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in flex flex-col">
@@ -12446,49 +12539,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       </div>
                   </div>
 
-               </div>
-           </div>
-        </div>
-      )}
-
-      {isCustomerImportHistoryOpen && (
-        <div className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center p-4">
-           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in">
-               <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl shrink-0">
-                   <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><History size={20} className="text-[#1bc5bd]"/> Geçmiş Toplu Yüklemeler (Müşteri Aktarımı)</h3>
-                   <button onClick={() => setIsCustomerImportHistoryOpen(false)} className="bg-white p-1.5 rounded-full shadow-sm text-slate-400 hover:text-red-500 transition-colors"><X size={20} /></button>
-               </div>
-               <div className="p-6 overflow-y-auto flex-1 bg-slate-50">
-                  <div className="overflow-x-auto border border-gray-200 rounded-xl bg-white">
-                      <table className="w-full text-left text-sm text-gray-600">
-                          <thead className="bg-slate-50 border-b border-gray-200 font-bold text-gray-700 text-xs uppercase">
-                              <tr>
-                                  <th className="p-4">Yükleme Tarihi</th>
-                                  <th className="p-4">Dosya Adı</th>
-                                  <th className="p-4 text-center">Eklenen Müşteri</th>
-                                  <th className="p-4 text-center">Kiralanan Oda</th>
-                                  <th className="p-4 text-center">İşlem</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                              {customerImportHistory.length > 0 ? customerImportHistory.map(history => (
-                                  <tr key={history.id} className="hover:bg-gray-50">
-                                      <td className="p-4 font-bold text-gray-800">{history.dateStr}</td>
-                                      <td className="p-4 font-medium text-gray-600">{history.fileName}</td>
-                                      <td className="p-4 text-center font-bold text-emerald-600">{history.importedCustomerCount}</td>
-                                      <td className="p-4 text-center font-bold text-indigo-600">{history.updatedRoomCount}</td>
-                                      <td className="p-4 text-center">
-                                          <button onClick={() => handleRevertCustomerImport(history)} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border border-red-100 whitespace-nowrap mx-auto">
-                                              <Trash2 size={14}/> Geri Al / Sil
-                                          </button>
-                                      </td>
-                                  </tr>
-                              )) : (
-                                  <tr><td colSpan="5" className="p-8 text-center text-gray-500 font-medium">Henüz kayıtlı bir müşteri aktarımı geçmişi bulunmuyor.</td></tr>
-                              )}
-                          </tbody>
-                      </table>
-                  </div>
                </div>
            </div>
         </div>
