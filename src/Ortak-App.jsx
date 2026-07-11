@@ -5808,9 +5808,9 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                   
                   <div className="text-center mb-10 mt-2">
                       <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-50 mb-4 shadow-sm border border-gray-100">
-                          <Box size={32} className="text-orange-500" />
+                          <img src="https://www.depoevim.com/wp-content/uploads/2026/01/depoevim_favicon2.webp" alt="Depoevim" className="w-9 h-9 object-contain" />
                       </div>
-                      <div className="text-3xl font-black text-slate-800 tracking-tight"><span className="text-orange-500">Depo</span><span className="text-blue-500">evim</span><span className="text-sm text-gray-400 font-bold ml-2 uppercase tracking-widest align-middle">CRM</span></div>
+                      <div className="flex items-center justify-center gap-2"><img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" className="h-9 object-contain" /><span className="text-sm text-gray-400 font-bold uppercase tracking-widest align-middle">CRM</span></div>
                       <p className="text-sm text-gray-500 mt-2 font-medium">Yönetim paneline hoş geldiniz, lütfen giriş yapın.</p>
                   </div>
 
@@ -5863,7 +5863,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
       {isSidebarOpen && <div className="fixed inset-0 bg-gray-800/50 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}/>}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out flex flex-col ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} lg:relative h-full`}>
         <div className="h-16 flex items-center px-6 border-b border-gray-200 shrink-0">
-          <div className="flex items-center gap-2 text-xl font-bold text-slate-800"><span className="text-orange-500">Depo</span><span className="text-blue-500">evim</span><span className="text-xs text-gray-400 font-normal ml-1">CRM</span></div>
+          <div className="flex items-center gap-2 text-xl font-bold text-slate-800"><img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" className="h-7 object-contain" /><span className="text-xs text-gray-400 font-normal ml-1">CRM</span></div>
           <button className="ml-auto lg:hidden p-1" onClick={() => setIsSidebarOpen(false)}><X size={24} className="text-gray-500" /></button>
         </div>
         <div className="flex-1 overflow-y-auto py-4 scrollbar-thin min-h-0">
