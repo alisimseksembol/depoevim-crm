@@ -1675,7 +1675,8 @@ setTimeout(() => {
       const iframe = document.createElement('iframe');
       iframe.style.position='fixed'; iframe.style.right='0'; iframe.style.bottom='0'; iframe.style.width='0'; iframe.style.height='0'; iframe.style.border='0';
       document.body.appendChild(iframe);
-      setPdfFileName(customer?.name || 'Belge'); const doc = iframe.contentWindow.document; doc.open(); doc.write(html); doc.close();
+      const _infoCustomer = customers.find(c => c.name === selectedRoomDetail?.customerName);
+      setPdfFileName(_infoCustomer?.name || selectedRoomDetail?.customerName || 'Belge'); const doc = iframe.contentWindow.document; doc.open(); doc.write(html); doc.close();
       setTimeout(() => { try { document.body.removeChild(iframe); } catch(e){} }, 60000);
   };
 
@@ -4173,7 +4174,7 @@ const reader = new FileReader();
       const iframe = document.createElement('iframe');
       iframe.style.position='fixed'; iframe.style.right='0'; iframe.style.bottom='0'; iframe.style.width='0'; iframe.style.height='0'; iframe.style.border='0';
       document.body.appendChild(iframe);
-      setPdfFileName(customer?.name || 'Belge'); const doc = iframe.contentWindow.document; doc.open(); doc.write(html); doc.close();
+      const doc = iframe.contentWindow.document; doc.open(); doc.write(html); doc.close();
       setTimeout(() => { try { document.body.removeChild(iframe); } catch(e){} }, 60000);
   };
 
