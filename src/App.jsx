@@ -46,7 +46,9 @@ import {
   Lock,
   Share2,
   Mail,
-  LogIn
+  LogIn,
+  Camera,
+  Image as ImageIcon
 } from 'lucide-react';
 
 // ============================================================================
@@ -66,6 +68,16 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'depoevim-crm';
+
+// YENİ: Bu ay (monthCounter: girişten itibaren 0,1,2...) hediye kapsamında mı?
+// Hediye artık her zaman İLK aylardan değil, hediyenin verildiği SÖZLEŞME YILININ
+// ilk aylarından başlar. giftStartMonthIndex hediye verilirken kaydedilir
+// (örn. 3. yıl dolduysa 36). Eski kayıtlarda bu alan yoktur (0) → eski davranış korunur.
+const isGiftedMonth = (roomLike, monthCounter) => {
+    if (!roomLike || !roomLike.giftMonths) return false;
+    const start = Number(roomLike.giftStartMonthIndex || 0);
+    return monthCounter >= start && monthCounter < start + Number(roomLike.giftMonths);
+};
 
 // ============================================================================
 // 🧠 ÖNİZLEME İÇİN BELLEK-İÇİ (IN-MEMORY) SAKLAMA
@@ -290,8 +302,10 @@ export default function App() {
   // YENİ EKLENEN: Gösterge Paneli kartlarına tıklayınca açılan detay penceresi
   // type: 'newCustomers' | 'exitedCustomers' | 'enteredRooms' | 'exitedRooms' | 'overdueMovements'
   const [dashboardDetail, setDashboardDetail] = useState(null); // { type, title }
-  const [dashboardDetailFilter, setDashboardDetailFilter] = useState('today'); // today | month | year
+  const [dashboardDetailFilter, setDashboardDetailFilter] = useState('today'); // today | yesterday | week | month | year | all
   const [dashboardDetailShowAll, setDashboardDetailShowAll] = useState(false);
+  // YENİ: Gösterge Paneli genel zaman filtresi — kartlardaki toplam sayılar bu aralığa göre hesaplanır
+  const [dashboardRange, setDashboardRange] = useState('today'); // today | yesterday | week | month | year | all
 
   // --- YENİ EKLENEN: OTOMATİK GÜNCELLEME ---
   // Tüm cari borç ve oda borçlandırma hesapları (getCustomerLedger) her render'da bugünün tarihine göre
@@ -463,6 +477,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           { id: 'page-senesi-dolan-odalar', label: 'Senesi Dolan Odalar' },
           { id: 'page-aylik-odeme', label: 'Aylık Borç Takip' },
           { id: 'page-kdvsiz-cariler', label: 'KDVsiz Cariler' },
+          { id: 'page-icra-odalari', label: 'İcra Odaları' },
           { id: 'page-finans-rapor', label: 'Finans Rapor' },
           { id: 'page-depo-rapor', label: 'Depo Rapor' },
           { id: 'page-panel-kullanicilari', label: 'Panel Kullanıcıları' },
@@ -1641,21 +1656,22 @@ setTimeout(() => {
       const rulesHtml = c.rules.map((r, i) => `<li>${r}</li>`).join('');
 
       return `<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><title>DepoEvim Bilgilendirme</title><style>
-        @page { size:A4; margin:18mm; } * { box-sizing:border-box; font-family:'Segoe UI',Arial,sans-serif; }
-        body { color:#1f2937; line-height:1.6; font-size:12.5px; }
-        .head { text-align:center; border-bottom:3px solid #dc2626; padding-bottom:12px; margin-bottom:18px; }
+        @page { size:A4; margin:14mm; } * { box-sizing:border-box; font-family:'Segoe UI',Arial,sans-serif; }
+        html,body { height:auto; }
+        body { color:#1f2937; line-height:1.45; font-size:11.5px; }
+        .head { text-align:center; border-bottom:3px solid #dc2626; padding-bottom:8px; margin-bottom:14px; }
         .head .brand { font-size:26px; font-weight:900; color:#111827; } .head .brand span{ color:#dc2626; }
         .head .sub { font-size:10px; letter-spacing:3px; color:#6b7280; text-transform:uppercase; }
-        h1 { text-align:center; color:#dc2626; font-size:16px; margin:12px 0 6px; }
-        .meta { text-align:center; font-size:11px; color:#6b7280; margin-bottom:16px; }
-        .info-box { border:1px solid #e5e7eb; background:#f9fafb; border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:12px; }
+        h1 { text-align:center; color:#dc2626; font-size:15px; margin:8px 0 4px; }
+        .meta { text-align:center; font-size:10.5px; color:#6b7280; margin-bottom:12px; }
+        .info-box { border:1px solid #e5e7eb; background:#f9fafb; border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:11px; }
         .info-box b { color:#111827; }
-        ol { padding-left:18px; } ol li { margin-bottom:7px; font-size:12px; }
-        .sign-row { display:flex; justify-content:space-between; margin-top:40px; }
-        .sign-box { width:45%; text-align:center; } .sign-line { border-top:1.5px solid #111827; padding-top:6px; font-weight:700; font-size:12px; }
-        .foot { margin-top:36px; text-align:center; font-size:9px; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:10px; }
+        ol { padding-left:16px; margin:4px 0; } ol li { margin-bottom:4px; font-size:11px; }
+        .sign-row { display:flex; justify-content:space-between; margin-top:26px; }
+        .sign-box { width:45%; text-align:center; } .sign-line { border-top:1.5px solid #111827; padding-top:6px; font-weight:700; font-size:11px; }
+        .foot { margin-top:22px; text-align:center; font-size:9px; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:8px; }
       </style></head><body>
-        <div class="head"><div class="brand">Depo<span>evim</span></div><div class="sub">Eşya Depolama · Evden Eve · Asansörlü Taşıma</div></div>
+        <div class="head"><img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:42px;object-fit:contain;display:block;margin:0 auto;" /></div>
         <h1>${c.heading}</h1>
         <div class="meta">Tarih: ${today}</div>
         <div class="info-box">Müşteri: <b>${custName}</b> &nbsp;|&nbsp; Oda No: <b>${roomName}</b> &nbsp;|&nbsp; Müşteri No: <b>${customer?.customerNo || '-'}</b></div>
@@ -1741,7 +1757,7 @@ setTimeout(() => {
           <body>
               <div class="watermark">Depoevim</div>
               <div class="header">
-                  <div class="logo"><span class="black">Depo</span><span class="blue">evim</span></div>
+                  <div class="logo"><img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:44px;object-fit:contain;display:block;margin:0 auto;" /></div>
                   <div class="subtitle">EŞYA DEPOLAMA</div>
               </div>
               
@@ -1853,7 +1869,7 @@ setTimeout(() => {
           <body>
               <div class="watermark">Depoevim</div>
               <div class="header">
-                  <div class="logo"><span class="black">Depo</span><span class="blue">evim</span></div>
+                  <div class="logo"><img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:44px;object-fit:contain;display:block;margin:0 auto;" /></div>
                   <div class="subtitle">EŞYA DEPOLAMA</div>
               </div>
               
@@ -2424,7 +2440,7 @@ const handleAddExtraDocument = async (e, customerId) => {
   const getCustomerRoomPhotos = (customerName) => {
       const photos = [];
       rooms.filter(r => r.customerName === customerName).forEach(r => {
-          if (r.entryPhoto) photos.push({ key: `entry-${r.id}`, roomId: r.id, url: r.entryPhoto, label: `${r.name} - İlk Giriş`, kind: 'entryPhoto' });
+          if (r.entryPhoto) photos.push({ key: `entry-${r.id}`, roomId: r.id, url: r.entryPhoto, label: `${r.name} - İlk Giriş`, kind: 'entryPhoto', mediaType: r.entryMediaType || 'image' });
           (r.entryExitHistory || []).forEach((h, i) => {
               if (h.protocolPhoto) photos.push({ key: `hp-${r.id}-${i}`, roomId: r.id, url: h.protocolPhoto, label: `${r.name} - Tutanak (${h.date || ''})`, kind: 'history', histId: h.id, field: 'protocolPhoto' });
               if (h.finalPhoto) photos.push({ key: `hf-${r.id}-${i}`, roomId: r.id, url: h.finalPhoto, label: `${r.name} - Son Hal (${h.date || ''})`, kind: 'history', histId: h.id, field: 'finalPhoto' });
@@ -2601,32 +2617,60 @@ const handleUpdateCustomer = async () => {
       setEditCustomerData(null);
   };
 
+// YENİ: Müşterinin carisinde, verilen güne ait AKTİF (silinmemiş) bir tahsilat var mı?
+// Silinen veya tarihi değiştirilen tahsilatlar artık o günü "dolu" saymaz — böylece
+// tahsilat silindiğinde/düzenlendiğinde aynı güne yeniden tahsilat girilebilir.
+const hasActivePaymentOnDate = (customer, dateStr, excludePaymentId = null) => {
+    if (!customer || !dateStr) return false;
+    const overrides = customer.ledgerOverrides || [];
+    return (customer.payments || []).some(p => {
+        // Düzenleme sırasında kaydın kendisi hariç tutulur
+        if (excludePaymentId !== null && Number(p.id) === Number(excludePaymentId)) return false;
+        const ov = overrides.find(o => o.txId === `credit-global-${p.id}`);
+        // Cari dökümden "silindi" işaretlenen tahsilatlar sayılmaz
+        if (ov && ov.isDeleted) return false;
+        // Override ile tarihi değiştirilmişse GÜNCEL tarih baz alınır (eski günü boşaltır)
+        let effDate = p.date;
+        if (ov && ov.date) {
+            const d = new Date(ov.date);
+            if (!isNaN(d.getTime())) effDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+        return effDate === dateStr;
+    });
+};
+
 const handleDeleteLedgerItem = async (txId) => {
       if(!checkActionPerm('action-cari-sil')) return;
       logActivity('Cari Hareket Silme', 'Bir cari hareket silindi.');
     const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
     
-    if (customerToUpdate && db && firebaseUser) {
-        try {
-            let updatePayload = {};
+    if (customerToUpdate) {
+        let updatePayload = {};
 
-if (txId.startsWith('debt-extra-')) {
-                const debtId = Number(txId.replace('debt-extra-', ''));
-                updatePayload = { extraDebts: (customerToUpdate.extraDebts || []).filter(d => Number(d.id) !== debtId) };
-            } else if (txId.startsWith('credit-global-')) {
-                const payId = Number(txId.replace('credit-global-', ''));
-                updatePayload = { payments: (customerToUpdate.payments || []).filter(p => Number(p.id) !== payId) };
-            } else {
-                updatePayload = { 
-                    ledgerOverrides: [
-                        ...(customerToUpdate.ledgerOverrides || []).filter(o => o.txId !== txId),
-                        { txId, isDeleted: true }
-                    ]
-                };
-            }
+        if (txId.startsWith('debt-extra-')) {
+            const debtId = Number(txId.replace('debt-extra-', ''));
+            updatePayload = { extraDebts: (customerToUpdate.extraDebts || []).filter(d => Number(d.id) !== debtId) };
+        } else if (txId.startsWith('credit-global-')) {
+            const payId = Number(txId.replace('credit-global-', ''));
+            updatePayload = { payments: (customerToUpdate.payments || []).filter(p => Number(p.id) !== payId) };
+        } else {
+            updatePayload = { 
+                ledgerOverrides: [
+                    ...(customerToUpdate.ledgerOverrides || []).filter(o => o.txId !== txId),
+                    { txId, isDeleted: true }
+                ]
+            };
+        }
 
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), updatePayload, { merge: true });
-        } catch(e) { console.error("Cari Silme Hatası:", e); }
+        // YENİ: Yerel state ANINDA güncellenir — silmenin hemen ardından aynı güne
+        // yeni tahsilat girilebilsin (Firestore snapshot gecikmesi hataya yol açmasın).
+        setCustomers(prev => prev.map(c => c.id === selectedCustomerId ? { ...c, ...updatePayload } : c));
+
+        if (db && firebaseUser) {
+            try {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), updatePayload, { merge: true });
+            } catch(e) { console.error("Cari Silme Hatası:", e); }
+        }
     }
   };
 
@@ -2648,8 +2692,8 @@ if (txId.startsWith('debt-extra-')) {
                 const payId = Number(txId.replace('credit-global-', ''));
                 
                 const existingPayments = customerToUpdate.payments || [];
-                // Aynı gün kontrolü (Kendisi hariç)
-                if (existingPayments.some(p => Number(p.id) !== payId && p.date === editDate)) {
+                // Aynı gün kontrolü (Kendisi hariç) — YENİ: silinmiş/taşınmış tahsilatlar sayılmaz
+                if (hasActivePaymentOnDate(customerToUpdate, editDate, payId)) {
                     alert("HATA: Bu müşterinin carisinde seçili tarihe ait zaten bir tahsilat bulunmaktadır. Aynı güne başka tahsilat kaydedilemez.");
                     return;
                 }
@@ -2705,7 +2749,8 @@ const handleManualAddPayment = async () => {
     const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
     if (customerToUpdate) {
         const existingPayments = customerToUpdate.payments || [];
-        if (existingPayments.some(p => p.date === newPaymentData.date)) {
+        // YENİ: Silinmiş veya tarihi değiştirilmiş tahsilatlar o günü "dolu" saymaz
+        if (hasActivePaymentOnDate(customerToUpdate, newPaymentData.date)) {
             alert(`HATA: Bu müşteriye ait aynı günde (${newPaymentData.date}) zaten bir tahsilat kaydı bulunmaktadır. Aynı güne başka tahsilat girişi yapılamaz!`);
             return;
         }
@@ -3161,7 +3206,27 @@ const handleAddInvoice = async () => {
   const [detailYear, setDetailYear] = useState(2026);
 
   const [activeSizeFilter, setActiveSizeFilter] = useState(null);
-  const [isSizeFilterDropdownOpen, setIsSizeFilterDropdownOpen] = useState(false);
+  // YENİ: "Oda Boyutu Bul" seçenekleri artık ortada açılan pencerede (modal) gösterilir.
+  // null = kapalı | { scope } = açık; scope butona basılan ekranı belirtir (null / {warehouseId} / {blockId})
+  const [sizeFilterModal, setSizeFilterModal] = useState(null);
+  // YENİ: "Oda Boyutu Bul" kapsamı — butona basılan ekrana göre daraltır
+  // null = tüm depolar | { warehouseId } = seçili şube | { blockId } = seçili blok
+  const [sizeFilterScope, setSizeFilterScope] = useState(null);
+  // YENİ: "Rezerve Göster" görünümü ve kapsamı (aynı kapsam mantığı)
+  const [showReservedView, setShowReservedView] = useState(false);
+  const [reservedViewScope, setReservedViewScope] = useState(null);
+
+  // YENİ: Bir oda, verilen kapsamın (şube/blok) içinde mi?
+  const roomInScope = (r, scope) => {
+      if (!scope) return true; // kapsam yok → tüm depolar
+      if (scope.blockId) return r.blockId === scope.blockId;
+      if (scope.warehouseId) {
+          const blk = blocks.find(b => b.id === r.blockId);
+          return blk?.warehouseId === scope.warehouseId;
+      }
+      return true;
+  };
+  // KALDIRILDI: isSizeFilterDropdownOpen — "Oda Boyutu Bul" seçenekleri artık sizeFilterModal ile ortada açılıyor
   const sizeFilters = [
       { id: '1+0', label: '1+0 (0 - 12 m³)', min: 0, max: 12 },
       { id: '1+1', label: '1+1 (13 - 18 m³)', min: 13, max: 18 },
@@ -3293,8 +3358,7 @@ const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
         .foot b { color:#111827; }
       </style></head><body>
         <div class="head">
-          <div class="brand">Depo<span>evim</span></div>
-          <div class="sub">Evden Eve · Asansörlü Taşıma · Depolama</div>
+          <img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:44px; object-fit:contain; margin:0 auto 6px; display:block;" />
         </div>
         <h1>DEPO GİRİŞ / ÇIKIŞ TUTANAĞI</h1>
         <p class="body-text">
@@ -3410,9 +3474,26 @@ const handleEntryExitSave = async () => {
   };
 
  const handleSetGiftMonths = async (months) => {
+      // YENİ: Hediye, verildiği anda BULUNULAN SÖZLEŞME YILININ ilk aylarına uygulanır.
+      // Girişten bugüne geçen TAM yıl sayısı bulunur; hediye o yılın başından (tamYıl*12) başlar.
+      // Örn: 3. yılı dolan odaya 2 ay hediye → yeni yılın (37. ve 38. ay) ilk 2 ayı hediye olur.
+      let giftStartMonthIndex = 0;
+      const giftRoom = rooms.find(r => String(r.id) === String(selectedRoomId));
+      const entry = giftRoom ? parseAnyDate(giftRoom.entryDate) : null;
+      if (months > 0 && entry) {
+          const now = new Date();
+          let diffMonths = (now.getFullYear() - entry.getFullYear()) * 12 + (now.getMonth() - entry.getMonth());
+          if (now.getDate() < entry.getDate()) diffMonths -= 1; // Yıldönümü günü henüz gelmediyse tam ay sayılmaz
+          const fullYears = Math.max(0, Math.floor(diffMonths / 12));
+          giftStartMonthIndex = fullYears * 12;
+      }
+
+      // Yerel state ANINDA güncellenir (önizleme modunda da çalışır)
+      setRooms(prev => prev.map(r => String(r.id) === String(selectedRoomId) ? { ...r, giftMonths: months, giftStartMonthIndex } : r));
+
       if (db && firebaseUser) {
           try {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { giftMonths: months }, { merge: true });
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { giftMonths: months, giftStartMonthIndex }, { merge: true });
           } catch(e) { console.error("Firebase Hediye Ay Hatası:", e); }
       }
       setIsGiftModalOpen(false);
@@ -3981,13 +4062,26 @@ const reader = new FileReader();
           mAdres: customer?.address || '',
           odaNo: room?.name || '',
           dateStr,
-          kdvIncl
+          kdvIncl,
+          depoAdres: getRoomWarehouseAddress(room)
       });
   };
 
   // YENİ EKLENEN: Oda detayındaki "Sözleşme İndir" — odanın GÜNCEL (en son zamlı) kirasıyla sözleşme üretir.
   // Eski cari/oda kayıtlarındaki tutarları DEĞİŞTİRMEZ; yalnızca sözleşme çıktısında güncel kirayı gösterir.
   // YENİ EKLENEN: Ortak 4 sayfalık Eşya Depolama Sözleşmesi HTML üreticisi (ekteki formatla birebir)
+  const getRoomWarehouseAddress = (room) => {
+      if (!room) return '';
+      // 1) Blok üzerinden: room.blockId -> block.warehouseId -> warehouse.address
+      let blk = blocks.find(b => String(b.id) === String(room.blockId));
+      let wh = blk ? warehouses.find(w => String(w.id) === String(blk.warehouseId)) : null;
+      // 2) Oda doğrudan warehouseId taşıyorsa
+      if (!wh && room.warehouseId) wh = warehouses.find(w => String(w.id) === String(room.warehouseId));
+      // 3) Blok adı/şube adı ile eşleşme (bazı kayıtlar isimle bağlı olabilir)
+      if (!wh && room.warehouseName) wh = warehouses.find(w => w.name === room.warehouseName);
+      if (!wh && blk && blk.warehouseName) wh = warehouses.find(w => w.name === blk.warehouseName);
+      return wh?.address || '';
+  };
   const buildDepoevimContractHtml = (p) => {
       const companyName = contractSettings.accountHolder || 'Sembol Nakliyat Depoculuk Tic. Ltd. Şti';
       const iban = contractSettings.iban || 'TR90 0020 3000 0871 2889 0000 34';
@@ -4000,6 +4094,8 @@ const reader = new FileReader();
       const odaNo = p.odaNo || '';
       const dateStr = p.dateStr || '';
       const kdvIncl = Number(p.kdvIncl || 0);
+      // YENİ: Odanın bulunduğu şubenin adresi (yoksa varsayılan)
+      const depoAdres = p.depoAdres || 'Hürriyet mahallesi Berfin Sokak No:1';
       const kase = 'https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg';
       const logo = 'https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp';
 
@@ -4060,7 +4156,7 @@ const reader = new FileReader();
 
       <div class="page">
         <p class="lbl"><b>Depo Adresi:</b></p>
-        <p class="lbl"><b>Hürriyet mahallesi Berfin Sokak No:1</b></p>
+        <p class="lbl"><b>${depoAdres}</b></p>
         <p>Eşyaların bulunduğu adresten olası bir zorunlu tahliye işleminde eşyaların başka bir depo adresine taşınması durumunda depolayan kişiye sözlü ve ya yazılı olarak bildirilecektir.</p>
         <h2 class="madde">Madde 4 - SÖZLEŞMENİN SÜRESİ</h2>
         <p>İşbu sözleşme belirtilen tarihten itibaren geçerli sayılacaktır.</p>
@@ -4135,15 +4231,51 @@ const reader = new FileReader();
           mAdres: customer?.address || '',
           odaNo: room.name || '',
           dateStr,
-          kdvIncl
+          kdvIncl,
+          depoAdres: getRoomWarehouseAddress(room)
       });
-      setPrintFileName(customer?.name || room.customerName, 'sozlesme');
+      setPdfFileName(sanitizePdfName(`${customer?.name || room.customerName || 'Sozlesme'} - ${room.name || ''} Sozlesme`));
 
       const iframe = document.createElement('iframe');
       iframe.style.position='fixed'; iframe.style.right='0'; iframe.style.bottom='0'; iframe.style.width='0'; iframe.style.height='0'; iframe.style.border='0';
       document.body.appendChild(iframe);
       const docu = iframe.contentWindow.document; docu.open(); docu.write(html); docu.close();
       setTimeout(() => { try { document.body.removeChild(iframe); } catch(e){} }, 60000);
+  };
+
+  // YENİ EKLENEN: Oda güncel sözleşmesini DOĞRUDAN PDF olarak indir (yeni sekmede açar, dosya adı = müşteri)
+  const handleDownloadRoomCurrentContract = () => {
+      const room = selectedRoomDetail;
+      if (!room) return;
+      const customer = customers.find(c => c.name === room.customerName);
+      const entryD = parseDateLocal(room.entryDate || '2026-01-01');
+      const dateStr = entryD.toLocaleDateString('tr-TR');
+      const base = Math.max(Number(room.monthlyFee || 0), Number(getRoomFeeForMonth(room, new Date().getFullYear(), new Date().getMonth()) || 0));
+      const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
+      const kdvIncl = Math.round(hasKdv ? base * 1.20 : base);
+      const html = buildDepoevimContractHtml({
+          mAd: customer?.name || room.customerName || '',
+          mTc: customer?.tc || '',
+          mTel: customer?.phone || '',
+          mTel2: customer?.phone2 || '',
+          mAdres: customer?.address || '',
+          odaNo: room.name || '',
+          dateStr,
+          kdvIncl,
+          depoAdres: getRoomWarehouseAddress(room)
+      });
+      const fileName = sanitizePdfName(`${customer?.name || room.customerName || 'Sozlesme'} - ${room.name || ''} Sozlesme`);
+      setPdfFileName(fileName);
+      // Yeni sekmede aç: kullanıcı Paylaş/Kaydet ile PDF olarak indirir (iOS + masaüstü uyumlu)
+      const w = window.open('', '_blank');
+      if (w) {
+          w.document.open();
+          w.document.write(html);
+          w.document.close();
+      } else {
+          // Popup engellendiyse iframe ile yazdırma diyaloğuna düş
+          handlePrintRoomCurrentContract();
+      }
   };
 
   // YENİ EKLENEN: Oda detayı — güncel kira sözleşmesini WhatsApp'tan paylaş
@@ -4252,6 +4384,7 @@ const handleRentRoom = async () => {
           transportPrice: rentData.transportPrice,
           transportHasKdv: rentData.transportHasKdv,
           entryPhoto: rentData.entryPhoto,
+          entryMediaType: rentData.entryMediaType || 'image',
           paidMonths: [],
           rentedBy: currentUserProfile.name,
           isReserved: false, // Varsa rezerveyi iptal et
@@ -4307,7 +4440,8 @@ const handleGlobalPayment = async () => {
         const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
         if (customerToUpdate) {
             const existingPayments = customerToUpdate.payments || [];
-            if (existingPayments.some(p => p.date === globalPaymentData.date)) {
+            // YENİ: Silinmiş veya tarihi değiştirilmiş tahsilatlar o günü "dolu" saymaz
+            if (hasActivePaymentOnDate(customerToUpdate, globalPaymentData.date)) {
                 alert(`HATA: Bu müşteriye ait aynı günde (${globalPaymentData.date}) zaten bir tahsilat kaydı bulunmaktadır. Aynı güne başka tahsilat girişi yapılamaz!`);
                 return;
             }
@@ -4331,9 +4465,13 @@ const handleGlobalPayment = async () => {
   const handleDeleteCollection = async (customerId, paymentId) => {
       if (!window.confirm("Bu tahsilatı silmek istediğinize emin misiniz? İşlem müşterinin cari hesabından silinecektir.")) return;
       const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
-      if (customerToUpdate && db && firebaseUser) {
+      if (!customerToUpdate) return;
+      const updatedPayments = (customerToUpdate.payments || []).filter(p => Number(p.id) !== Number(paymentId));
+      // YENİ: Yerel state ANINDA güncellenir — böylece silmenin hemen ardından aynı güne
+      // yeni tahsilat girilirken eski (silinmiş) kayıt hataya yol açmaz.
+      setCustomers(prev => prev.map(c => String(c.id) === String(customerId) ? { ...c, payments: updatedPayments } : c));
+      if (db && firebaseUser) {
           try {
-              const updatedPayments = (customerToUpdate.payments || []).filter(p => Number(p.id) !== Number(paymentId));
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { payments: updatedPayments }, { merge: true });
           } catch(e) { console.error("Tahsilat Silme Hatası:", e); }
       }
@@ -4379,17 +4517,16 @@ const handleGlobalPayment = async () => {
           alert("Bu müşterinin KDV'siz bir odası bulunmuyor.");
           return;
       }
-      if (!window.confirm(`${customerToUpdate.name} müşterisinin tüm KDV'siz odaları, BU AYDAN İTİBAREN ödediği tutar değişmeden KDV DAHİL (faturalı) borçlandırılacak. Geçmiş aylar olduğu gibi kalır. Onaylıyor musunuz?`)) return;
+      if (!window.confirm(`${customerToUpdate.name} müşterisinin tüm KDV'siz odaları, BU AYDAN İTİBAREN faturalı (KDV dahil) hale getirilecek. Aylık tutar HİÇ DEĞİŞMEZ; sadece bu aydan sonraki aylarda tutarın içinden KDV ayrıştırılır. Geçmiş aylar olduğu gibi kalır. Onaylıyor musunuz?`)) return;
 
       // Geçiş anahtarı: bu ayın yıl-ay değeri (ledger bu aydan itibaren KDV dahil işler)
       const now = new Date();
       const kdvStartKey = `${now.getFullYear()}-${now.getMonth()}`;
 
-      // Yeni baz = eski kira / 1.20 → ×1.20 uygulanınca müşterinin ödediği rakam sabit kalır.
+      // Yeni baz: tutar HİÇ DEĞİŞMEZ. monthlyFee aynen kalır; sadece geçişten sonraki aylar
+      // "KDV dahil" kabul edilir (ledger içeriden KDV ayrıştırır). Böylece görünen tutar sabittir.
       const buildKdvUpdate = (room) => {
-          const oldFee = Number(room.monthlyFee || 0);
-          const newBase = Math.round((oldFee / 1.20) * 100) / 100;
-          return { monthlyFee: String(newBase), hasKdv: true, kdvStartKey };
+          return { hasKdv: true, kdvStartKey };
       };
 
       if (db && firebaseUser) {
@@ -4407,7 +4544,7 @@ const handleGlobalPayment = async () => {
               return r;
           }));
       }
-      alert(`${customerToUpdate.name} müşterisinin ${kdvsizRooms.length} odası bu aydan itibaren KDV dahil (faturalı) borçlandırılacak. Geçmiş aylar değişmedi, ödeme tutarı sabit kaldı.`);
+      alert(`${customerToUpdate.name} müşterisinin ${kdvsizRooms.length} odası bu aydan itibaren faturalı (KDV dahil) hale getirildi. Aylık tutar değişmedi; geçmiş aylar aynı kaldı, yeni aylarda tutarın içinden KDV ayrıştırılıyor.`);
   };
 
   // YENİ EKLENEN: E-Faturaya/yeni IBAN'a geçiş bilgilendirme mesajı (WhatsApp veya SMS)
@@ -4445,7 +4582,8 @@ const handleGlobalPayment = async () => {
       
       if (customerToUpdate && db && firebaseUser) {
           const existingPayments = customerToUpdate.payments || [];
-          if (existingPayments.some(p => Number(p.id) !== Number(editCollectionData.id) && p.date === editCollectionData.date)) {
+          // YENİ: Silinmiş veya tarihi değiştirilmiş tahsilatlar o günü "dolu" saymaz (kendisi hariç)
+          if (hasActivePaymentOnDate(customerToUpdate, editCollectionData.date, editCollectionData.id)) {
               alert("Bu müşterinin carisinde seçilen tarihte zaten bir tahsilat kaydı bulunmaktadır. Aynı güne birden fazla tahsilat girilemez.");
               return;
           }
@@ -4491,25 +4629,28 @@ const handleSaveEditRent = async () => {
       const custName = customer?.name || room.customerName || '..............................';
       const roomName = room.name || '............';
 
+      // NAKLİYE HASAR tutanağı tek sayfaya kesin sığacak şekilde kompakt ölçeklenir.
+      const isNakliye = type === 'nakliye';
       const styles = `
-        @page { size: A4; margin: 20mm; }
+        @page { size: A4; margin: ${isNakliye ? '14mm' : '20mm'}; }
         * { box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
-        body { color:#1f2937; line-height:1.8; }
-        .head { text-align:center; border-bottom:3px solid #dc2626; padding-bottom:14px; margin-bottom:26px; }
+        html, body { height:auto; }
+        body { color:#1f2937; line-height:${isNakliye ? '1.5' : '1.8'}; ${isNakliye ? 'font-size:13px;' : ''} }
+        .head { text-align:center; border-bottom:3px solid #dc2626; padding-bottom:${isNakliye ? '8px' : '14px'}; margin-bottom:${isNakliye ? '14px' : '26px'}; }
         .head .brand { font-size:30px; font-weight:900; letter-spacing:1px; color:#111827; }
         .head .brand span { color:#dc2626; }
         .head .sub { font-size:11px; letter-spacing:3px; color:#6b7280; margin-top:2px; text-transform:uppercase; }
-        h1 { text-align:center; color:#dc2626; font-size:22px; margin:20px 0 30px; }
-        .body-text { font-size:15px; font-weight:600; margin-bottom:24px; }
-        .fill { display:inline-block; min-width:200px; border-bottom:1.5px solid #111827; font-weight:800; text-align:center; padding:0 6px; }
+        h1 { text-align:center; color:#dc2626; font-size:${isNakliye ? '18px' : '22px'}; margin:${isNakliye ? '10px 0 16px' : '20px 0 30px'}; }
+        .body-text { font-size:${isNakliye ? '13px' : '15px'}; font-weight:600; margin-bottom:${isNakliye ? '14px' : '24px'}; }
+        .fill { display:inline-block; min-width:${isNakliye ? '150px' : '200px'}; border-bottom:1.5px solid #111827; font-weight:800; text-align:center; padding:0 6px; }
         .fill.small { min-width:80px; }
-        .info { font-size:15px; font-weight:800; margin:10px 0; }
-        .field { font-size:14px; margin:14px 0; }
+        .info { font-size:${isNakliye ? '13px' : '15px'}; font-weight:800; margin:${isNakliye ? '7px 0' : '10px 0'}; }
+        .field { font-size:${isNakliye ? '13px' : '14px'}; margin:${isNakliye ? '9px 0' : '14px 0'}; }
         .field b { display:inline-block; min-width:230px; }
         .line { display:inline-block; min-width:260px; border-bottom:1.5px solid #111827; }
-        .sign { margin-top:60px; }
+        .sign { margin-top:${isNakliye ? '32px' : '60px'}; }
         .sign-line { border-top:1.5px solid #111827; padding-top:8px; font-weight:700; font-size:13px; width:60%; }
-        .foot { margin-top:70px; text-align:center; font-size:10px; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:12px; }
+        .foot { margin-top:${isNakliye ? '28px' : '70px'}; text-align:center; font-size:10px; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:${isNakliye ? '8px' : '12px'}; }
         .foot b { color:#111827; }`;
 
       let inner = '';
@@ -4545,7 +4686,7 @@ const handleSaveEditRent = async () => {
       }
 
       return `<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><title>DepoEvim Tutanak</title><style>${styles}</style></head><body>
-        <div class="head"><div class="brand">Depo<span>evim</span></div><div class="sub">Evden Eve · Asansörlü Taşıma · Depolama</div></div>
+        <div class="head"><img src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp" alt="Depoevim" style="height:44px;object-fit:contain;display:block;margin:0 auto;" /></div>
         ${inner}
         <div class="foot"><b>${companyName}</b><br/>Bahçelievler Mah. Yeni Sokak No:5 C Pendik / İstanbul<br/>0(216) 390 89 99 · 0(554) 726 16 61 · www.sembolevdeneve.com</div>
         <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
@@ -4622,7 +4763,7 @@ const handleEndRentConfirm = async () => {
               const override = overrides.find(o => o.txId === txId);
               if (override && !override.isDeleted && override.debt !== undefined) currentMonthlyTotal = override.debt;
 
-              const isGifted = room.giftMonths && monthCounter < room.giftMonths;
+              const isGifted = isGiftedMonth(room, monthCounter);
               const isFree = room.isFreeRoom;
               
               if (isDueYet && !room.paidMonths?.includes(key) && !isGifted && !isFree) {
@@ -4784,6 +4925,40 @@ const handleChangeRoomConfirm = async () => {
           if (chosen) effective = chosen.fee;
       }
       return effective;
+  };
+
+  // YENİ: Odanın EN SON / EN YÜKSEK geçerli kirasını (KDV HARİÇ baz tutar) döndürür.
+  // Kaynakların tamamına bakar ve en yükseğini seçer:
+  //   1) room.monthlyFee (kayıtlı aylık kira)
+  //   2) increaseHistory (bugüne kadar yürürlüğe girmiş zamlar)
+  //   3) priceHistory (zam geçmişindeki son kayıtlar — "Geçmiş Zamları Düzenle" buraya yazar)
+  //   4) Müşteri carisindeki bu odaya ait borç override kayıtları (Geçmiş Zamlı Kira satırları)
+  // Böylece cariye yansımış zamlı kira, "Mevcut Kira" ve "Aylık Kira Bedeli" alanlarında da görünür.
+  const getRoomLatestFee = (room) => {
+      const now = new Date();
+      let best = Math.max(Number(room.monthlyFee || 0), Number(getRoomFeeForMonth(room, now.getFullYear(), now.getMonth()) || 0));
+
+      // priceHistory içindeki sayısal newFee değerlerinin en yükseği
+      if (Array.isArray(room.priceHistory)) {
+          room.priceHistory.forEach(ph => {
+              const f = Number(ph.newFee);
+              if (!isNaN(f) && f > 0) best = Math.max(best, f);
+          });
+      }
+
+      // Müşteri carisindeki bu odaya ait override'lar (hediye/silinmiş kayıtlar hariç)
+      const cust = customers.find(c => c.name === room.customerName);
+      const roomOverrides = (cust?.ledgerOverrides || []).filter(o =>
+          !o.isDeleted && !o.isSpecificGift &&
+          String(o.txId || '').startsWith(`debt-${room.id}-`) &&
+          o.baseDebt !== undefined
+      );
+      roomOverrides.forEach(o => {
+          const f = Number(o.baseDebt);
+          if (!isNaN(f) && f > 0) best = Math.max(best, f);
+      });
+
+      return best;
   };
 
   const handleOpenApplyIncreaseModal = (room, year) => {
@@ -5406,7 +5581,8 @@ const newAppt = {
         { id: 'gunu-gelen-odalar', label: 'Günü Gelen Odalar', permId: 'page-gunu-gelen-odalar' },
         { id: 'senesi-dolan-odalar', label: 'Senesi Dolan Odalar', permId: 'page-senesi-dolan-odalar' },
         { id: 'aylik-odeme', label: 'Aylık Borç Takip', permId: 'page-aylik-odeme' },
-        { id: 'kdvsiz-cariler', label: 'KDVsiz Cariler', permId: 'page-kdvsiz-cariler' }
+        { id: 'kdvsiz-cariler', label: 'KDVsiz Cariler', permId: 'page-kdvsiz-cariler' },
+        { id: 'icra-odalari', label: 'İcra Odaları', permId: 'page-icra-odalari' }
     ] },
     { id: 'depo', label: 'Depo Listesi', icon: Box, permId: 'menu-depo' },
     { id: 'finans-yonetimi', label: 'Finans Yönetimi', icon: TrendingUp, permId: 'menu-finans-yonetimi', subItems: [
@@ -5482,7 +5658,7 @@ const newAppt = {
       
       while (loopDate < today) {
           const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
-          const isGifted = r.giftMonths && monthCounter < r.giftMonths;
+          const isGifted = isGiftedMonth(r, monthCounter);
           const isFree = r.isFreeRoom;
           
 if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
@@ -5577,6 +5753,11 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
       if (range === 'today') {
           return dateObj.getDate() === now.getDate() && dateObj.getMonth() === now.getMonth() && dateObj.getFullYear() === now.getFullYear();
       }
+      if (range === 'yesterday') {
+          // YENİ: Dün — bugünden bir önceki takvim günü
+          const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+          return dateObj.getDate() === y.getDate() && dateObj.getMonth() === y.getMonth() && dateObj.getFullYear() === y.getFullYear();
+      }
       if (range === 'week') {
           // Bu hafta (Pazartesi başlangıçlı)
           const d = new Date(now); const day = (d.getDay() + 6) % 7; // Pzt=0
@@ -5593,8 +5774,10 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
       return true; // 'all' — Tüm Zamanlar
   };
 
-  // Bugün kaydedilen müşteri sayısı (kart 1 için)
-  const todayNewCustomersCount = customers.filter(c => inDashboardRange(parseAnyDate(c.createdAt), 'today')).length;
+  // YENİ: Seçilen zaman aralığına göre kart sayıları (Gösterge Paneli filtresi)
+  const dashboardRangeLabels = { today: 'Bugün', yesterday: 'Dün', week: 'Bu hafta', month: 'Bu ay', year: 'Bu sene', all: 'Tüm zamanlarda' };
+  const rangeLabel = dashboardRangeLabels[dashboardRange] || 'Bugün';
+  const rangeNewCustomersCount = customers.filter(c => inDashboardRange(parseAnyDate(c.createdAt), dashboardRange)).length;
   // Bugün çıkış yapan müşteri sayısı (kart 2 için) — odaların çıkış geçmişinden
   const collectExits = (range) => {
       const list = [];
@@ -5608,7 +5791,7 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
       });
       return list;
   };
-  const todayExitsCount = collectExits('today').length;
+  const rangeExitsCount = collectExits(dashboardRange).length;
   // Bugün giren oda sayısı (kart 3) — entryExitHistory girişleri + aktif odaların entryDate'i
   const collectEntries = (range) => {
       const list = [];
@@ -5626,14 +5809,22 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
       });
       return list;
   };
-  const todayEntriesCount = collectEntries('today').length;
+  const rangeEntriesCount = collectEntries(dashboardRange).length;
+
+  // YENİ: Takvim menü rozeti — bugün ve sonrasındaki (yaklaşan) randevu sayısı
+  const upcomingAppointmentsCount = appointments.filter(a => {
+      const d = parseAnyDate(a.date);
+      if (!d) return false;
+      const t = new Date(); t.setHours(0, 0, 0, 0);
+      return d >= t;
+  }).length;
 
   const dashboardCards = [
-    { id: 1, title: 'KAYDEDİLEN MÜŞTERİ', value: todayNewCustomersCount.toString(), desc: 'Bugün sisteme eklenen müşteriler', tag: 'Detay için tıklayın', tagColor: 'text-blue-700 bg-blue-100', borderColor: 'border-blue-500', iconColor: 'text-blue-500 bg-blue-50', icon: Users, chartData: [10, 15, 12, 20, 18, 25, 30], chartColor: '#3b82f6' },
-    { id: 2, title: 'ÇIKIŞ YAPAN MÜŞTERİLER', value: todayExitsCount.toString(), desc: 'Bugün depodan çıkış yapanlar', tag: 'Detay için tıklayın', tagColor: 'text-orange-700 bg-orange-100', borderColor: 'border-orange-400', iconColor: 'text-orange-500 bg-orange-50', icon: LogOut, chartData: [20, 22, 25, 23, 28, 30, 32], chartColor: '#f97316' },
-    { id: 3, title: 'GİREN ODA SAYISI', value: todayEntriesCount.toString(), desc: 'Bugün odaya giriş yapılanlar', tag: 'Detay için tıklayın', tagColor: 'text-teal-700 bg-teal-100', borderColor: 'border-teal-400', iconColor: 'text-teal-500 bg-teal-50', icon: Box, chartData: [5, 10, 8, 15, 10, 18, 25], chartColor: '#14b8a6' },
-    { id: 4, title: 'ÇIKAN ODA SAYISI', value: todayExitsCount.toString(), desc: 'Bugün odadan çıkış yapılanlar', tag: 'Detay için tıklayın', tagColor: 'text-blue-700 bg-blue-100', borderColor: 'border-blue-400', iconColor: 'text-blue-500 bg-blue-50', icon: Box, chartData: [10, 12, 15, 10, 20, 25, 20], chartColor: '#3b82f6' },
-    { id: 5, title: 'ODAYA GİRİŞ ÇIKIŞ İŞLEMİ YAPAN MÜŞTERİLER', value: (todayEntriesCount + todayExitsCount).toString(), desc: 'Bugün oda giriş/çıkış işlemi yapılan müşteriler', tag: 'Detay için tıklayın', tagColor: 'text-red-700 bg-red-100', borderColor: 'border-red-500', iconColor: 'text-indigo-500 bg-indigo-50', icon: RefreshCcw, chartData: [30, 25, 28, 20, 15, 10, 5], chartColor: '#6366f1' },
+    { id: 1, title: 'KAYDEDİLEN MÜŞTERİ', value: rangeNewCustomersCount.toString(), desc: `${rangeLabel} sisteme eklenen müşteriler`, tag: 'Detay için tıklayın', tagColor: 'text-blue-700 bg-blue-100', borderColor: 'border-blue-500', iconColor: 'text-blue-500 bg-blue-50', icon: Users, chartData: [10, 15, 12, 20, 18, 25, 30], chartColor: '#3b82f6' },
+    { id: 2, title: 'ÇIKIŞ YAPAN MÜŞTERİLER', value: rangeExitsCount.toString(), desc: `${rangeLabel} depodan çıkış yapanlar`, tag: 'Detay için tıklayın', tagColor: 'text-orange-700 bg-orange-100', borderColor: 'border-orange-400', iconColor: 'text-orange-500 bg-orange-50', icon: LogOut, chartData: [20, 22, 25, 23, 28, 30, 32], chartColor: '#f97316' },
+    { id: 3, title: 'GİREN ODA SAYISI', value: rangeEntriesCount.toString(), desc: `${rangeLabel} odaya giriş yapılanlar`, tag: 'Detay için tıklayın', tagColor: 'text-teal-700 bg-teal-100', borderColor: 'border-teal-400', iconColor: 'text-teal-500 bg-teal-50', icon: Box, chartData: [5, 10, 8, 15, 10, 18, 25], chartColor: '#14b8a6' },
+    { id: 4, title: 'ÇIKAN ODA SAYISI', value: rangeExitsCount.toString(), desc: `${rangeLabel} odadan çıkış yapılanlar`, tag: 'Detay için tıklayın', tagColor: 'text-blue-700 bg-blue-100', borderColor: 'border-blue-400', iconColor: 'text-blue-500 bg-blue-50', icon: Box, chartData: [10, 12, 15, 10, 20, 25, 20], chartColor: '#3b82f6' },
+    { id: 5, title: 'ODAYA GİRİŞ ÇIKIŞ İŞLEMİ YAPAN MÜŞTERİLER', value: (rangeEntriesCount + rangeExitsCount).toString(), desc: `${rangeLabel} oda giriş/çıkış işlemi yapılan müşteriler`, tag: 'Detay için tıklayın', tagColor: 'text-red-700 bg-red-100', borderColor: 'border-red-500', iconColor: 'text-indigo-500 bg-indigo-50', icon: RefreshCcw, chartData: [30, 25, 28, 20, 15, 10, 5], chartColor: '#6366f1' },
     { id: 6, title: 'TOPLAM DEPO', value: warehouses.length.toString(), desc: `${totalRoomsCount} oda kapasitesi (tüm depolar)`, tag: `Genel doluluk %${roomCapacityPercentage}`, tagColor: 'text-purple-700 bg-purple-100', borderColor: 'border-purple-500', iconColor: 'text-purple-500 bg-purple-50', icon: Home, chartData: [10, 10, 10, 10, 10, 10, 10], chartColor: '#a855f7' },
     { id: 7, title: 'DOLU ODA', value: activeRentalsCount.toString(), desc: 'Hesaba bağlı oda sayısı', tag: `Tüm odaların %${roomCapacityPercentage} payı`, tagColor: 'text-green-700 bg-green-100', borderColor: 'border-green-500', iconColor: 'text-green-500 bg-green-50', icon: Box, chartData: [10, 20, 30, 40, 50, 60, 70], chartColor: '#22c55e' },
     { id: 8, title: 'BOŞ ODA', value: emptyRoomsCount.toString(), desc: 'Kiraya hazır kapasite', tag: `Tüm odaların %${emptyRoomPercentage} payı`, tagColor: 'text-gray-600 bg-gray-100', borderColor: 'border-slate-500', iconColor: 'text-slate-500 bg-slate-50', icon: Box, chartData: [50, 40, 30, 20, 10, 5, 2], chartColor: '#64748b' },
@@ -5669,7 +5860,11 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
         // YENİ EKLENEN: Dönem, ödeme gününün bir gün SONRASINDA görünür (aynı gün çıkışta o ay alınmaz).
         let periodDueDate = new Date(loopDate.getFullYear(), loopDate.getMonth(), loopDate.getDate() + 1);
         periodDueDate.setHours(0, 0, 0, 0);
-        if (periodDueDate <= today) {
+        // YENİ: Hediye ayları (giftMonths kapsamındaki aylar) vade tarihi henüz gelmese bile
+        // dökümde HER ZAMAN gösterilir — böylece 2 ay hediye verildiğinde ikinci hediye ayı da görünür.
+        // Bu özel görünürlük yalnızca hediye aylarına aittir; normal aylar eskisi gibi vadesi gelince listelenir.
+        const isGiftMonthNow = isGiftedMonth(selectedRoomDetail, monthCounter);
+        if (periodDueDate <= today || isGiftMonthNow) {
 const start = new Date(loopDate);
           
           const targetDay = selectedRoomDetail.paymentDate && !selectedRoomDetail.paymentDate.includes('-') ? parseInt(selectedRoomDetail.paymentDate) : paymentAnchorDate.getDate();
@@ -5712,7 +5907,7 @@ const start = new Date(loopDate);
           }
 
           const isPaid = selectedRoomDetail.paidMonths?.includes(paymentKey);
-          const isGifted = selectedRoomDetail.giftMonths && monthCounter < selectedRoomDetail.giftMonths;
+          const isGifted = isGiftedMonth(selectedRoomDetail, monthCounter);
           const isFree = selectedRoomDetail.isFreeRoom;
 
           let stat = isPaid ? 'Ödeme Yapıldı' : (isFree ? 'Ücretsiz Oda' : ((isGifted || isSpecificGift) ? 'Hediye Edildi' : 'Bekliyor'));
@@ -5790,7 +5985,7 @@ const targetDay = selectedRoomDetail.paymentDate && !selectedRoomDetail.paymentD
           currentMonthlyTotal = override.debt;
       }
 
-      const isGifted = selectedRoomDetail.giftMonths && monthCounter < selectedRoomDetail.giftMonths;
+      const isGifted = isGiftedMonth(selectedRoomDetail, monthCounter);
       const isFree = selectedRoomDetail.isFreeRoom;
       
 if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !isFree) {
@@ -5857,7 +6052,7 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
                   dueDate.setHours(0, 0, 0, 0);
 
                   if (dueDate <= calculationEndDate) {
-                  const isGifted = room.giftMonths && monthCounter < room.giftMonths;
+                  const isGifted = isGiftedMonth(room, monthCounter);
                   const isFree = room.isFreeRoom;
                   // YENİ EKLENEN: Zam geçmişi (increaseHistory) — o aya geçerli baz kira seçilir.
                   // Zam yalnızca etkin ayından (effectiveKey) itibaren geçerli olur; önceki aylar eski ücretle kalır.
@@ -5879,17 +6074,32 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
                   // borçlandırma KDV dahil işlenir; öncesi eski (KDV'siz) haliyle kalır.
                   // kdvStartKey yoksa odanın kendi hasKdv değeri tüm aylara uygulanır (eski davranış korunur).
                   let monthHasKdv = hasKdv;
+                  // Sonradan "KDV'li Yap" ile çevrilen odalarda tutar SABİT kalır: geçişten sonraki
+                  // aylarda effectiveBase "KDV dahil tutar" kabul edilir (içeriden KDV ayrıştırılır).
+                  let isConvertedKdvMonth = false;
                   if (room.kdvStartKey) {
                       const startParts = String(room.kdvStartKey).split('-');
                       const startY = parseInt(startParts[0]);
                       const startM = parseInt(startParts[1]);
                       const isFromSwitchOnward = (year > startY) || (year === startY && month >= startM);
                       monthHasKdv = isFromSwitchOnward; // geçişten sonra KDV dahil, önce KDV'siz
+                      isConvertedKdvMonth = isFromSwitchOnward;
                   }
-                  const monthAppliedTotal = monthHasKdv ? effectiveBase * 1.20 : effectiveBase;
+                  let monthAppliedTotal, appliedBaseAmt2, appliedKdvDebt2;
+                  if (isConvertedKdvMonth) {
+                      // Tutar değişmez (effectiveBase = KDV dahil); net ve KDV içeriden ayrılır
+                      monthAppliedTotal = effectiveBase;
+                      appliedBaseAmt2 = Math.round((effectiveBase / 1.20) * 100) / 100;
+                      appliedKdvDebt2 = Math.round((effectiveBase - appliedBaseAmt2) * 100) / 100;
+                  } else {
+                      // Eski davranış: baştan KDV'li odalarda net üzerine %20 eklenir; KDV'sizde olduğu gibi
+                      monthAppliedTotal = monthHasKdv ? effectiveBase * 1.20 : effectiveBase;
+                      appliedBaseAmt2 = effectiveBase;
+                      appliedKdvDebt2 = monthHasKdv ? effectiveBase * 0.20 : 0;
+                  }
                   const appliedMonthlyTotal = (isGifted || isFree) ? 0 : monthAppliedTotal;
-                  const appliedBaseAmt = (isGifted || isFree) ? 0 : effectiveBase;
-                  const appliedKdvDebt = (isGifted || isFree) ? 0 : (monthHasKdv ? effectiveBase * 0.20 : 0);
+                  const appliedBaseAmt = (isGifted || isFree) ? 0 : appliedBaseAmt2;
+                  const appliedKdvDebt = (isGifted || isFree) ? 0 : appliedKdvDebt2;
 
                   ledgerTransactions.push({
                       id: `debt-${room.id}-${key}`,
@@ -6270,9 +6480,21 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                       setSelectedWarehouseId(null);
                       setSelectedBlockId(null);
                       setSelectedRoomId(null);
+                      // YENİ: Özel görünümler (boyut arama / rezerve listesi) de kapatılır
+                      setActiveSizeFilter(null);
+                      setSizeFilterScope(null);
+                      setShowReservedView(false);
+                      setReservedViewScope(null);
                     }
                 }} className={`w-full flex items-center gap-3 px-3 py-2.5 border rounded-xl shadow-sm transition-colors text-sm font-medium ${activeMenu === item.id && !selectedCustomerId ? 'border-orange-200 bg-orange-50 text-orange-600' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
                   <item.icon size={18} className={activeMenu === item.id ? 'text-orange-500' : 'text-gray-400'} />{item.label}
+                  {/* YENİ: Takvim'de yaklaşan randevu varsa, sayısıyla birlikte yanıp sönen bildirim rozeti */}
+                  {item.id === 'takvim' && upcomingAppointmentsCount > 0 && (
+                     <span className="ml-auto relative flex h-5 min-w-[20px] items-center justify-center shrink-0">
+                        <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                        <span className="relative inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">{upcomingAppointmentsCount}</span>
+                     </span>
+                  )}
                 </button>
               )
             })}
@@ -6459,7 +6681,15 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                     </div>
                  </div>
               </div>
-              <div className="mb-6"><h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Özet</h1><h2 className="text-2xl font-bold text-gray-800">Gösterge Paneli</h2></div>
+              {/* YENİ: Başlık + genel zaman filtresi — seçim tüm kartlardaki sayıları günceller */}
+              <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+                 <div><h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Özet</h1><h2 className="text-2xl font-bold text-gray-800">Gösterge Paneli</h2></div>
+                 <div className="flex flex-wrap gap-1.5">
+                    {[['today','Bugün'],['yesterday','Dün'],['week','Bu Hafta'],['month','Bu Ay'],['year','Bu Sene'],['all','Tüm Zamanlar']].map(([val,label]) => (
+                       <button key={val} onClick={() => setDashboardRange(val)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors shadow-sm ${dashboardRange === val ? 'bg-indigo-500 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>{label}</button>
+                    ))}
+                 </div>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                 {dashboardCards.map((card) => {
                   // YENİ EKLENEN: İlk 5 kart tıklanınca detay penceresi açar
@@ -6468,7 +6698,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                   const detailType = detailMap[card.id];
                   const clickable = !!detailType;
                   return (
-                  <div key={card.id} onClick={clickable ? () => { setDashboardDetail({ type: detailType, title: detailTitleMap[card.id] }); setDashboardDetailFilter('today'); setDashboardDetailShowAll(false); } : undefined} className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden relative ${clickable ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all' : ''}`}>
+                  <div key={card.id} onClick={clickable ? () => { setDashboardDetail({ type: detailType, title: detailTitleMap[card.id] }); setDashboardDetailFilter(dashboardRange); setDashboardDetailShowAll(false); } : undefined} className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden relative ${clickable ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all' : ''}`}>
                     <div className={`absolute left-0 top-0 bottom-0 w-1 ${card.borderColor}`}></div>
                     <div className="p-5 pl-6">
                       <div className="flex justify-between items-start mb-4"><div className={`p-2 rounded-lg ${card.iconColor}`}><card.icon size={20} /></div><Sparkline data={card.chartData} color={card.chartColor} /></div>
@@ -6925,12 +7155,12 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                     <div className="relative">
                         <button onClick={() => { setCustTimeDropdownOpen(!custTimeDropdownOpen); setCustRoomDropdownOpen(false); }} className="flex items-center gap-1.5 bg-white border border-gray-200 hover:border-indigo-300 text-gray-700 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors shadow-sm">
                             <Calendar size={16} className="text-indigo-500"/> Zamanlama
-                            {custTimeFilter !== 'all' && <span className="bg-indigo-100 text-indigo-600 text-[10px] px-1.5 py-0.5 rounded-full">{({today:'Bugün',week:'Bu Hafta',month:'Bu Ay',year:'Bu Sene'})[custTimeFilter]}</span>}
+                            {custTimeFilter !== 'all' && <span className="bg-indigo-100 text-indigo-600 text-[10px] px-1.5 py-0.5 rounded-full">{({today:'Bugün',yesterday:'Dün',week:'Bu Hafta',month:'Bu Ay',year:'Bu Sene'})[custTimeFilter]}</span>}
                             <ChevronDown size={14}/>
                         </button>
                         {custTimeDropdownOpen && (
                             <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-100 rounded-xl shadow-lg z-30 overflow-hidden py-1">
-                                {[['today','Bugün Kayıt Olanlar'],['week','Bu Hafta Kayıt Olanlar'],['month','Bu Ay Kayıt Olanlar'],['year','Bu Sene Kayıt Olanlar'],['all','Tüm Zamanlar']].map(([val,label]) => (
+                                {[['today','Bugün Kayıt Olanlar'],['yesterday','Dün Kayıt Olanlar'],['week','Bu Hafta Kayıt Olanlar'],['month','Bu Ay Kayıt Olanlar'],['year','Bu Sene Kayıt Olanlar'],['all','Tüm Zamanlar']].map(([val,label]) => (
                                     <button key={val} onClick={() => { setCustTimeFilter(val); setCustTimeDropdownOpen(false); }} className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors ${custTimeFilter === val ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}>{label}</button>
                                 ))}
                             </div>
@@ -7190,7 +7420,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                            {[
                                              { id: 'faturalar', label: 'Faturalar', count: (customer.invoices || []).length },
                                              { id: 'sozlesmeler', label: 'Sözleşmeler', count: (customer.contracts || []).length },
-                                             { id: 'odafoto', label: 'Oda Fotoğrafları', count: getCustomerRoomPhotos(customer.name).length },
+                                             { id: 'odafoto', label: 'Oda Görseli', count: getCustomerRoomPhotos(customer.name).length },
                                              { id: 'ekbelge', label: 'Ek Belgeler', count: (customer.extraDocuments || []).length }
                                            ].map(t => (
                                                <button key={t.id} onClick={() => setArchiveTab(t.id)} className={`flex-1 min-w-[80px] px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all ${archiveTab === t.id ? 'bg-white text-slate-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -7248,18 +7478,23 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                            <div className="border border-gray-200 rounded-xl p-3 bg-white min-h-[9rem] flex flex-wrap gap-3 items-start content-start shadow-inner">
                                                {getCustomerRoomPhotos(customer.name).length === 0 ? (
                                                    <div className="w-full flex flex-col items-center justify-center text-gray-400 opacity-70 py-8">
-                                                       <Box size={24} className="mb-1 text-gray-300" /><span className="text-[10px] font-medium">Oda fotoğrafı bulunmuyor</span>
+                                                       <Box size={24} className="mb-1 text-gray-300" /><span className="text-[10px] font-medium">Oda görseli bulunmuyor</span>
                                                    </div>
                                                ) : (
-                                                   getCustomerRoomPhotos(customer.name).map((ph) => (
+                                                   getCustomerRoomPhotos(customer.name).map((ph) => {
+                                                       const isVideo = /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i.test(String(ph.url || '')) || String(ph.url || '').startsWith('data:video') || ph.mediaType === 'video';
+                                                       return (
                                                        <div key={ph.key} className="relative group border border-gray-200 rounded-lg p-2 bg-indigo-50/40 flex flex-col items-center gap-1 w-24 shadow-sm hover:shadow-md transition-all">
                                                            <a href={ph.url} target="_blank" rel="noreferrer" className="w-full h-14 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden">
-                                                               <img src={ph.url} alt={ph.label} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                                               {isVideo
+                                                                  ? <video src={ph.url} className="w-full h-full object-cover bg-black" muted playsInline />
+                                                                  : <img src={ph.url} alt={ph.label} className="w-full h-full object-cover transition-transform group-hover:scale-105" />}
                                                            </a>
-                                                           <span className="text-[9px] text-gray-600 font-medium truncate w-full text-center" title={ph.label}>{ph.label}</span>
-                                                           <button onClick={() => handleDeleteRoomPhoto(ph)} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" title="Fotoğrafı Kaldır"><X size={10} strokeWidth={3} /></button>
+                                                           <span className="text-[9px] text-gray-600 font-medium truncate w-full text-center" title={ph.label}>{isVideo ? '🎬 ' : ''}{ph.label}</span>
+                                                           <button onClick={() => handleDeleteRoomPhoto(ph)} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" title="Görseli Kaldır"><X size={10} strokeWidth={3} /></button>
                                                        </div>
-                                                   ))
+                                                       );
+                                                   })
                                                )}
                                            </div>
                                        )}
@@ -7427,17 +7662,18 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
 const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              const paymentAnchorDate = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryDate;
                              const today = new Date(); today.setHours(23, 59, 59, 999);
-                             // YENİ: En son geçerli (zamlı) kirayı baz al
-                             const baseAmount = Math.max(Number(room.monthlyFee || 0), Number(getRoomFeeForMonth(room, today.getFullYear(), today.getMonth()) || 0));
+                             // YENİ: En son geçerli (zamlı) kirayı baz al — cari, priceHistory ve zam geçmişinin EN YÜKSEĞİ
+                             const baseAmount = getRoomLatestFee(room);
                              const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
                              let monthlyTotal = hasKdv ? baseAmount * 1.20 : baseAmount;
 
                              // Madde 16: Varsa mevcut ayın güncel override (zam) tutarını al
+                             // YENİ: Override daha düşükse (örn. hediye ayı) zamlı kirayı ezmesin — her zaman en yüksek gösterilir
                              const currentKey = `${today.getFullYear()}-${today.getMonth()}`;
                              const txId = `debt-${room.id}-${currentKey}`;
                              const currentOverride = overrides.find(o => o.txId === txId && !o.isDeleted);
                              if (currentOverride && currentOverride.debt !== undefined) {
-                                 monthlyTotal = currentOverride.debt;
+                                 monthlyTotal = Math.max(monthlyTotal, Number(currentOverride.debt) || 0);
                              }
 
                              return (
@@ -8222,6 +8458,114 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                   );
               })()}
             </div>
+          ) : activeMenu === 'icra-odalari' ? (
+            /* YENİ: İCRA ODALARI — icra (yasal takip) sürecindeki odaların detaylı listesi */
+            <div className="max-w-7xl mx-auto flex flex-col h-full animate-in fade-in duration-300">
+              <div className="mb-6">
+                  <h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Finans / Yasal Takip</h1>
+                  <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Shield size={24} className="text-red-500" /> İcra Odaları</h2>
+                  <p className="text-sm text-gray-500 mt-1">İcra (yasal takip) sürecinde olan odaların detaylı listesi. Bu odalarda kira borçlandırması icra başlangıç tarihinde durdurulmuştur.</p>
+              </div>
+
+              {(() => {
+                  // İcra sürecindeki odalar, en yeni icra başlangıcı en üstte
+                  const legalRooms = rooms
+                      .filter(r => r.isUnderLegalAction)
+                      .sort((a, b) => (b.legalActionStartDate || 0) - (a.legalActionStartDate || 0));
+
+                  if (legalRooms.length === 0) {
+                      return (
+                          <div className="py-20 text-center bg-white rounded-xl border border-dashed border-gray-300 shadow-sm">
+                              <Shield size={44} className="mx-auto text-gray-300 mb-4" />
+                              <h3 className="text-lg font-bold text-gray-700">İcra Sürecinde Oda Yok</h3>
+                              <p className="text-sm text-gray-500 mt-1">Şu anda yasal takip (icra) sürecinde olan bir oda bulunmuyor.</p>
+                          </div>
+                      );
+                  }
+
+                  return (
+                      <div className="flex flex-col gap-4 pb-8">
+                          {/* Üst özet şeridi */}
+                          <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-red-500 text-white flex items-center justify-center shrink-0"><Shield size={20} /></div>
+                              <div>
+                                  <span className="text-2xl font-black text-red-600 leading-none">{legalRooms.length}</span>
+                                  <span className="text-sm font-bold text-red-500 ml-2">oda icra sürecinde</span>
+                              </div>
+                          </div>
+
+                          {legalRooms.map(room => {
+                              const block = blocks.find(b => b.id === room.blockId);
+                              const warehouse = warehouses.find(w => w.id === block?.warehouseId);
+                              const cust = customers.find(c => c.name === room.customerName);
+                              const startDate = room.legalActionStartDate ? new Date(room.legalActionStartDate) : null;
+                              const startStr = startDate ? `${String(startDate.getDate()).padStart(2, '0')}.${String(startDate.getMonth() + 1).padStart(2, '0')}.${startDate.getFullYear()}` : '-';
+                              const daysInLegal = startDate ? Math.max(0, Math.floor((Date.now() - startDate.getTime()) / 86400000)) : null;
+                              // Odanın en son geçerli kirası (KDV dahil gösterim)
+                              const baseFee = getRoomLatestFee(room);
+                              const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
+                              const feeTotal = hasKdv ? Math.round(baseFee * 1.20) : baseFee;
+
+                              return (
+                                  <div key={room.id} className="bg-white rounded-xl shadow-sm border-l-4 border-red-500 border border-gray-100 p-5">
+                                      {/* Üst satır: Oda + konum + icra rozeti */}
+                                      <div className="flex flex-wrap justify-between items-start gap-2 mb-3">
+                                          <div>
+                                              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><Box size={18} className="text-red-500" /> {room.name}</h3>
+                                              <p className="text-xs text-gray-500 font-medium mt-0.5">{warehouse?.name} — {block?.name} • {room.m3} m³</p>
+                                          </div>
+                                          <span className="bg-red-100 text-red-600 text-[10px] font-black px-2.5 py-1.5 rounded-full uppercase tracking-wide animate-pulse">İcra Sürecinde</span>
+                                      </div>
+
+                                      {/* Detay bilgiler */}
+                                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                          <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Müşteri</p>
+                                              <p className="text-sm font-bold text-slate-700 truncate" title={room.customerName}>{room.customerName || '-'}</p>
+                                              {cust?.customerNo && <p className="text-[10px] text-gray-400 mt-0.5">No: {cust.customerNo}</p>}
+                                          </div>
+                                          <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">İcra Başlangıcı</p>
+                                              <p className="text-sm font-bold text-slate-700">{startStr}</p>
+                                              {daysInLegal !== null && <p className="text-[10px] text-red-500 font-bold mt-0.5">{daysInLegal} gündür icrada</p>}
+                                          </div>
+                                          <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Aylık Kira</p>
+                                              <p className="text-sm font-bold text-slate-700">{feeTotal.toLocaleString('tr-TR')} TL</p>
+                                              <p className="text-[10px] text-gray-400 mt-0.5">{hasKdv ? 'KDV Dahil' : 'KDV Yok'}</p>
+                                          </div>
+                                          <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Giriş Tarihi</p>
+                                              <p className="text-sm font-bold text-slate-700">{room.entryDate || '-'}</p>
+                                          </div>
+                                      </div>
+
+                                      {/* İcra sebebi */}
+                                      {room.legalActionReason && (
+                                          <div className="bg-red-50 border border-red-100 rounded-lg p-3 mb-4">
+                                              <p className="text-[10px] font-bold text-red-400 uppercase mb-1">İcra Sebebi</p>
+                                              <p className="text-sm text-red-700 font-medium">{room.legalActionReason}</p>
+                                          </div>
+                                      )}
+
+                                      {/* Aksiyonlar */}
+                                      <div className="flex flex-wrap gap-2 justify-end" onClick={e => e.stopPropagation()}>
+                                          {cust && (
+                                              <button onClick={() => { setActiveMenu('tum-musteriler'); setSelectedCustomerId(cust.id); }} className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 px-3 py-2 rounded-lg text-xs font-bold transition-colors">
+                                                  <Wallet size={14} /> Carisine Git
+                                              </button>
+                                          )}
+                                          <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(warehouse?.id); setSelectedBlockId(block?.id); setSelectedRoomId(room.id); }} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-lg text-xs font-bold transition-colors">
+                                              <Box size={14} /> Odaya Git
+                                          </button>
+                                      </div>
+                                  </div>
+                              );
+                          })}
+                      </div>
+                  );
+              })()}
+            </div>
           ) : activeMenu === 'kdvsiz-cariler' ? (
             <div className="max-w-7xl mx-auto flex flex-col h-full animate-in fade-in duration-300">
               <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -8537,7 +8881,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                     const blockInfo = blocks.find(b => b.id === room.blockId);
                                     const warehouseInfo = blockInfo ? warehouses.find(w => w.id === blockInfo.warehouseId) : null;
                                     
-                                    const baseAmount = Math.max(Number(room.monthlyFee || 0), Number(getRoomFeeForMonth(room, new Date().getFullYear(), new Date().getMonth()) || 0));
+                                    // YENİ: Mevcut Kira = müşterinin carisine yansımış EN SON / EN YÜKSEK kira (zamlı kira dahil)
+                                    const baseAmount = getRoomLatestFee(room);
                                     const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
                                     const monthlyTotal = hasKdv ? baseAmount * 1.20 : baseAmount;
                                     
@@ -8711,8 +9056,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <div className="animate-in fade-in duration-300">
                     <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-purple-200 bg-purple-50/30">
                         <div>
-                            <button onClick={() => setActiveSizeFilter(null)} className="text-xs font-bold text-gray-500 hover:text-purple-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
-                            <h2 className="text-2xl font-bold text-purple-900">Boş Depo Arama: {sizeFilters.find(f => f.id === activeSizeFilter)?.label}</h2>
+                            <button onClick={() => { setActiveSizeFilter(null); setSizeFilterScope(null); }} className="text-xs font-bold text-gray-500 hover:text-purple-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
+                            {/* YENİ: Kapsam etiketi — hangi şube/blok içinde arandığını gösterir */}
+                            <h2 className="text-2xl font-bold text-purple-900">Boş Oda Arama: {sizeFilters.find(f => f.id === activeSizeFilter)?.label}
+                               {sizeFilterScope?.blockId && <span className="text-sm font-bold text-purple-500 ml-2">({blocks.find(b => b.id === sizeFilterScope.blockId)?.name} içinde)</span>}
+                               {sizeFilterScope?.warehouseId && !sizeFilterScope?.blockId && <span className="text-sm font-bold text-purple-500 ml-2">({warehouses.find(w => w.id === sizeFilterScope.warehouseId)?.name} içinde)</span>}
+                            </h2>
                         </div>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-6 pb-8">
@@ -8721,7 +9070,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             const filteredEmptyRooms = rooms.filter(r => {
                                 const isEmpty = !r.customerName && (!r.isReserved || r.reserveExpiryTimestamp < Date.now());
                                 const m3 = Number(r.m3 || 0);
-                                return isEmpty && m3 >= filterOpt.min && m3 <= filterOpt.max;
+                                // YENİ: Kapsam kontrolü — butona basılan ekrana (şube/blok) göre daraltılır
+                                return isEmpty && m3 >= filterOpt.min && m3 <= filterOpt.max && roomInScope(r, sizeFilterScope);
                             });
 
                             if (filteredEmptyRooms.length === 0) {
@@ -8744,6 +9094,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                         setSelectedBlockId(block?.id);
                                         setSelectedRoomId(oda.id);
                                         setActiveSizeFilter(null);
+                                        setSizeFilterScope(null);
                                     }} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
                                         <div className="px-4 py-3 flex justify-between items-center bg-[#1bc5bd] text-white shadow-md z-10">
                                             <div className="flex flex-col min-w-0 mr-2">
@@ -8767,33 +9118,80 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         })()}
                     </div>
                  </div>
+              ) : showReservedView ? (
+                 /* YENİ: REZERVE GÖSTER görünümü — kapsamına (tümü/şube/blok) göre rezerveli odaları listeler */
+                 <div className="animate-in fade-in duration-300">
+                    <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-orange-200 bg-orange-50/30">
+                        <div>
+                            <button onClick={() => { setShowReservedView(false); setReservedViewScope(null); }} className="text-xs font-bold text-gray-500 hover:text-orange-600 tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> Geri Dön</button>
+                            <h2 className="text-2xl font-bold text-orange-700">Rezerveli Odalar
+                               {reservedViewScope?.blockId && <span className="text-sm font-bold text-orange-500 ml-2">({blocks.find(b => b.id === reservedViewScope.blockId)?.name} içinde)</span>}
+                               {reservedViewScope?.warehouseId && !reservedViewScope?.blockId && <span className="text-sm font-bold text-orange-500 ml-2">({warehouses.find(w => w.id === reservedViewScope.warehouseId)?.name} içinde)</span>}
+                            </h2>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-6 pb-8">
+                        {(() => {
+                            // Geçerli (süresi dolmamış) rezerveler, kapsam dahilinde
+                            const reservedRooms = rooms.filter(r => r.isReserved && (!r.reserveExpiryTimestamp || r.reserveExpiryTimestamp > Date.now()) && roomInScope(r, reservedViewScope));
+
+                            if (reservedRooms.length === 0) {
+                                return (
+                                    <div className="col-span-full py-16 text-center bg-white rounded-xl border border-dashed border-gray-300 shadow-sm">
+                                        <Clock size={40} className="mx-auto text-gray-300 mb-4" />
+                                        <h3 className="text-lg font-bold text-gray-700">Rezerveli Oda Bulunamadı</h3>
+                                        <p className="text-sm text-gray-500 mt-1">Bu kapsamda aktif rezervasyonu olan bir oda mevcut değil.</p>
+                                    </div>
+                                );
+                            }
+
+                            return reservedRooms.map((oda) => {
+                                const block = blocks.find(b => b.id === oda.blockId);
+                                const warehouse = warehouses.find(w => w.id === block?.warehouseId);
+                                return (
+                                    <div key={oda.id} onClick={() => {
+                                        setSelectedWarehouseId(warehouse?.id);
+                                        setSelectedBlockId(block?.id);
+                                        setSelectedRoomId(oda.id);
+                                        setShowReservedView(false);
+                                        setReservedViewScope(null);
+                                    }} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
+                                        <div className="px-4 py-3 flex justify-between items-center bg-orange-500 text-white shadow-md z-10">
+                                            <div className="flex flex-col min-w-0 mr-2">
+                                                <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
+                                                <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
+                                            </div>
+                                            <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner shrink-0">{oda.m3} m³</span>
+                                        </div>
+                                        <div className="flex-1 relative flex flex-col justify-center items-center gap-2 min-h-[150px] p-3"
+                                            style={{ backgroundImage: 'repeating-linear-gradient(to bottom, #f8fafc, #f8fafc 12px, #e2e8f0 12px, #e2e8f0 14px)' }}>
+                                            <div className="px-3 py-2 rounded-lg border-2 shadow-sm font-bold uppercase text-[11px] text-center max-w-[90%] truncate bg-orange-50 text-orange-600 border-orange-200 z-10">
+                                                REZERVELİ
+                                            </div>
+                                            {oda.reservedName && <div className="text-xs font-bold text-gray-700 bg-white/90 px-2 py-1 rounded shadow-sm z-10 truncate max-w-[90%]">{oda.reservedName}</div>}
+                                            {oda.reserveExpiry && <div className="text-[10px] font-semibold text-orange-600 bg-white/90 px-2 py-0.5 rounded shadow-sm z-10">Bitiş: {oda.reserveExpiry}</div>}
+                                        </div>
+                                    </div>
+                                );
+                            });
+                        })()}
+                    </div>
+                 </div>
               ) : !selectedWarehouseId ? (
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-col sm:flex-row gap-4 sm:gap-0">
                     <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <div className="relative">
-                            <button onClick={() => setIsSizeFilterDropdownOpen(!isSizeFilterDropdownOpen)} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-all shadow-md shadow-purple-500/30">
-                                <Search size={16} /> Depo Boyutu Bul
-                            </button>
-                            {isSizeFilterDropdownOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setIsSizeFilterDropdownOpen(false)}></div>
-                                    <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-100 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                                        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase flex items-center justify-between">
-                                            <span>Boş Depo Filtreleri</span>
-                                            <button onClick={() => setIsSizeFilterDropdownOpen(false)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
-                                        </div>
-                                        {sizeFilters.map(f => (
-                                            <button key={f.id} onClick={() => { setActiveSizeFilter(f.id); setIsSizeFilterDropdownOpen(false); }} className="w-full text-left px-4 py-3 text-sm font-bold text-gray-700 hover:bg-purple-50 hover:text-purple-700 border-b border-gray-50 last:border-0 transition-colors flex items-center justify-between group">
-                                                <div className="flex items-center gap-2"><Box size={16} className="text-purple-400 group-hover:text-purple-600 transition-colors" /> {f.label}</div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                        <button onClick={() => setIsAddWarehouseModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors shadow-sm">Depo Ekle <Plus size={16} /></button>
+                    {/* YENİ: Üç küçük buton tek satırda yan yana — Oda Boyutu Bul / Rezerve Göster / Depo Ekle */}
+                    <div className="flex flex-nowrap items-center gap-2">
+                        {/* YENİ: "Oda Boyutu Bul" — seçenekler ortada modal pencerede açılır (tüm depolar kapsamı) */}
+                        <button onClick={() => setSizeFilterModal({ scope: null })} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all shadow-md shadow-purple-500/30 whitespace-nowrap">
+                            <Search size={14} /> Oda Boyutu Bul
+                        </button>
+                        {/* YENİ: Rezerve Göster — tüm depolardaki rezerveli odaları listeler */}
+                        <button onClick={() => { setShowReservedView(true); setReservedViewScope(null); }} className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-md shadow-orange-500/30 whitespace-nowrap">
+                            <Clock size={14} /> Rezerve Göster
+                        </button>
+                        <button onClick={() => setIsAddWarehouseModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-sm whitespace-nowrap">Depo Ekle <Plus size={14} /></button>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-8">
@@ -8823,23 +9221,22 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       </div>
                       
                       <div className={`p-6 flex-1 flex flex-col ${wColor.bg}`}>
-                        <div className="flex justify-between items-start mb-4">
-                          <div className={`w-14 h-14 ${wColor.iconBg} rounded-xl flex items-center justify-center border-2 border-white/50 ${wColor.text} shadow-inner overflow-hidden`}>
-                            {depo.listPhoto ? <img src={depo.listPhoto} alt={depo.name} className="w-full h-full object-cover" /> : <Home size={28} strokeWidth={1.5} />}
+                        {/* YENİ DÜZEN — Üst buton sırası: göz SOL ÜSTTE (koyu yuvarlak tasarım), taşıma ORTA ÜSTTE, silme SAĞ ÜSTTE */}
+                        <div className="flex justify-between items-center mb-4 z-10" onClick={e => e.stopPropagation()}>
+                          <button onClick={(e) => { e.stopPropagation(); setEntityPhotoViewer({ type: 'warehouse', id: depo.id }); }} className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-900 text-white flex items-center justify-center shadow-md ring-2 ring-white/70 transition-all hover:scale-105" title="Depo Fotoğrafı"><Eye size={15} /></button>
+                          <div className="flex gap-1 bg-white/80 border border-slate-200 rounded-full px-1.5 py-1 shadow-sm" title="Sırayı Değiştir">
+                            <button onClick={(e) => moveWarehouseUp(index, e)} disabled={index === 0} className="hover:bg-slate-100 text-slate-500 p-1 rounded-full transition-colors disabled:opacity-30"><ArrowUp size={13} /></button>
+                            <button onClick={(e) => moveWarehouseDown(index, e)} disabled={index === warehouses.length - 1} className="hover:bg-slate-100 text-slate-500 p-1 rounded-full transition-colors disabled:opacity-30"><ArrowDown size={13} /></button>
                           </div>
-                          <div className="flex gap-1.5 z-10" onClick={e => e.stopPropagation()}>
-                            <button onClick={(e) => handleShareWarehouse(e, depo)} className="bg-gray-100 hover:bg-green-500 hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="WhatsApp'tan Paylaş (Adres + Konum)"><MessageCircle size={14} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); setEntityPhotoViewer({ type: 'warehouse', id: depo.id }); }} className="bg-gray-100 hover:bg-slate-700 hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="Depo Fotoğrafı"><Eye size={14} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); setEditWarehouseData({...depo}); setIsEditWarehouseModalOpen(true); }} className="bg-gray-100 hover:bg-[#1bc5bd] hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="Düzenle"><Edit size={14} /></button>
-                            <button onClick={(e) => handleDeleteWarehouseClick(e, depo.id)} className="bg-gray-100 hover:bg-[#f64e60] hover:text-white text-gray-500 p-2 rounded-lg transition-colors shadow-sm" title="Depoyu Sil"><Trash2 size={14} /></button>
-                            <div className="flex flex-col gap-1 ml-1">
-                              <button onClick={(e) => moveWarehouseUp(index, e)} disabled={index === 0} className="bg-gray-100 hover:bg-gray-200 text-gray-400 p-0.5 rounded transition-colors disabled:opacity-30"><ArrowUp size={12} /></button>
-                              <button onClick={(e) => moveWarehouseDown(index, e)} disabled={index === warehouses.length - 1} className="bg-gray-100 hover:bg-gray-200 text-gray-400 p-0.5 rounded transition-colors disabled:opacity-30"><ArrowDown size={12} /></button>
-                            </div>
-                          </div>
+                          <button onClick={(e) => handleDeleteWarehouseClick(e, depo.id)} className="w-9 h-9 rounded-full bg-red-50 hover:bg-red-500 text-red-500 hover:text-white border border-red-200 flex items-center justify-center shadow-sm transition-all hover:scale-105" title="Depoyu Sil"><Trash2 size={15} /></button>
                         </div>
-                        
-                        <h3 className={`text-xl font-black ${wColor.text} uppercase tracking-tight mb-1 transition-colors`}>{depo.name}</h3>
+                        {/* İkon + başlık yan yana */}
+                        <div className="flex items-center gap-3 mb-1">
+                          <div className={`w-12 h-12 ${wColor.iconBg} rounded-xl flex items-center justify-center border-2 border-white/50 ${wColor.text} shadow-inner overflow-hidden shrink-0`}>
+                            {depo.listPhoto ? <img src={depo.listPhoto} alt={depo.name} className="w-full h-full object-cover" /> : <Home size={24} strokeWidth={1.5} />}
+                          </div>
+                          <h3 className={`text-xl font-black ${wColor.text} uppercase tracking-tight transition-colors`}>{depo.name}</h3>
+                        </div>
                         {depo.address && <p className="text-[10px] text-gray-500 font-medium mb-1 line-clamp-1 flex items-center gap-1" title={depo.address}><MapPin size={10} /> {depo.address}</p>}
                         <p className="text-xs text-gray-500 font-semibold mb-6 flex items-center gap-1"><Box size={14}/> Ana Depo Merkezi</p>
                         
@@ -8867,6 +9264,16 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              <span className="text-[9px] font-bold mt-1 text-red-600/70 uppercase">Dolu</span>
                           </div>
                         </div>
+
+                        {/* YENİ DÜZEN — Alt buton sırası: konum paylaş SOL ALTTA (renkli, MapPin simgesi), düzenle SAĞ ALTTA */}
+                        <div className="flex justify-between items-center mt-4 pt-3 border-t border-slate-100" onClick={e => e.stopPropagation()}>
+                          <button onClick={(e) => handleShareWarehouse(e, depo)} className="flex items-center gap-1.5 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-md shadow-green-500/30 transition-all hover:scale-105" title="WhatsApp'tan Paylaş (Adres + Konum)">
+                             <MapPin size={14} /> Konum Paylaş
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); setEditWarehouseData({...depo}); setIsEditWarehouseModalOpen(true); }} className="flex items-center gap-1.5 bg-white hover:bg-[#1bc5bd] hover:text-white text-teal-600 border border-teal-200 px-3 py-2 rounded-xl text-xs font-bold shadow-sm transition-all hover:scale-105" title="Düzenle">
+                             <Edit size={14} /> Düzenle
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )})}
@@ -8876,7 +9283,17 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <div><button onClick={() => setSelectedWarehouseId(null)} className="text-xs font-bold text-gray-400 hover:text-[#1bc5bd] tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> {warehouses.find(w => w.id === selectedWarehouseId)?.name}</button><h2 className="text-2xl font-bold text-slate-800">Blok Listesi</h2></div>
-                    <button onClick={() => setIsAddBlockModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Blok Ekle <Plus size={16} /></button>
+                    {/* YENİ: Üç küçük buton tek satırda — Oda Boyutu Bul (bu şubede) / Rezerve Göster (bu şubede) / Blok Ekle */}
+                    <div className="flex flex-nowrap items-center gap-2">
+                        {/* YENİ: "Oda Boyutu Bul" — seçenekler ortada modal pencerede açılır (bu şube kapsamı) */}
+                        <button onClick={() => setSizeFilterModal({ scope: { warehouseId: selectedWarehouseId } })} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all shadow-md shadow-purple-500/30 whitespace-nowrap">
+                            <Search size={14} /> Oda Boyutu Bul
+                        </button>
+                        <button onClick={() => { setShowReservedView(true); setReservedViewScope({ warehouseId: selectedWarehouseId }); }} className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-md shadow-orange-500/30 whitespace-nowrap">
+                            <Clock size={14} /> Rezerve Göster
+                        </button>
+                        <button onClick={() => setIsAddBlockModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-sm whitespace-nowrap">Blok Ekle <Plus size={14} /></button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6 pb-8">
                   {(() => {
@@ -8907,19 +9324,20 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       <div className={`absolute right-0 top-0 bottom-0 w-2.5 ${bColor.side}`}></div>
                       
                       <div className="p-5 px-7 flex-1 flex flex-col">
+                        {/* YENİ DÜZEN — Üst buton sırası: göz SOL ÜSTTE, taşıma ORTA ÜSTTE, silme SAĞ ÜSTTE.
+                            opacity-0/group-hover kaldırıldı: butonlar mobilde de HER ZAMAN görünür. */}
+                        <div className="flex justify-between items-center mb-3 z-10" onClick={e => e.stopPropagation()}>
+                          <button onClick={(e) => { e.stopPropagation(); setEntityPhotoViewer({ type: 'block', id: blok.id }); }} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-900 text-white flex items-center justify-center shadow-md ring-2 ring-white/70 transition-all hover:scale-105" title="Blok Fotoğrafı"><Eye size={14} /></button>
+                          <div className="flex gap-1 bg-gray-50 border border-gray-200 rounded-full px-1.5 py-1 shadow-sm" title="Sırayı Değiştir">
+                            <button onClick={(e) => moveBlockUp(index, arr, e)} disabled={index === 0} className="hover:bg-gray-200 text-gray-500 p-1 rounded-full transition-colors disabled:opacity-30"><ArrowUp size={12} /></button>
+                            <button onClick={(e) => moveBlockDown(index, arr, e)} disabled={index === arr.length - 1} className="hover:bg-gray-200 text-gray-500 p-1 rounded-full transition-colors disabled:opacity-30"><ArrowDown size={12} /></button>
+                          </div>
+                          <button onClick={(e) => handleDeleteBlockClick(e, blok.id)} className="w-8 h-8 rounded-full bg-red-50 hover:bg-red-500 text-red-500 hover:text-white border border-red-200 flex items-center justify-center shadow-sm transition-all hover:scale-105" title="Sil"><Trash2 size={14} /></button>
+                        </div>
                         <div className="flex justify-between items-start mb-4">
                           <h3 className={`text-2xl font-black ${bColor.title} uppercase tracking-tight flex items-center gap-2 ${bColor.titleHover} transition-colors`}>
                              {blok.listPhoto ? <img src={blok.listPhoto} alt={blok.name} className="w-8 h-8 rounded-lg object-cover border border-white shadow-sm" /> : <LayoutDashboard size={24} className={bColor.icon} />} {blok.name}
                           </h3>
-                          <div className="flex gap-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                            <button onClick={(e) => { e.stopPropagation(); setEntityPhotoViewer({ type: 'block', id: blok.id }); }} className="bg-slate-100 hover:bg-slate-700 hover:text-white text-slate-500 p-1.5 rounded transition-colors" title="Blok Fotoğrafı"><Eye size={14} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); setEditBlockData({...blok}); setIsEditBlockModalOpen(true); }} className={`${bColor.editBg} p-1.5 rounded transition-colors`} title="Düzenle"><Edit size={14} /></button>
-                            <button onClick={(e) => handleDeleteBlockClick(e, blok.id)} className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded transition-colors" title="Sil"><Trash2 size={14} /></button>
-                            <div className="flex flex-col gap-0.5 ml-1">
-                              <button onClick={(e) => moveBlockUp(index, arr, e)} disabled={index === 0} className="bg-gray-100 hover:bg-gray-200 text-gray-500 p-0.5 rounded transition-colors disabled:opacity-30"><ArrowUp size={10} /></button>
-                              <button onClick={(e) => moveBlockDown(index, arr, e)} disabled={index === arr.length - 1} className="bg-gray-100 hover:bg-gray-200 text-gray-500 p-0.5 rounded transition-colors disabled:opacity-30"><ArrowDown size={10} /></button>
-                            </div>
-                          </div>
                         </div>
                         
                         <div className="mb-6 mt-auto">
@@ -8937,6 +9355,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           <div className="flex items-center gap-1.5 text-orange-500 bg-orange-50 px-2 py-1 rounded" title="Rezerve Odalar"><Clock size={14} strokeWidth={2.5}/> <span className="font-bold text-sm">{stats.reserved}</span></div>
                           <div className="flex items-center gap-1.5 text-red-600 bg-red-50 px-2 py-1 rounded" title="Dolu Odalar"><Key size={14} strokeWidth={2.5}/> <span className="font-bold text-sm">{stats.full}</span></div>
                         </div>
+
+                        {/* YENİ DÜZEN — Düzenle butonu SAĞ ALT köşede, her zaman görünür */}
+                        <div className="flex justify-end mt-3" onClick={e => e.stopPropagation()}>
+                          <button onClick={(e) => { e.stopPropagation(); setEditBlockData({...blok}); setIsEditBlockModalOpen(true); }} className={`${bColor.editBg} flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all hover:scale-105`} title="Düzenle"><Edit size={13} /> Düzenle</button>
+                        </div>
                       </div>
                     </div>
                   )});
@@ -8947,9 +9370,20 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <>
                   <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <div><button onClick={() => setSelectedBlockId(null)} className="text-xs font-bold text-gray-400 hover:text-[#1bc5bd] tracking-wider uppercase mb-1 flex items-center gap-1 transition-colors"><ArrowLeft size={14} /> {blocks.find(b => b.id === selectedBlockId)?.name}</button><h2 className="text-2xl font-bold text-slate-800">Oda Listesi</h2></div>
-                    <button onClick={() => setIsAddRoomModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium transition-colors">Oda Ekle <Plus size={16} /></button>
+                    {/* YENİ: Üç küçük buton tek satırda — Oda Boyutu Bul (bu blokta) / Rezerve Göster (bu blokta) / Oda Ekle */}
+                    <div className="flex flex-nowrap items-center gap-2">
+                        {/* YENİ: "Oda Boyutu Bul" — seçenekler ortada modal pencerede açılır (bu blok kapsamı) */}
+                        <button onClick={() => setSizeFilterModal({ scope: { blockId: selectedBlockId } })} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all shadow-md shadow-purple-500/30 whitespace-nowrap">
+                            <Search size={14} /> Oda Boyutu Bul
+                        </button>
+                        <button onClick={() => { setShowReservedView(true); setReservedViewScope({ blockId: selectedBlockId }); }} className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-md shadow-orange-500/30 whitespace-nowrap">
+                            <Clock size={14} /> Rezerve Göster
+                        </button>
+                        <button onClick={() => setIsAddRoomModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-sm whitespace-nowrap">Oda Ekle <Plus size={14} /></button>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-6 pb-8">
+                  {/* YENİ: Oda kartları büyütüldü — satır başına daha az kart */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-6 pb-8">
                     {rooms.filter(r => r.blockId === selectedBlockId).map((oda, index, arr) => {
                       let headerBg = 'bg-[#1bc5bd]'; let badgeStyle = 'bg-white text-teal-600 border-teal-200'; let statusText = 'BOŞ ODA';
                       let isValidReservation = oda.isReserved && (!oda.reserveExpiryTimestamp || oda.reserveExpiryTimestamp > Date.now());
@@ -8972,23 +9406,23 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner shrink-0">{oda.m3} m³</span>
                         </div>
                         
-                        {/* Oda Kapısı Dokusu (Kepenk Görünümü) */}
-                        <div className="flex-1 relative flex flex-col justify-center items-center min-h-[140px]"
+                        {/* Oda Kapısı Dokusu (Kepenk Görünümü) — YENİ: kart büyütüldü (min yükseklik artırıldı) */}
+                        <div className="flex-1 relative flex flex-col justify-center items-center min-h-[185px]"
                              style={ oda.roomListPhoto ? { backgroundImage: `url(${oda.roomListPhoto})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { backgroundImage: 'repeating-linear-gradient(to bottom, #f8fafc, #f8fafc 12px, #e2e8f0 12px, #e2e8f0 14px)' }}>
 
                              {/* Fotoğraf varsa okunabilirlik için hafif karartma */}
                              {oda.roomListPhoto && <div className="absolute inset-0 bg-black/25"></div>}
 
-                             {/* YENİ EKLENEN: Göz ikonu — dolu/boş fark etmeksizin oda fotoğrafı ekleme/görüntüleme */}
-                             <button onClick={(e) => { e.stopPropagation(); setRoomPhotoViewer(oda.id); }} className="absolute top-2 left-2 z-20 bg-white/90 hover:bg-white text-slate-700 p-1.5 rounded-lg shadow transition-colors" title="Oda Fotoğrafı">
-                                <Eye size={15} />
+                             {/* Göz ikonu — dolu/boş fark etmeksizin oda fotoğrafı ekleme/görüntüleme (YENİ: küçültüldü) */}
+                             <button onClick={(e) => { e.stopPropagation(); setRoomPhotoViewer(oda.id); }} className="absolute top-1.5 left-1.5 z-20 bg-white/90 hover:bg-white text-slate-700 p-1 rounded-md shadow transition-colors" title="Oda Fotoğrafı">
+                                <Eye size={12} />
                              </button>
 
-                             {/* Kilit/Kulp Detayı */}
-                             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center justify-center z-10">
+                             {/* YENİ: Kilit/Kulp Detayı — isim rozetinin ALTINDA, butonlarla çakışmadan ortada */}
+                             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center justify-center z-10">
                                 {oda.customerName ? (
-                                    <div className="bg-gradient-to-b from-amber-300 to-amber-500 border border-amber-600 rounded p-1 shadow-md text-amber-900" title="Dolu - Kilitli">
-                                        <Lock size={16} strokeWidth={2.5} />
+                                    <div className="bg-gradient-to-b from-amber-300 to-amber-500 border border-amber-600 rounded-md p-1.5 shadow-md text-amber-900" title="Dolu - Kilitli">
+                                        <Lock size={18} strokeWidth={2.5} />
                                     </div>
                                 ) : (
                                     <div className="w-10 h-3 bg-slate-300 border border-slate-400 rounded-sm flex items-center justify-center shadow-sm">
@@ -8997,20 +9431,19 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 )}
                              </div>
 
-                             {/* Durum Etiketi */}
-                             <div className={`relative z-10 px-3 py-2 rounded-lg border-2 shadow-sm font-bold uppercase text-[11px] text-center max-w-[90%] truncate ${badgeStyle}`}>
+                             {/* YENİ: Durum Etiketi (müşteri adı / BOŞ ODA) — büyütüldü, tam ortada belirgin */}
+                             <div className={`relative z-10 px-4 py-2.5 rounded-xl border-2 shadow-md font-bold uppercase text-xs text-center max-w-[85%] truncate ${badgeStyle}`}>
                                  {statusText}
                              </div>
                              
-                             {/* Hover Aksiyonları */}
-                             <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20" onClick={e => e.stopPropagation()}>
-                                <button onClick={(e) => { e.stopPropagation(); setEditRoomData({...oda}); setIsEditRoomModalOpen(true); }} className="bg-white hover:bg-gray-100 text-gray-700 p-1.5 rounded-md shadow transition-colors" title="Düzenle"><Edit size={14} /></button>
-                                <button onClick={(e) => handleDeleteRoomClick(e, oda.id)} className="bg-white hover:bg-red-50 text-red-600 p-1.5 rounded-md shadow transition-colors" title="Sil"><Trash2 size={14} /></button>
-                                <div className="flex flex-col gap-0.5 ml-0.5">
-                                  <button onClick={(e) => moveRoomUp(index, arr, e)} disabled={index === 0} className="bg-white hover:bg-gray-100 text-gray-500 p-0.5 rounded-md shadow transition-colors disabled:opacity-30"><ArrowUp size={10} /></button>
-                                  <button onClick={(e) => moveRoomDown(index, arr, e)} disabled={index === arr.length - 1} className="bg-white hover:bg-gray-100 text-gray-500 p-0.5 rounded-md shadow transition-colors disabled:opacity-30"><ArrowDown size={10} /></button>
-                                </div>
+                             {/* Aksiyonlar mobilde HER ZAMAN görünür — YENİ: butonlar küçültüldü.
+                                 Taşıma ORTA ÜSTTE, silme SAĞ ÜSTTE, düzenleme SAĞ ALTTA. Göz butonu SOL ÜSTTE (yukarıda). */}
+                             <div className="absolute top-1.5 left-1/2 -translate-x-1/2 flex gap-0.5 z-20 bg-white/90 rounded-full px-1 py-0.5 shadow" onClick={e => e.stopPropagation()} title="Sırayı Değiştir">
+                                <button onClick={(e) => moveRoomUp(index, arr, e)} disabled={index === 0} className="hover:bg-gray-100 text-gray-500 p-0.5 rounded-full transition-colors disabled:opacity-30"><ArrowUp size={10} /></button>
+                                <button onClick={(e) => moveRoomDown(index, arr, e)} disabled={index === arr.length - 1} className="hover:bg-gray-100 text-gray-500 p-0.5 rounded-full transition-colors disabled:opacity-30"><ArrowDown size={10} /></button>
                              </div>
+                             <button onClick={(e) => handleDeleteRoomClick(e, oda.id)} className="absolute top-1.5 right-1.5 z-20 bg-white/90 hover:bg-red-500 hover:text-white text-red-600 p-1 rounded-md shadow transition-colors" title="Sil"><Trash2 size={12} /></button>
+                             <button onClick={(e) => { e.stopPropagation(); setEditRoomData({...oda}); setIsEditRoomModalOpen(true); }} className="absolute bottom-1.5 right-1.5 z-20 bg-white/90 hover:bg-gray-100 text-gray-700 p-1 rounded-md shadow transition-colors" title="Düzenle"><Edit size={12} /></button>
                         </div>
                       </div>
                       );
@@ -9128,6 +9561,35 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                     )}
                                  </div>
                               </div>
+
+                              {/* Oda Sözleşmesi bloğu — 3 buton tek satırda yan yana, kompakt ve tam yatay hizalı */}
+                              {selectedRoomDetail?.customerName && (
+                                <div className="mb-5 rounded-xl p-3 bg-gradient-to-br from-violet-50 to-indigo-50 border border-violet-100 shadow-sm">
+                                   {/* Başlık: ikon + metin yatay, küçültülmüş */}
+                                   <div className="flex items-center gap-1.5 mb-2.5">
+                                      <div className="w-6 h-6 rounded-md bg-violet-600 text-white flex items-center justify-center shrink-0"><FileTextIcon size={13}/></div>
+                                      <h4 className="text-xs font-bold text-violet-800 tracking-wide">Oda Sözleşmesi</h4>
+                                   </div>
+                                   {/* 3 buton yan yana — ikon + kısa metin YATAY hizada, ince ve kompakt */}
+                                   <div className="grid grid-cols-3 gap-1.5">
+                                      {/* Güncel sözleşmeyi indir */}
+                                      <button onClick={handleDownloadRoomCurrentContract} title="Güncel Kira ile İndir" className="flex items-center justify-center gap-1 bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-lg py-1.5 px-2 transition-all shadow-sm shadow-violet-500/30">
+                                         <Download size={13} className="shrink-0"/>
+                                         <span className="text-[10px] font-bold whitespace-nowrap">İndir</span>
+                                      </button>
+                                      {/* Sözleşmeyi yazdır */}
+                                      <button onClick={handlePrintRoomCurrentContract} title="Sözleşme Yazdır" className="flex items-center justify-center gap-1 bg-white border border-violet-200 text-violet-700 hover:bg-violet-50 active:scale-95 rounded-lg py-1.5 px-2 transition-all">
+                                         <FileTextIcon size={13} className="shrink-0"/>
+                                         <span className="text-[10px] font-bold whitespace-nowrap">Yazdır</span>
+                                      </button>
+                                      {/* WhatsApp üzerinden paylaş */}
+                                      <button onClick={handleShareRoomCurrentContract} title="WhatsApp'tan Paylaş" className="flex items-center justify-center gap-1 bg-green-500 hover:bg-green-600 active:scale-95 text-white rounded-lg py-1.5 px-2 transition-all shadow-sm shadow-green-500/30">
+                                         <MessageCircle size={13} className="shrink-0"/>
+                                         <span className="text-[10px] font-bold whitespace-nowrap">Paylaş</span>
+                                      </button>
+                                   </div>
+                                </div>
+                              )}
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                                 <div className="flex flex-col gap-1.5">
                                   <label className="text-[11px] text-gray-500 font-semibold">Ad Soyad</label>
@@ -9398,23 +9860,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <div><h4 className="text-red-800 font-bold text-lg">Müşteri Toplam Cari Bakiyesi</h4><p className="text-red-500 text-sm">Müşteriye ait tüm odaların ve ekstra hizmetlerin toplam güncel borcu.</p></div>
                               <div className="text-3xl font-extrabold text-red-600">{customerTotalBalance.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</div>
                            </div>
-
-                           {/* YENİ EKLENEN: Odanın GÜNCEL kirasıyla sözleşme indir */}
-                           {selectedRoomDetail?.customerName && (
-                             <>
-                             <button onClick={handlePrintRoomCurrentContract} className="mt-4 w-full bg-violet-500 hover:bg-violet-600 text-white rounded-xl py-3.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-violet-500/30">
-                                <Download size={18}/> Güncel Kira ile Sözleşme İndir
-                             </button>
-                             <div className="mt-2 grid grid-cols-2 gap-2">
-                                <button onClick={handlePrintRoomCurrentContract} className="border-2 border-violet-200 text-violet-700 hover:bg-violet-50 rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors">
-                                   <FileTextIcon size={14}/> Sözleşme Yazdır
-                                </button>
-                                <button onClick={handleShareRoomCurrentContract} className="bg-green-500 hover:bg-green-600 text-white rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm">
-                                   <MessageCircle size={14}/> WhatsApp'tan Paylaş
-                                </button>
-                             </div>
-                             </>
-                           )}
                         </>
                      )}
                   </div>
@@ -9857,7 +10302,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                while (loopDate <= today) {
                                    if (loopDate >= branchStartD) {
                                        const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
-                                       const isGifted = room.giftMonths && monthCounter < room.giftMonths;
+                                       const isGifted = isGiftedMonth(room, monthCounter);
                                        const isFree = room.isFreeRoom;
                                        // YENİ EKLENEN: Borç ödeme gününün bir gün SONRASINDA sayılır (aynı gün çıkışta o ay alınmaz).
                                        let dueDate = new Date(loopDate.getFullYear(), loopDate.getMonth(), loopDate.getDate() + 1);
@@ -10855,15 +11300,39 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                </div>
 
                <div className="mb-4">
-                 <div className="flex items-center gap-2 mb-4"><div className="w-6 h-6 rounded-full bg-[#1bc5bd] text-white flex items-center justify-center text-xs font-bold">4</div><h4 className="font-bold text-gray-800">Giriş Görseli Ekle (İsteğe Bağlı)</h4></div>
+                 <div className="flex items-center gap-2 mb-4"><div className="w-6 h-6 rounded-full bg-[#1bc5bd] text-white flex items-center justify-center text-xs font-bold">4</div><h4 className="font-bold text-gray-800">Giriş Görsel & Video Ekle (İsteğe Bağlı)</h4></div>
                  <div className="bg-slate-50 p-5 rounded-xl border border-gray-200">
-                    <label className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-white hover:border-[#1bc5bd] transition-colors cursor-pointer group bg-white/50">
-                     {rentData.entryPhoto ? (
-                       <div className="text-[#1bc5bd] font-bold flex flex-col items-center"><Check size={24} className="mb-2" /><span>Görsel Eklendi</span><img src={rentData.entryPhoto} alt="Önizleme" className="h-16 w-16 object-cover rounded mt-2 border border-gray-200"/></div>
-                     ) : (
-                       <><Upload size={20} className="text-gray-400 mb-2 group-hover:text-[#1bc5bd] transition-colors" /><span className="text-xs text-gray-500 font-medium">Depoya yerleşim yapıldıktan sonraki fotoğrafı yükleyin</span><span className="text-[10px] text-gray-400 mt-1">PNG, JPG formatlarında</span></>
-                     )}
-<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url}); } }}/>                   </label>
+                    {/* Önizleme: fotoğraf veya video */}
+                    {rentData.entryPhoto ? (
+                      <div className="flex flex-col items-center mb-4">
+                         <div className="text-[#1bc5bd] font-bold flex items-center gap-2 mb-2"><Check size={20} /><span>{rentData.entryMediaType === 'video' ? 'Video Eklendi' : 'Görsel Eklendi'}</span></div>
+                         {rentData.entryMediaType === 'video'
+                            ? <video src={rentData.entryPhoto} controls className="h-40 w-full max-w-xs object-cover rounded-lg border border-gray-200 bg-black" />
+                            : <img src={rentData.entryPhoto} alt="Önizleme" className="h-40 w-full max-w-xs object-cover rounded-lg border border-gray-200" />}
+                         <button type="button" onClick={() => setRentData({...rentData, entryPhoto: '', entryMediaType: ''})} className="text-xs text-red-500 font-bold mt-2 hover:underline">Kaldır</button>
+                      </div>
+                    ) : (
+                      <div className="border-2 border-dashed border-gray-300 rounded-xl p-5 flex flex-col items-center justify-center text-center bg-white/50 mb-3">
+                         <Upload size={20} className="text-gray-400 mb-2" />
+                         <span className="text-xs text-gray-500 font-medium">Depoya yerleşim sonrası fotoğraf veya video ekleyin</span>
+                         <span className="text-[10px] text-gray-400 mt-1">Fotoğraf (PNG, JPG) veya Video (MP4)</span>
+                      </div>
+                    )}
+                    {/* 3 seçenekli yükleme: Şimdi Çek / Galeriden Seç / Dosyadan Seç */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                       <label className="cursor-pointer flex items-center justify-center gap-1.5 bg-[#1bc5bd] hover:bg-teal-600 text-white rounded-lg py-2.5 text-xs font-bold transition-colors shadow-sm">
+                          <Camera size={15}/> Şimdi Çek
+                          <input type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const isVid = file.type.startsWith('video'); const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url, entryMediaType: isVid ? 'video' : 'image'}); } e.target.value=''; }}/>
+                       </label>
+                       <label className="cursor-pointer flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-[#1bc5bd] text-gray-700 rounded-lg py-2.5 text-xs font-bold transition-colors shadow-sm">
+                          <ImageIcon size={15}/> Galeriden Seç
+                          <input type="file" accept="image/*,video/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const isVid = file.type.startsWith('video'); const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url, entryMediaType: isVid ? 'video' : 'image'}); } e.target.value=''; }}/>
+                       </label>
+                       <label className="cursor-pointer flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-[#1bc5bd] text-gray-700 rounded-lg py-2.5 text-xs font-bold transition-colors shadow-sm">
+                          <FileTextIcon size={15}/> Dosyadan Seç
+                          <input type="file" accept="image/*,video/*,application/octet-stream" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const isVid = file.type.startsWith('video'); const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url, entryMediaType: isVid ? 'video' : 'image'}); } e.target.value=''; }}/>
+                       </label>
+                    </div>
                  </div>
                </div>
                
@@ -11363,7 +11832,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <button onClick={() => setIsGiftModalOpen(false)}><X size={20} className="text-purple-400 hover:text-purple-600"/></button>
              </div>
              <div className="p-6">
-                <p className="text-sm text-gray-500 mb-5 text-center">Müşteriye deponun ilk kaç ayını ücretsiz (hediye) vermek istiyorsunuz? Bu aylar için cari hesaba borç yansıtılmaz.</p>
+                <p className="text-sm text-gray-500 mb-5 text-center">Kaç ay hediye vermek istiyorsunuz? Hediye, <b>bulunulan sözleşme yılının ilk aylarından</b> başlayarak uygulanır ve bu aylar için cari hesaba borç yansıtılmaz.</p>
                 <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider text-center">Hediye Edilecek Ay Sayısı</label>
                     <div className="flex items-center justify-center gap-4 mt-2">
@@ -12501,6 +12970,34 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
         </div>
       )}
 
+      {/* YENİ: ODA BOYUTU BUL — seçenekler ekranın ORTASINDA modal pencerede.
+          Seçim yapılınca kapsam (tümü/şube/blok) uygulanır ve boş odalar listelenir. */}
+      {sizeFilterModal && (
+        <div className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center p-4" onClick={() => setSizeFilterModal(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in" onClick={(e) => e.stopPropagation()}>
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-purple-50 rounded-t-2xl">
+                 <div>
+                    <h3 className="text-lg font-bold text-purple-700 flex items-center gap-2"><Search size={18} /> Oda Boyutu Bul</h3>
+                    <p className="text-[11px] text-purple-500 font-semibold mt-0.5">
+                       {sizeFilterModal.scope?.blockId ? `${blocks.find(b => b.id === sizeFilterModal.scope.blockId)?.name} içindeki boş odalar` :
+                        sizeFilterModal.scope?.warehouseId ? `${warehouses.find(w => w.id === sizeFilterModal.scope.warehouseId)?.name} içindeki boş odalar` :
+                        'Tüm depolardaki boş odalar'}
+                    </p>
+                 </div>
+                 <button onClick={() => setSizeFilterModal(null)} className="text-purple-400 hover:text-purple-600 bg-white p-1 rounded-full shadow-sm"><X size={20} /></button>
+             </div>
+             <div className="p-4 flex flex-col gap-2">
+                {sizeFilters.map(f => (
+                    <button key={f.id} onClick={() => { setActiveSizeFilter(f.id); setSizeFilterScope(sizeFilterModal.scope || null); setSizeFilterModal(null); }} className="w-full text-left px-4 py-3.5 rounded-xl text-sm font-bold text-gray-700 bg-gray-50 hover:bg-purple-50 hover:text-purple-700 border border-gray-100 hover:border-purple-200 transition-colors flex items-center gap-3 group">
+                        <div className="w-9 h-9 rounded-lg bg-purple-100 text-purple-500 group-hover:bg-purple-500 group-hover:text-white flex items-center justify-center shrink-0 transition-colors"><Box size={18} /></div>
+                        {f.label}
+                    </button>
+                ))}
+             </div>
+          </div>
+        </div>
+      )}
+
       {/* YENİ EKLENEN: GÖSTERGE PANELİ DETAY PENCERESİ */}
       {dashboardDetail && (() => {
           const range = dashboardDetailFilter;
@@ -12546,7 +13043,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                      <div className="flex items-start gap-2">
                         {/* Filtreler sağ üst köşede */}
                         <div className="flex flex-wrap gap-1.5 justify-end">
-                            {[['today','Bugün'],['week','Bu Hafta'],['month','Bu Ay'],['year','Bu Sene'],['all','Tüm Zamanlar']].map(([val,label]) => (
+                            {[['today','Bugün'],['yesterday','Dün'],['week','Bu Hafta'],['month','Bu Ay'],['year','Bu Sene'],['all','Tüm Zamanlar']].map(([val,label]) => (
                                 <button key={val} onClick={() => { setDashboardDetailFilter(val); setDashboardDetailShowAll(false); }} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${range === val ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{label}</button>
                             ))}
                         </div>
@@ -12566,7 +13063,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                      </div>
                                      <div className="flex items-center gap-2 shrink-0">
                                          {['overdueMovements','newCustomers','exitedCustomers'].includes(dashboardDetail.type) && item.customerId && (
-                                             <button onClick={() => { setSelectedCustomerId(item.customerId); setDashboardDetail(null); }} className="flex items-center gap-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">
+                                             <button onClick={() => { setActiveMenu('tum-musteriler'); setSelectedCustomerId(item.customerId); setDashboardDetail(null); }} className="flex items-center gap-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">
+                                                 {/* DÜZELTİLDİ: activeMenu değişmediği için cari ekranı açılmıyordu — menü de müşteri ekranına geçirilir */}
                                                  <Wallet size={13}/> Carisine Git
                                              </button>
                                          )}
