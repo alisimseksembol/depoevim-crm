@@ -186,6 +186,43 @@ const uploadImageToServer = async (file) => {
     });
 };
 
+// YENİ: Arşiv belgesini (base64 data URL veya normal http URL) güvenli şekilde yeni sekmede açar.
+// Tarayıcılar büyük base64 data URL'leri (özellikle PDF) target="_blank" ile engeller; bu yüzden
+// data URL'yi Blob'a çevirip blob: adresi olarak açarız. Böylece fotoğraf/PDF/sözleşme görüntülenebilir.
+const openArchiveFile = (fileUrl) => {
+    if (!fileUrl) return;
+    try {
+        if (String(fileUrl).startsWith('data:')) {
+            // data:[mime];base64,xxxx → Blob
+            const parts = String(fileUrl).split(',');
+            const meta = parts[0] || '';
+            const mimeMatch = meta.match(/data:([^;]+)/);
+            const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+            const isBase64 = meta.includes('base64');
+            const dataStr = parts.slice(1).join(',');
+            let blob;
+            if (isBase64) {
+                const byteChars = atob(dataStr);
+                const byteNums = new Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+                blob = new Blob([new Uint8Array(byteNums)], { type: mime });
+            } else {
+                blob = new Blob([decodeURIComponent(dataStr)], { type: mime });
+            }
+            const blobUrl = URL.createObjectURL(blob);
+            const w = window.open(blobUrl, '_blank');
+            // Blob URL'yi bir süre sonra serbest bırak (sekme yüklendikten sonra)
+            setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch(e){} }, 60000);
+            if (!w) alert('Tarayıcı yeni sekme açmayı engelledi. Lütfen pop-up iznini verin.');
+        } else {
+            window.open(fileUrl, '_blank');
+        }
+    } catch (e) {
+        console.error('Belge açma hatası:', e);
+        window.open(fileUrl, '_blank');
+    }
+};
+
 // Mini grafik bileşeni
 const Sparkline = ({ data, color }) => {
   const max = Math.max(...data);
@@ -412,6 +449,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const unsubUserRoles = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'userRoles'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setUserRoles(fetchedData); }, (error) => console.error("Rol Çekme Hatası:", error));
       // YENİ EKLENEN: İŞLEM HAREKETLERİ (aktivite kaydı) DİNLEYİCİSİ
       const unsubActivityLogs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'activityLogs'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); setActivityLogs(fetchedData); }, (error) => console.error("Log Çekme Hatası:", error));
+      // YENİ: SİLİNEN KAYITLAR (çöp kutusu) DİNLEYİCİSİ — İşlem Geri Yükle menüsü için
+      const unsubDeletedItems = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'deletedItems'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); setDeletedItems(fetchedData); }, (error) => console.error("Silinen Kayıt Çekme Hatası:", error));
       // YENİ EKLENEN: KULLANICI HAREKETLERİ (oturum) DİNLEYİCİSİ
       const unsubUserSessions = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'userSessions'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); setUserSessions(fetchedData); }, (error) => console.error("Oturum Çekme Hatası:", error));
       
@@ -431,7 +470,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
 
       return () => { 
           unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); 
-          unsubSettings(); unsubBulkUploadHistory(); unsubUserRoles(); unsubActivityLogs(); unsubUserSessions();
+          unsubSettings(); unsubBulkUploadHistory(); unsubUserRoles(); unsubActivityLogs(); unsubUserSessions(); unsubDeletedItems();
       };
   }, [firebaseUser]);
   // ============================================================================
@@ -498,7 +537,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           { id: 'page-kullanici-hareketleri', label: 'Kullanıcı Hareketleri (Giriş/Çıkış)' },
           { id: 'page-pdf-sozlesme', label: 'PDF & Sözleşme Ayarları' },
           { id: 'page-tahsilat-oranlari', label: 'Tahsilat Oranları' },
-          { id: 'page-islem-hareketleri', label: 'İşlem Hareketleri (Aktivite Kaydı)' }
+          { id: 'page-islem-hareketleri', label: 'İşlem Hareketleri (Aktivite Kaydı)' },
+          { id: 'page-islem-geri-yukle', label: 'İşlem Geri Yükle (Silinen Kayıtlar)' }
       ],
       actions: [
           { id: 'action-yeni-musteri', label: 'Yeni Müşteri Ekleme' },
@@ -643,6 +683,55 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       } catch (e) { console.error('Log kaydı hatası:', e); }
   };
 
+  // YENİ: SİLİNEN KAYIT ÇÖP KUTUSU — silme anında kaydın TAM kopyasını saklar (geri yükleme için).
+  // entityType: 'customer'|'room'|'warehouse'|'block'|'appointment'|'payment' vb.
+  // collectionName: Firestore koleksiyon adı (geri yüklerken aynı yere yazılır)
+  // data: silinen kaydın tam nesnesi
+  const archiveDeletedItem = async (entityType, collectionName, data, extraLabel) => {
+      try {
+          if (!data) return;
+          const entry = {
+              id: `del_${Date.now()}_${Math.floor(Math.random()*10000)}`,
+              entityType: entityType || 'kayit',
+              collectionName: collectionName || '',
+              label: extraLabel || data.name || data.customerName || data.title || (data.id ? `#${data.id}` : 'Kayıt'),
+              data: data,                       // Geri yükleme için tam veri
+              deletedBy: currentUserProfile?.name || 'Bilinmeyen',
+              deletedByRole: getCurrentRole()?.name || currentUserProfile?.role || '',
+              deletedAtISO: new Date().toISOString(),
+              restored: false
+          };
+          setDeletedItems(prev => [entry, ...prev]);
+          if (db && firebaseUser) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deletedItems', String(entry.id)), entry);
+          }
+      } catch (e) { console.error('Çöp kutusu arşiv hatası:', e); }
+  };
+
+  // YENİ: Silinen kaydı geri yükle — orijinal koleksiyona geri yazar, çöp kutusundan kaldırır
+  const handleRestoreDeletedItem = async (entry) => {
+      try {
+          if (!entry?.data) return;
+          const setterMap = {
+              'customers': setCustomers, 'rooms': setRooms, 'warehouses': setWarehouses,
+              'blocks': setBlocks, 'appointments': setAppointments
+          };
+          const localSetter = setterMap[entry.collectionName];
+          if (localSetter) {
+              localSetter(prev => {
+                  const exists = prev.some(x => String(x.id) === String(entry.data.id));
+                  return exists ? prev : [entry.data, ...prev];
+              });
+          }
+          if (db && firebaseUser && entry.collectionName) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', entry.collectionName, String(entry.data.id)), entry.data);
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deletedItems', String(entry.id)));
+          }
+          setDeletedItems(prev => prev.filter(x => x.id !== entry.id));
+          logActivity('İşlem Geri Yükleme', `${entry.entityType} geri yüklendi: ${entry.label}`);
+      } catch (e) { console.error('Geri yükleme hatası:', e); }
+  };
+
   // --- MÜŞTERİ YÖNETİMİ STATE'LERİ ---
   const [openSubMenus, setOpenSubMenus] = useState({'musteri-listesi': true});
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
@@ -653,6 +742,10 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [custTimeDropdownOpen, setCustTimeDropdownOpen] = useState(false);
   // YENİ EKLENEN: İşlem Hareketleri (aktivite kaydı)
   const [activityLogs, setActivityLogs] = useState([]);
+  // YENİ: Silinen kayıtların çöp kutusu (geri yükleme menüsü için)
+  const [deletedItems, setDeletedItems] = useState([]);
+  // YENİ: İşlem Geri Yükle menüsü zaman filtresi
+  const [restoreRange, setRestoreRange] = useState('all'); // today|week|month|year|all
   const [logUserFilter, setLogUserFilter] = useState('all');
   const [logTimeFilter, setLogTimeFilter] = useState('all');
   // YENİ EKLENEN: Kullanıcı Hareketleri (oturum giriş/çıkış takibi)
@@ -747,10 +840,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [messageModalData, setMessageModalData] = useState(null);
 
   // --- RANDEVU VE TAKVİM STATE'LERİ ---
-  const [appointments, setAppointments] = useState([
-      { id: 9001, customerType: 'registered', customerId: 'cust_1', customerName: 'AHMET YILMAZ', customerPhone: '5321112233', warehouseId: 1, date: new Date().toISOString().split('T')[0], time: '11:00 - 12:00', purpose: 'giris-cikis', createdBy: 'Sistem Yöneticisi' },
-      { id: 9002, customerType: 'unregistered', customerId: null, customerName: 'BURAK ÖZTÜRK', customerPhone: '5354445566', warehouseId: 2, date: new Date().toISOString().split('T')[0], time: '14:00 - 15:00', purpose: 'ziyaret', createdBy: 'Sistem Yöneticisi' }
-  ]); // NOT: Örnek/sahte randevu verileri — Firebase bağlıyken canlı veriyle değiştirilecektir.
+  const [appointments, setAppointments] = useState([]); // TEMİZLENDİ: Örnek/sahte randevu kayıtları kaldırıldı, liste boş başlar.
   const [appointmentData, setAppointmentData] = useState({
     customerType: 'registered',
     customerId: '',
@@ -796,7 +886,7 @@ const [apptCustomerSearch, setApptCustomerSearch] = useState('');
   const [updateAllStats, setUpdateAllStats] = useState(null);
 
   // --- FİNANS RAPOR STATE'LERİ ---
-  const [finansReportFilter, setFinansReportFilter] = useState('year'); // today, week, month, year, custom
+  const [finansReportFilter, setFinansReportFilter] = useState('month'); // today, week, month(Bu Ay), year, custom
   const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().split('T')[0]); // YENİ
   const [customEndDate, setCustomEndDate] = useState(new Date().toISOString().split('T')[0]);     // YENİ
   const [branchPaymentFilter, setBranchPaymentFilter] = useState('1'); // 1, 3, 6, 12, all
@@ -1128,7 +1218,9 @@ const handleSaveEditPending = async () => {
   // Aylık faiz oranları tablosunda gösterilen yıl (geçmiş 3 sene + gelecek yıl arası)
   const [interestRateYear, setInterestRateYear] = useState(new Date().getFullYear());
   // Finans Rapor'daki "Hediye Ay Özeti" için zaman filtresi (today|week|month|year|all)
-  const [giftReportRange, setGiftReportRange] = useState('all');
+  const [giftReportRange, setGiftReportRange] = useState('month');
+  // YENİ: Hediye Ay Özeti tablosunda tümünü göster/gizle
+  const [giftShowAll, setGiftShowAll] = useState(false);
 
   const [contractSettings, setContractSettings] = useState({
       iban: 'TR90 0020 3000 0871 2889 0000 34',
@@ -2487,41 +2579,7 @@ const handleAddExtraDocument = async (e, customerId) => {
       }
   };
 
-  const [customers, setCustomers] = useState([
-      {
-          id: 'cust_1', customerNo: '10234', name: 'AHMET YILMAZ', tc: '12345678901', phone: '5321112233', altPhone: '',
-          address: 'Bahçelievler Mah. Gül Sk. No:14 Pendik/İstanbul', notes: 'Uzun süreli kiracı, düzenli ödeme yapar.',
-          hasProxy: false, type: 'bireysel', createdAt: '10.03.2025', createdBy: 'Sistem Yöneticisi',
-          invoices: [], documentPhoto: null, documentPhotoFront: null, documentPhotoBack: null,
-          payments: [
-              { id: 501, amount: 7920, date: '2026-05-11', note: 'Mayıs 2026 Kirası' },
-              { id: 502, amount: 7920, date: '2026-06-11', note: 'Haziran 2026 Kirası' }
-          ],
-          extraDebts: [], ledgerOverrides: []
-      },
-      {
-          id: 'cust_2', customerNo: '55621', name: 'ELİF KAYA', tc: '23456789012', phone: '5439998877', altPhone: '05052223344',
-          address: 'Kartal Sanayi Sitesi B Blok No:7 Kartal/İstanbul', notes: '',
-          hasProxy: true, proxyName: 'MURAT KAYA', proxyTc: '34567890123', proxyPhone: '5462223311', proxyAltPhone: '', proxyAddress: 'Aynı adres', proxyDocumentPhoto: null,
-          type: 'bireysel', createdAt: '01.06.2024', createdBy: 'Sistem Yöneticisi',
-          invoices: [], documentPhoto: null, documentPhotoFront: null, documentPhotoBack: null,
-          payments: [
-              { id: 601, amount: 9840, date: '2026-04-01', note: 'Nisan 2026 Kirası' }
-          ],
-          extraDebts: [
-              { id: 602, type: 'manual_debt', date: '2026-06-15', amount: 200, hasKdv: false, desc: 'Mühür Yenileme Ücreti' }
-          ],
-          ledgerOverrides: []
-      },
-      {
-          id: 'cust_3', customerNo: '99012', name: 'CANAN ŞAHİN', tc: '34567890123', phone: '5051239900', altPhone: '',
-          address: 'Sapanbağları Mah. Düzova Sk. No:9', notes: 'Depo çıkışı öncesi bilgilendirilecek.',
-          hasProxy: false, type: 'bireysel', createdAt: '15.01.2023', createdBy: 'Sistem Yöneticisi',
-          invoices: [], documentPhoto: null, documentPhotoFront: null, documentPhotoBack: null,
-          payments: [],
-          extraDebts: [], ledgerOverrides: []
-      }
-  ]); // NOT: Örnek/sahte müşteri verileri — Firebase bağlandığında canlı veriyle senkronize olacaktır.
+  const [customers, setCustomers] = useState([]); // TEMİZLENDİ: Örnek/sahte müşteri kayıtları kaldırıldı, liste boş başlar.
 
 const handleSaveCustomer = async () => {
       if (!newCustomer.name || !newCustomer.tc || !newCustomer.phone) return;
@@ -2724,6 +2782,8 @@ const renderNewCustomerForm = () => (
 const handleDeleteCustomer = async (customerId) => {
       logActivity('Müşteri Silme', 'Bir müşteri kalıcı olarak silindi.');
       const customerToDelete = customers.find(c => c.id === customerId);
+      // YENİ: Silinen müşteriyi geri yükleme çöp kutusuna arşivle
+      if (customerToDelete) await archiveDeletedItem('Müşteri', 'customers', customerToDelete, customerToDelete.name);
       
       if (db && firebaseUser) {
           try {
@@ -3093,10 +3153,7 @@ const handleAddInvoice = async () => {
   const [isDeleteWarehouseModalOpen, setIsDeleteWarehouseModalOpen] = useState(false);
   const [warehouseToDelete, setWarehouseToDelete] = useState(null);
 
-  const [warehouses, setWarehouses] = useState([
-      { id: 1, name: 'PENDİK ŞUBE', m3: 0, address: 'Bahçelievler Mah. Yeni Sk. Ravza Apt. No:5 C Pendik/İstanbul', mapLink: '', orderIndex: 0 },
-      { id: 2, name: 'KARTAL ŞUBE', m3: 0, address: 'Kartal Sanayi Sitesi No:12 Kartal/İstanbul', mapLink: '', orderIndex: 1 }
-  ]); // NOT: Örnek/sahte depo (şube) verisi
+  const [warehouses, setWarehouses] = useState([]); // TEMİZLENDİ: Örnek/sahte şube (depo) kayıtları kaldırıldı, liste boş başlar.
 
   const handleAddWarehouse = async () => {
       if(!checkActionPerm('action-depo-ekle')) return;
@@ -3131,6 +3188,9 @@ const handleAddInvoice = async () => {
   const confirmDeleteWarehouse = async () => {
       if (!warehouseToDelete) return;
       logActivity('Depo Silme', `Bir depo/şube silindi.`);
+      // YENİ: Silinen şubeyi geri yükleme çöp kutusuna arşivle
+      const whToArchive = warehouses.find(w => w.id === warehouseToDelete);
+      if (whToArchive) await archiveDeletedItem('Şube/Depo', 'warehouses', whToArchive, whToArchive.name);
       if (db && firebaseUser) {
           try {
               await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'warehouses', String(warehouseToDelete)));
@@ -3188,10 +3248,8 @@ const handleAddInvoice = async () => {
   const [blockToDelete, setBlockToDelete] = useState(null);
 
   const [blocks, setBlocks] = useState([
-      { id: 101, warehouseId: 1, name: 'A BLOK', m3: 0, orderIndex: 0 },
-      { id: 102, warehouseId: 1, name: 'B BLOK', m3: 0, orderIndex: 1 },
       { id: 201, warehouseId: 2, name: 'A BLOK', m3: 0, orderIndex: 0 }
-  ]); // NOT: Örnek/sahte blok verisi
+  ]); // TEMİZLENDİ: 101 (A BLOK) ve 102 (B BLOK) örnek blokları kaldırıldı.
 
   const handleAddBlock = async () => {
       logActivity('Blok Ekleme', 'Yeni blok eklendi.');
@@ -3227,6 +3285,9 @@ const handleAddInvoice = async () => {
 
   const confirmDeleteBlock = async () => {
       if (!blockToDelete) return;
+      // YENİ: Silinen bloğu geri yükleme çöp kutusuna arşivle
+      const blkToArchive = blocks.find(b => b.id === blockToDelete);
+      if (blkToArchive) await archiveDeletedItem('Blok', 'blocks', blkToArchive, blkToArchive.name);
       if (db && firebaseUser) {
           try {
               await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'blocks', String(blockToDelete)));
@@ -3288,13 +3349,8 @@ const handleAddInvoice = async () => {
   const [roomToDelete, setRoomToDelete] = useState(null);
 
   const [rooms, setRooms] = useState([
-      { id: 1001, blockId: 101, name: 'A-101', customerName: 'AHMET YILMAZ', m3: 15, monthlyFee: '6600', hasKdv: true, entryDate: '2025-03-10', paymentDate: '2025-03-10', sealNo: 'MH-10234', broughtBy: 'kendisi', paidMonths: ['2026-4', '2026-5'], isReserved: false, orderIndex: 0 },
-      { id: 1002, blockId: 101, name: 'A-102', customerName: null, m3: 12, isReserved: false, paidMonths: [], orderIndex: 1 },
-      { id: 1003, blockId: 101, name: 'A-103', customerName: 'ELİF KAYA', m3: 22, monthlyFee: '8200', hasKdv: true, entryDate: '2024-06-01', paymentDate: '2024-06-01', sealNo: 'MH-55621', broughtBy: 'sembol', teamList: 'Mehmet Şen, Cemal Kaya', paidMonths: ['2026-3'], isReserved: false, orderIndex: 2 },
-      { id: 1004, blockId: 102, name: 'B-201', customerName: null, m3: 18, isReserved: true, reservedName: 'MEHMET DEMİR', reservedPhone: '5321234567', reserveExpiry: '20.07.2026', reserveExpiryTimestamp: Date.now() + 10 * 24 * 60 * 60 * 1000, paidMonths: [], orderIndex: 0 },
-      { id: 1005, blockId: 102, name: 'B-202', customerName: 'CANAN ŞAHİN', m3: 30, monthlyFee: '11500', hasKdv: true, entryDate: '2023-01-15', paymentDate: '2023-01-15', sealNo: 'MH-99012', broughtBy: 'kendisi', paidMonths: [], isReserved: false, orderIndex: 1 },
       { id: 2001, blockId: 201, name: 'K-501', customerName: null, m3: 9, isReserved: false, paidMonths: [], orderIndex: 0 }
-  ]); // NOT: Örnek/sahte oda verisi — Firebase bağlandığında canlı depo verileriyle güncellenecektir.
+  ]); // TEMİZLENDİ: A BLOK (101) ve B BLOK (102) ile birlikte A-101, A-102, A-103, B-201, B-202 örnek odaları kaldırıldı.
 
   const handleAddRoom = async () => {
       if(!checkActionPerm('action-yeni-oda')) return;
@@ -3329,6 +3385,9 @@ const handleAddInvoice = async () => {
 
   const confirmDeleteRoom = async () => {
       if (!roomToDelete) return;
+      // YENİ: Silinen odayı geri yükleme çöp kutusuna arşivle
+      const roomToArchive = rooms.find(r => r.id === roomToDelete);
+      if (roomToArchive) await archiveDeletedItem('Oda', 'rooms', roomToArchive, roomToArchive.name);
       if (db && firebaseUser) {
           try {
               await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomToDelete)));
@@ -3413,7 +3472,7 @@ const handleAddInvoice = async () => {
   ];
 
   const [isEndRentModalOpen, setIsEndRentModalOpen] = useState(false);
-  const [endRentData, setEndRentData] = useState({ exitDate: new Date().toISOString().split('T')[0], photo: null, carrierName: '', carrierVkn: '', carrierAuthorized: '' });
+  const [endRentData, setEndRentData] = useState({ exitDate: new Date().toISOString().split('T')[0], photo: null, carrierName: '', carrierVkn: '', carrierAuthorized: '', exitBy: '' });
   // YENİ EKLENEN: Çıkış modalında "Yükle" açılır menüsü
   const [endRentUploadMenu, setEndRentUploadMenu] = useState(false);
   // --- İCRA SÜRECİ STATE'LERİ ---
@@ -3477,6 +3536,9 @@ const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
   const [changeRoomWarehouseId, setChangeRoomWarehouseId] = useState('');
   const [changeRoomBlockId, setChangeRoomBlockId] = useState('');
   const [changeRoomTargetRoomId, setChangeRoomTargetRoomId] = useState('');
+  // YENİ: Oda Değiştir — kira aynı kalsın mı yoksa yeni kira mı belirlenecek
+  const [changeRoomFeeMode, setChangeRoomFeeMode] = useState('same'); // 'same' | 'new'
+  const [changeRoomNewFee, setChangeRoomNewFee] = useState(''); // KDV DAHİL tutar olarak girilir
   const [isPriceHistoryModalOpen, setIsPriceHistoryModalOpen] = useState(false);
   const [isRoomHistoryModalOpen, setIsRoomHistoryModalOpen] = useState(false);
   const [isEditRentModalOpen, setIsEditRentModalOpen] = useState(false);
@@ -3502,6 +3564,12 @@ const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
 
   // YENİ: Vekalet Tutanağı — yetki verilen kişinin bilgileri (Giriş-Çıkış İşlemi ve Depodan Çıkış modallarında kullanılır)
   const [vekaletData, setVekaletData] = useState({ vekilName: '', vekilTc: '' });
+  // YENİ: Kimlik Belgesi (Ön/Arka) düzenleme modu — kalem butonuyla açılır, Değiştir/Sil butonları o zaman görünür
+  const [isEditingIdDocs, setIsEditingIdDocs] = useState(false);
+  // YENİ: Oda İlk Giriş Görseli düzenleme modu — kalem butonuyla açılır, Değiştir/Sil butonları o zaman görünür
+  const [isEditingEntryMedia, setIsEditingEntryMedia] = useState(false);
+  // YENİ: Dashboard "Sembol Nakliyat" kartı segmenti: 'getiren' | 'cikis' | 'toplam'
+  const [sembolCardMode, setSembolCardMode] = useState('getiren');
 
   // YENİ EKLENEN: Giriş-Çıkış Tutanağını müşteri bilgileriyle doldurup yazdırır (imza alanlı)
   const handlePrintEntryExitProtocol = () => {
@@ -4868,25 +4936,30 @@ const handleSaveEditRent = async () => {
 
       return `<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><title>${sanitizePdfName(custName + ' - Vekalet')}</title>
       <style>
-        @page { size:A4; margin:20mm; @top-left{content:""} @top-center{content:""} @top-right{content:""} @bottom-left{content:""} @bottom-center{content:""} @bottom-right{content:""} }
-        * { box-sizing:border-box; font-family:'Segoe UI', Arial, sans-serif; }
-        body { color:#1f2937; line-height:1.8; margin:0; position:relative; min-height:250mm; }
-        .head { text-align:center; border-bottom:3px solid #dc2626; padding-bottom:14px; margin-bottom:30px; }
-        .head img { height:48px; object-fit:contain; display:block; margin:0 auto; }
-        h1 { text-align:center; color:#dc2626; font-size:20px; margin:24px 0 34px; letter-spacing:.3px; }
-        .content { font-size:14px; text-align:justify; margin-bottom:30px; }
-        .info-box { background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; padding:16px 18px; margin:22px 0; }
-        .info-box .row { font-size:13px; margin:5px 0; }
-        .info-box .row b { display:inline-block; min-width:190px; color:#111827; }
-        .date { font-size:14px; font-weight:700; margin-top:20px; }
-        .signatures { display:flex; justify-content:space-between; margin-top:70px; }
+        /* Tek sayfa: kenar boşlukları daraltıldı, tüm margin-box kutuları boşaltıldı (tarayıcı üst/alt yazısı gizlenir) */
+        @page { size:A4; margin:12mm 16mm; @top-left{content:""} @top-center{content:""} @top-right{content:""} @bottom-left{content:""} @bottom-center{content:""} @bottom-right{content:""} }
+        html, body { height:auto; }
+        * { box-sizing:border-box; font-family:'Segoe UI', Arial, sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+        /* min-height kaldırıldı; içerik doğal yüksekliğinde kalır, ikinci sayfaya taşmaz */
+        body { color:#1f2937; line-height:1.55; margin:0; }
+        .wrap { page-break-inside:avoid; }
+        .head { text-align:center; border-bottom:2px solid #dc2626; padding-bottom:10px; margin-bottom:16px; }
+        .head img { height:40px; object-fit:contain; display:block; margin:0 auto; }
+        h1 { text-align:center; color:#dc2626; font-size:17px; margin:14px 0 18px; letter-spacing:.3px; }
+        .content { font-size:13px; text-align:justify; margin-bottom:14px; }
+        .info-box { background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; margin:14px 0; }
+        .info-box .row { font-size:12.5px; margin:4px 0; }
+        .info-box .row b { display:inline-block; min-width:180px; color:#111827; }
+        .date { font-size:13px; font-weight:700; margin-top:14px; }
+        .signatures { display:flex; justify-content:space-between; margin-top:44px; }
         .sig-box { width:45%; text-align:center; }
         .sig-title { font-weight:800; font-size:12px; color:#111827; }
-        .sig-name { font-size:12px; color:#374151; margin:6px 0 44px; }
+        .sig-name { font-size:12px; color:#374151; margin:6px 0 34px; }
         .sig-line { border-top:1.5px solid #111827; padding-top:8px; font-weight:700; font-size:12px; }
-        .foot { position:absolute; bottom:0; left:0; right:0; text-align:center; font-size:10px; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:12px; line-height:1.6; }
+        .foot { text-align:center; font-size:10px; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:10px; margin-top:34px; line-height:1.5; }
         .foot b { color:#111827; }
       </style></head><body>
+        <div class="wrap">
         <div class="head"><img src="${logo}" alt="Depoevim" /></div>
         <h1>${baslik}</h1>
         <div class="content"><p>${govde}</p></div>
@@ -4903,6 +4976,7 @@ const handleSaveEditRent = async () => {
           <div class="sig-box"><div class="sig-title">Yetki Verilen Kişi</div><div class="sig-name">${vName}</div><div class="sig-line">Ad Soyad / İmza</div></div>
         </div>
         <div class="foot"><b>${companyName}</b><br/>Bahçelievler Mah. Yeni Sokak No:5 C Pendik / İstanbul<br/>0(216) 390 89 99 · 0(554) 726 16 61 · www.sembolevdeneve.com</div>
+        </div>
         <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
       </body></html>`;
   };
@@ -5054,6 +5128,8 @@ const handleSaveEditRent = async () => {
 const handleEndRentConfirm = async () => {
       const room = rooms.find(r => String(r.id) === String(selectedRoomId));
       if (!room) return;
+      // YENİ: Çıkışı kimin yaptığı zorunlu (kendisi / sembol)
+      if (!endRentData.exitBy) { alert('Lütfen eşyanın çıkışını kimin yaptığını seçin (Kendisi / Sembol Nakliyat).'); return; }
       logActivity('Odadan Çıkış', `${room.customerName || ''} - ${room.name || ''} odasından çıkış yapıldı.`);
       
       const customerToUpdate = customers.find(c => c.name === room.customerName);
@@ -5119,21 +5195,34 @@ const handleEndRentConfirm = async () => {
       
       const historyRecord = { 
           id: Date.now(), 
+          roomId: room.id || null,
+          roomName: room.name || null,
           customerName: room.customerName || null, 
           entryDate: room.entryDate || null, 
           exitDate: endRentData.exitDate || null, 
           duration: durationStr, 
           monthlyFee: room.monthlyFee || null, 
           status: 'Çıkış Yaptı', 
-          photo: endRentData.photo || null, 
-          entryPhoto: room.entryPhoto || null, 
+          exitBy: endRentData.exitBy || 'kendisi',  // YENİ: çıkışı kim yaptı (kendisi / sembol)
+          photo: endRentData.photo || null,        // Çıkış görseli
+          exitPhoto: endRentData.photo || null,    // YENİ: çıkış fotoğrafı ayrı anahtarla da saklanır (oda görseli arşivi)
+          entryPhoto: room.entryPhoto || null,     // Oda ilk giriş görseli
+          roomListPhoto: room.roomListPhoto || null, // YENİ: oda görseli (liste görseli) de arşive kopyalanır
           entryExitHistory: room.entryExitHistory || null 
       };
+
+      // YENİ: Müşterinin carisinde görünecek oda geçmişi kaydı (her oda ayrı ayrı listelenir)
+      const customerRoomHistory = customerToUpdate ? [historyRecord, ...(customerToUpdate.roomHistory || [])] : null;
 
       const roomUpdates = {
           customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null, broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null, paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
           history: [historyRecord, ...(room.history || [])]
       };
+
+      // Yerel state'i anında güncelle (önizleme + canlı): müşteri oda geçmişi görünür olsun
+      if (customerToUpdate && customerRoomHistory) {
+          setCustomers(prev => prev.map(c => String(c.id) === String(customerToUpdate.id) ? { ...c, roomHistory: customerRoomHistory } : c));
+      }
 
       if (db && firebaseUser) {
           try {
@@ -5144,21 +5233,32 @@ const handleEndRentConfirm = async () => {
                       extraDebts: [...existingDebts, ...pendingDebtsToTransfer]
                   }, { merge: true });
               }
+              // YENİ: Müşterinin oda geçmişini kaydet
+              if (customerToUpdate && customerRoomHistory) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), {
+                      roomHistory: customerRoomHistory
+                  }, { merge: true });
+              }
               // Odayı Boşalt
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), roomUpdates, { merge: true });
           } catch(e) { console.error("Firebase Çıkış Yapma Hatası:", e); }
       }
 
       setIsEndRentModalOpen(false); 
-      setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null });
+      setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null, carrierName: '', carrierVkn: '', carrierAuthorized: '', exitBy: '' });
   };
 
 const handleChangeRoomConfirm = async () => {
     if(!changeRoomTargetRoomId) return;
     const oldRoom = rooms.find(r => String(r.id) === String(selectedRoomId));
-    logActivity('Oda Değiştirme/Taşıma', `${oldRoom?.customerName || ''} için oda değişikliği/taşıma yapıldı.`);
     const newRoom = rooms.find(r => String(r.id) === String(changeRoomTargetRoomId));
     if(!oldRoom || !newRoom) return;
+
+    // YENİ: Kira modu — 'same' (aynı kira/cari aynen devam) | 'new' (yeni kira, eski oda kapanıyormuş gibi)
+    const isNewFeeMode = changeRoomFeeMode === 'new';
+    if (isNewFeeMode && (!changeRoomNewFee || Number(changeRoomNewFee) <= 0)) { alert('Lütfen KDV dahil yeni kira bedelini girin.'); return; }
+
+    logActivity('Oda Değiştirme/Taşıma', `${oldRoom?.customerName || ''} için oda değişikliği/taşıma yapıldı (${isNewFeeMode ? 'Yeni Kira' : 'Aynı Kira'}).`);
 
     const entryD = new Date(oldRoom.entryDate || Date.now());
     const exitD = new Date();
@@ -5166,63 +5266,233 @@ const handleChangeRoomConfirm = async () => {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     const months = Math.floor(diffDays / 30);
     const durationStr = months > 0 ? `${months} Ay` : `${diffDays} Gün`;
+    const customerToUpdate = customers.find(c => c.name === oldRoom.customerName);
 
-    const historyRecord = {
-        id: Date.now(), 
-        customerName: oldRoom.customerName || null, 
-        entryDate: oldRoom.entryDate || null, 
-        exitDate: exitD.toLocaleDateString('tr-TR'),
-        duration: durationStr, 
-        monthlyFee: oldRoom.monthlyFee || null, 
-        status: `${newRoom.name} Odasına Taşındı`, 
-        photo: null,
-        entryPhoto: oldRoom.entryPhoto || null, 
-        entryExitHistory: oldRoom.entryExitHistory || null
-    };
+    if (!isNewFeeMode) {
+        // =========================================================
+        // MOD 1: AYNI KİRA — eski odanın TÜM bilgileri (kira, giriş tarihi, cari borçlanma şekli)
+        // aynen yeni odaya taşınır. Cari hiç kesintiye uğramamış gibi devam eder.
+        // =========================================================
+        const historyRecord = {
+            id: Date.now(),
+            roomId: oldRoom.id, roomName: oldRoom.name,
+            customerName: oldRoom.customerName || null,
+            entryDate: oldRoom.entryDate || null,
+            exitDate: exitD.toLocaleDateString('tr-TR'),
+            duration: durationStr,
+            monthlyFee: oldRoom.monthlyFee || null,
+            status: `${newRoom.name} Odasına Taşındı (Aynı Kira)`,
+            photo: null, exitPhoto: null,
+            entryPhoto: oldRoom.entryPhoto || null,
+            roomListPhoto: oldRoom.roomListPhoto || null,
+            entryExitHistory: oldRoom.entryExitHistory || null
+        };
+        const customerRoomHistory = customerToUpdate ? [historyRecord, ...(customerToUpdate.roomHistory || [])] : null;
+        if (customerToUpdate && customerRoomHistory) {
+            setCustomers(prev => prev.map(c => String(c.id) === String(customerToUpdate.id) ? { ...c, roomHistory: customerRoomHistory } : c));
+        }
 
-    if (db && firebaseUser) {
-        try {
-            // 1. Eski odayı boşalt ve geçmişe ekle
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(oldRoom.id)), {
-                customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null,
-                broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null,
-                paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
-                history: [historyRecord, ...(oldRoom.history || [])]
-            }, { merge: true });
+        if (db && firebaseUser) {
+            try {
+                // 1. Eski odayı boşalt ve geçmişe ekle
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(oldRoom.id)), {
+                    customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null,
+                    broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null,
+                    paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0,
+                    history: [historyRecord, ...(oldRoom.history || [])]
+                }, { merge: true });
 
-            // 2. Yeni odaya müşterinin tüm verilerini taşı
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), {
-                customerName: oldRoom.customerName || null, 
-                entryDate: oldRoom.entryDate || null, 
-                paymentDate: oldRoom.paymentDate || null,
-                monthlyFee: oldRoom.monthlyFee || null, 
-                hasKdv: oldRoom.hasKdv !== undefined ? oldRoom.hasKdv : true, 
-                sealNo: oldRoom.sealNo || null,
-                broughtBy: oldRoom.broughtBy || 'kendisi', 
-                teamList: oldRoom.teamList || null, 
-                hasDamage: oldRoom.hasDamage || false,
-                damageDescription: oldRoom.damageDescription || null, 
-                transportPrice: oldRoom.transportPrice || null,
-                transportHasKdv: oldRoom.transportHasKdv || false, 
-                entryPhoto: oldRoom.entryPhoto || null,
-                entryExitHistory: oldRoom.entryExitHistory || null, 
-                paidMonths: oldRoom.paidMonths || [],
-                rentedBy: oldRoom.rentedBy || currentUserProfile.name,
-                movedFrom: oldRoom.name || null, 
-                isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null,
-                isFreeRoom: oldRoom.isFreeRoom || false, 
-                freeRoomReason: oldRoom.freeRoomReason || null, 
-                giftMonths: oldRoom.giftMonths || 0
-            }, { merge: true });
+                // 2. Yeni odaya müşterinin TÜM verilerini (kira dahil) birebir taşı
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), {
+                    customerName: oldRoom.customerName || null,
+                    entryDate: oldRoom.entryDate || null,
+                    paymentDate: oldRoom.paymentDate || null,
+                    monthlyFee: oldRoom.monthlyFee || null,
+                    hasKdv: oldRoom.hasKdv !== undefined ? oldRoom.hasKdv : true,
+                    sealNo: oldRoom.sealNo || null,
+                    broughtBy: oldRoom.broughtBy || 'kendisi',
+                    teamList: oldRoom.teamList || null,
+                    hasDamage: oldRoom.hasDamage || false,
+                    damageDescription: oldRoom.damageDescription || null,
+                    transportPrice: oldRoom.transportPrice || null,
+                    transportHasKdv: oldRoom.transportHasKdv || false,
+                    entryPhoto: oldRoom.entryPhoto || null,
+                    entryExitHistory: oldRoom.entryExitHistory || null,
+                    paidMonths: oldRoom.paidMonths || [],
+                    rentedBy: oldRoom.rentedBy || currentUserProfile.name,
+                    movedFrom: oldRoom.name || null,
+                    isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null,
+                    isFreeRoom: oldRoom.isFreeRoom || false,
+                    freeRoomReason: oldRoom.freeRoomReason || null,
+                    giftMonths: oldRoom.giftMonths || 0,
+                    increaseHistory: oldRoom.increaseHistory || null,
+                    priceHistory: oldRoom.priceHistory || null
+                }, { merge: true });
 
-        } catch (e) { console.error("Firebase Oda Değiştirme Hatası:", e); }
+                // YENİ: Müşterinin oda geçmişini kaydet
+                if (customerToUpdate && customerRoomHistory) {
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), { roomHistory: customerRoomHistory }, { merge: true });
+                }
+            } catch (e) { console.error("Firebase Oda Değiştirme Hatası (Aynı Kira):", e); }
+        }
+    } else {
+        // =========================================================
+        // MOD 2: YENİ KİRA — eski oda normal bir "çıkış" gibi kapanır (bugüne kadarki
+        // ödenmemiş borç cariye kalıcı borç olarak işlenir), yeni odada SIFIRDAN bir kiralama
+        // başlar: bugünün tarihi, kullanıcının girdiği YENİ (KDV dahil) kira, yeni sözleşme.
+        // =========================================================
+        const today = new Date(); today.setHours(23, 59, 59, 999);
+        let pendingDebtsToTransfer = [];
+
+        if (customerToUpdate) {
+            const entryDate = parseDateLocal(oldRoom.entryDate || '2026-01-01');
+            const paymentAnchorDate = oldRoom.paymentDate && oldRoom.paymentDate.includes('-') ? parseDateLocal(oldRoom.paymentDate) : entryDate;
+            const baseAmt = Number(oldRoom.monthlyFee || 0);
+            const hasKdvOld = oldRoom.hasKdv !== undefined ? oldRoom.hasKdv : true;
+            const monthlyTotalOld = hasKdvOld ? baseAmt * 1.20 : baseAmt;
+            const overrides = customerToUpdate.ledgerOverrides || [];
+
+            let loopDate = new Date(paymentAnchorDate);
+            while (loopDate <= today) {
+                const key = `${loopDate.getFullYear()}-${loopDate.getMonth()}`;
+                const txId = `debt-${oldRoom.id}-${key}`;
+                let dueDate = new Date(loopDate.getFullYear(), loopDate.getMonth(), loopDate.getDate() + 1);
+                dueDate.setHours(0, 0, 0, 0);
+                const isDueYet = dueDate <= today;
+
+                let currentMonthlyTotal = monthlyTotalOld;
+                const override = overrides.find(o => o.txId === txId);
+                if (override && !override.isDeleted && override.debt !== undefined) currentMonthlyTotal = override.debt;
+
+                const monthIdx = Math.round((loopDate.getFullYear() * 12 + loopDate.getMonth()) - (paymentAnchorDate.getFullYear() * 12 + paymentAnchorDate.getMonth()));
+                const isGifted = isGiftedMonth(oldRoom, monthIdx);
+                const isFree = oldRoom.isFreeRoom;
+
+                if (isDueYet && !oldRoom.paidMonths?.includes(key) && !isGifted && !isFree) {
+                    pendingDebtsToTransfer.push({
+                        id: Date.now() + Math.random(),
+                        type: 'manual_debt',
+                        date: new Date(loopDate).toISOString().split('T')[0],
+                        amount: currentMonthlyTotal,
+                        hasKdv: false,
+                        desc: `${oldRoom.name} Odası Eski Kira Borcu (Oda Değişikliği)`
+                    });
+                }
+                const targetDay = oldRoom.paymentDate && !oldRoom.paymentDate.includes('-') ? parseInt(oldRoom.paymentDate) : paymentAnchorDate.getDate();
+                let nMonth = loopDate.getMonth() + 1; let nYear = loopDate.getFullYear();
+                if (nMonth > 11) { nMonth = 0; nYear++; }
+                let maxDayInNextMonth = new Date(nYear, nMonth + 1, 0).getDate();
+                loopDate = new Date(nYear, nMonth, Math.min(targetDay, maxDayInNextMonth));
+            }
+        }
+
+        const historyRecord = {
+            id: Date.now(),
+            roomId: oldRoom.id, roomName: oldRoom.name,
+            customerName: oldRoom.customerName || null,
+            entryDate: oldRoom.entryDate || null,
+            exitDate: exitD.toLocaleDateString('tr-TR'),
+            duration: durationStr,
+            monthlyFee: oldRoom.monthlyFee || null,
+            status: `Çıkış Yaptı (${newRoom.name} Odasına Yeni Kira İle Geçti)`,
+            photo: null, exitPhoto: null,
+            entryPhoto: oldRoom.entryPhoto || null,
+            roomListPhoto: oldRoom.roomListPhoto || null,
+            entryExitHistory: oldRoom.entryExitHistory || null
+        };
+        const customerRoomHistory = customerToUpdate ? [historyRecord, ...(customerToUpdate.roomHistory || [])] : null;
+
+        // Yeni kira: girilen tutar HER ZAMAN KDV DAHİL kabul edilir; taban (KDV hariç) tutar hesaplanır.
+        const newFeeTotal = Number(changeRoomNewFee);
+        const newFeeBase = Math.round((newFeeTotal / 1.20) * 100) / 100;
+        const todayISO = today.toISOString().split('T')[0];
+
+        // Yerel state'i anında güncelle
+        if (customerToUpdate) {
+            const existingDebts = customerToUpdate.extraDebts || [];
+            setCustomers(prev => prev.map(c => String(c.id) === String(customerToUpdate.id) ? {
+                ...c,
+                extraDebts: pendingDebtsToTransfer.length > 0 ? [...existingDebts, ...pendingDebtsToTransfer] : existingDebts,
+                roomHistory: customerRoomHistory || c.roomHistory
+            } : c));
+        }
+
+        if (db && firebaseUser) {
+            try {
+                // 1. Eski borcu cariye kalıcı borç olarak işle + oda geçmişini kaydet
+                if (customerToUpdate) {
+                    const existingDebts = customerToUpdate.extraDebts || [];
+                    const payload = {};
+                    if (pendingDebtsToTransfer.length > 0) payload.extraDebts = [...existingDebts, ...pendingDebtsToTransfer];
+                    if (customerRoomHistory) payload.roomHistory = customerRoomHistory;
+                    if (Object.keys(payload).length > 0) {
+                        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerToUpdate.id)), payload, { merge: true });
+                    }
+                }
+
+                // 2. Eski odayı tamamen boşalt (normal çıkış gibi)
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(oldRoom.id)), {
+                    customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null,
+                    broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null,
+                    paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0,
+                    history: [historyRecord, ...(oldRoom.history || [])]
+                }, { merge: true });
+
+                // 3. Yeni odada SIFIRDAN bir kiralama başlat (yeni tarih, yeni kira, hediye ay yok)
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), {
+                    customerName: oldRoom.customerName || null,
+                    entryDate: todayISO,
+                    paymentDate: todayISO,
+                    monthlyFee: newFeeBase,
+                    hasKdv: true,
+                    sealNo: oldRoom.sealNo || null,
+                    broughtBy: 'kendisi',
+                    teamList: null,
+                    hasDamage: false, damageDescription: null,
+                    transportPrice: null, transportHasKdv: false,
+                    entryPhoto: null, entryExitHistory: null,
+                    paidMonths: [],
+                    rentedBy: currentUserProfile.name,
+                    movedFrom: oldRoom.name || null,
+                    isReserved: false, reservedName: null, reservedPhone: null, reserveExpiry: null, reserveExpiryTimestamp: null,
+                    isFreeRoom: false, freeRoomReason: null,
+                    giftMonths: 0, giftStartMonthIndex: 0,
+                    increaseHistory: null, priceHistory: null
+                }, { merge: true });
+
+                // 4. YENİ Sözleşmeyi üret ve cariye arşivle
+                try {
+                    const dateStr = today.toLocaleDateString('tr-TR');
+                    const contractHtml = buildDepoevimContractHtml({
+                        mAd: customerToUpdate?.name || oldRoom.customerName || '',
+                        mTc: customerToUpdate?.tc || '',
+                        mTel: customerToUpdate?.phone || '',
+                        mTel2: customerToUpdate?.phone2 || '',
+                        mAdres: customerToUpdate?.address || '',
+                        odaNo: newRoom.name || '',
+                        dateStr,
+                        kdvIncl: Math.round(newFeeTotal),
+                        depoAdres: getRoomWarehouseAddress(newRoom)
+                    });
+                    if (customerToUpdate) {
+                        // HTML içerik, arşiv görüntüleyicide (openArchiveFile) açılabilmesi için data:text/html URL'sine çevrilir
+                        const htmlDataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(contractHtml);
+                        const contractRecord = { id: Date.now() + 1, label: `Sözleşme (${newRoom.name} - Oda Değişikliği)`, date: today.toISOString().split('T')[0], file: htmlDataUrl, note: 'Oda değişikliği ile yenilenen sözleşme' };
+                        await saveContractToCustomer(customerToUpdate.id, contractRecord);
+                    }
+                } catch (ce) { console.error('Yeni sözleşme üretme hatası:', ce); }
+
+            } catch (e) { console.error("Firebase Oda Değiştirme Hatası (Yeni Kira):", e); }
+        }
     }
 
     setIsChangeRoomModalOpen(false);
     setChangeRoomWarehouseId('');
     setChangeRoomBlockId('');
     setChangeRoomTargetRoomId('');
-    
+    setChangeRoomFeeMode('same');
+    setChangeRoomNewFee('');
+
     const targetBlock = blocks.find(b => b.id === newRoom.blockId);
     if (targetBlock) {
         setSelectedWarehouseId(targetBlock.warehouseId);
@@ -5285,15 +5555,10 @@ const handleChangeRoomConfirm = async () => {
   };
 
   const handleOpenApplyIncreaseModal = (room, year) => {
-      // YENİ: Zam, bu yılın giriş ayına denk gelir; baz olarak BİR ÖNCEKİ ayın geçerli kirası alınır.
-      const entryDForBase = parseDateLocal(room.entryDate || '2026-01-01');
-      const anchorDForBase = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryDForBase;
-      const increaseMonth = anchorDForBase.getMonth();
-      // Bir önceki ay (zam ayının bir öncesi)
-      let prevMonth = increaseMonth - 1;
-      let prevYear = parseInt(year);
-      if (prevMonth < 0) { prevMonth = 11; prevYear = parseInt(year) - 1; }
-      const base = Math.max(Number(getRoomFeeForMonth(room, prevYear, prevMonth) || 0), Number(room.monthlyFee || 0));
+      // GÜNCELLENDİ: Zam baz kirası, listede gösterilen "MEVCUT KIRA" ile birebir aynı olsun diye
+      // getRoomLatestFee(room) kullanılır (en güncel/geçerli kira). Böylece zam, ekranda görülen
+      // mevcut kira üzerinden yapılır ve tutarsızlık olmaz.
+      const base = Math.max(Number(getRoomLatestFee(room) || 0), Number(room.monthlyFee || 0));
 
       const rate = Number(collectionRates.roomIncreaseRate || 50);
       const defaultNew = Math.round(base + (base * rate / 100));
@@ -5904,7 +6169,6 @@ const newAppt = {
         { id: 'gunu-gelen-odalar', label: 'Günü Gelen Odalar', permId: 'page-gunu-gelen-odalar' },
         { id: 'senesi-dolan-odalar', label: 'Senesi Dolan Odalar', permId: 'page-senesi-dolan-odalar' },
         { id: 'aylik-odeme', label: 'Aylık Borç Takip', permId: 'page-aylik-odeme' },
-        { id: 'kdvsiz-cariler', label: 'KDVsiz Cariler', permId: 'page-kdvsiz-cariler' },
         { id: 'icra-odalari', label: 'İcra Odaları', permId: 'page-icra-odalari' }
     ] },
     { id: 'depo', label: 'Depo Listesi', icon: Box, permId: 'menu-depo' },
@@ -5923,6 +6187,7 @@ const newAppt = {
         { id: 'pdf-sozlesme', label: 'PDF & Sözleşme Ayarları', permId: 'page-pdf-sozlesme' },
         { id: 'tahsilat-oranlari', label: 'Tahsilat Oranları', permId: 'page-tahsilat-oranlari' },
         { id: 'islem-hareketleri', label: 'İşlem Hareketleri', permId: 'page-islem-hareketleri' },
+        { id: 'islem-geri-yukle', label: 'İşlem Geri Yükle', permId: 'page-islem-geri-yukle' },
         { id: 'sistem-yedekleme', label: 'Sistem Yedekleme', permId: 'page-sistem-yedekleme' }
     ] },
   ]; // <-- İŞTE EKSİK OLAN KAPANIŞ PARANTEZİ BU!
@@ -6139,6 +6404,24 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
   };
   const rangeEntriesCount = collectEntries(dashboardRange).length;
 
+  // YENİ: "Giriş-Çıkış İşlemi" kartı için — SADECE giriş-çıkış işlemi butonuyla eklenen hareketleri sayar.
+  // İlk oda kaydı (kiralama/ilk giriş) sayılmaz; yalnızca entryExitHistory kayıtları (buton hareketleri) sayılır.
+  const collectEntryExitOps = (range) => {
+      const list = [];
+      rooms.forEach(r => {
+          const blk = blocks.find(b => b.id === r.blockId);
+          (r.entryExitHistory || []).forEach(h => {
+              // Hareketin tarihi: işlem/çıkış/giriş tarihinden hangisi varsa
+              const dRaw = h.date || h.exitDate || h.entryDate;
+              if (!dRaw) return;
+              const d = parseAnyDate(dRaw);
+              if (inDashboardRange(d, range)) list.push({ id: h.id, name: h.customerName || r.customerName || '-', customerName: h.customerName || r.customerName, roomName: r.name, date: dRaw, dateObj: d, roomId: r.id, blockId: r.blockId, warehouseId: blk?.warehouseId });
+          });
+      });
+      return list;
+  };
+  const rangeEntryExitOpsCount = collectEntryExitOps(dashboardRange).length;
+
   // YENİ: Takvim menü rozeti — YALNIZCA bugüne ait randevu sayısı (bugün randevu yoksa rozet görünmez)
   const upcomingAppointmentsCount = appointments.filter(a => {
       const d = parseAnyDate(a.date);
@@ -6152,7 +6435,7 @@ if (!r.paidMonths?.includes(key) && !isGifted && !isFree) {
     /* SİLİNDİ: 'ÇIKIŞ YAPAN MÜŞTERİLER' kartı (id: 2) — istek üzerine kaldırıldı */
     { id: 3, title: 'GİREN ODA SAYISI', value: rangeEntriesCount.toString(), desc: `${rangeLabel} odaya giriş yapılanlar`, tag: 'Detay için tıklayın', tagColor: 'text-teal-700 bg-teal-100', borderColor: 'border-teal-400', iconColor: 'text-teal-500 bg-teal-50', icon: Box, chartData: [5, 10, 8, 15, 10, 18, 25], chartColor: '#14b8a6' },
     { id: 4, title: 'ÇIKAN ODA SAYISI', value: rangeExitsCount.toString(), desc: `${rangeLabel} odadan çıkış yapılanlar`, tag: 'Detay için tıklayın', tagColor: 'text-blue-700 bg-blue-100', borderColor: 'border-blue-400', iconColor: 'text-blue-500 bg-blue-50', icon: Box, chartData: [10, 12, 15, 10, 20, 25, 20], chartColor: '#3b82f6' },
-    { id: 5, title: 'ODAYA GİRİŞ ÇIKIŞ İŞLEMİ YAPAN MÜŞTERİLER', value: (rangeEntriesCount + rangeExitsCount).toString(), desc: `${rangeLabel} oda giriş/çıkış işlemi yapılan müşteriler`, tag: 'Detay için tıklayın', tagColor: 'text-red-700 bg-red-100', borderColor: 'border-red-500', iconColor: 'text-indigo-500 bg-indigo-50', icon: RefreshCcw, chartData: [30, 25, 28, 20, 15, 10, 5], chartColor: '#6366f1' },
+    { id: 5, title: 'ODAYA GİRİŞ ÇIKIŞ İŞLEMİ YAPAN MÜŞTERİLER', value: rangeEntryExitOpsCount.toString(), desc: `${rangeLabel} oda giriş/çıkış işlemi yapılan müşteriler`, tag: 'Detay için tıklayın', tagColor: 'text-red-700 bg-red-100', borderColor: 'border-red-500', iconColor: 'text-indigo-500 bg-indigo-50', icon: RefreshCcw, chartData: [30, 25, 28, 20, 15, 10, 5], chartColor: '#6366f1' },
     { id: 6, title: 'TOPLAM DEPO', value: warehouses.length.toString(), desc: `${totalRoomsCount} oda kapasitesi (tüm depolar)`, tag: `Genel doluluk %${roomCapacityPercentage}`, tagColor: 'text-purple-700 bg-purple-100', borderColor: 'border-purple-500', iconColor: 'text-purple-500 bg-purple-50', icon: Home, chartData: [10, 10, 10, 10, 10, 10, 10], chartColor: '#a855f7' },
     { id: 7, title: 'DOLU ODA', value: activeRentalsCount.toString(), desc: 'Hesaba bağlı oda sayısı', tag: `Tüm odaların %${roomCapacityPercentage} payı`, tagColor: 'text-green-700 bg-green-100', borderColor: 'border-green-500', iconColor: 'text-green-500 bg-green-50', icon: Box, chartData: [10, 20, 30, 40, 50, 60, 70], chartColor: '#22c55e' },
     { id: 8, title: 'BOŞ ODA', value: emptyRoomsCount.toString(), desc: 'Kiraya hazır kapasite', tag: `Tüm odaların %${emptyRoomPercentage} payı`, tagColor: 'text-gray-600 bg-gray-100', borderColor: 'border-slate-500', iconColor: 'text-slate-500 bg-slate-50', icon: Box, chartData: [50, 40, 30, 20, 10, 5, 2], chartColor: '#64748b' },
@@ -6612,15 +6895,29 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
   // Yeni 5 kartın metrikleri. Performans için yalnızca Gösterge Paneli açıkken hesaplanır.
   // (getCustomerLedger'dan SONRA tanımlanmalı — cari borç hesabı ona bağlıdır.)
   const extraCardStats = (() => {
-      if (activeMenu !== 'dashboard') return { sembolCount: 0, sembolPct: 0, debtorCount: 0, debtorPct: 0, todayEntryRooms: 0, todayEntryPct: 0, invoicedCount: 0, invoicedPct: 0, legalCount: 0, legalPct: 0, apptCount: 0 };
+      if (activeMenu !== 'dashboard') return { sembolCount: 0, sembolGetirenCount: 0, sembolCikisCount: 0, sembolToplam: 0, sembolPct: 0, debtorCount: 0, debtorPct: 0, todayEntryRooms: 0, todayEntryPct: 0, invoicedCount: 0, invoicedPct: 0, legalCount: 0, legalPct: 0, apptCount: 0 };
 
       // 1) Sembol Nakliyat ile getiren müşteriler — zaman filtresine (dashboardRange) tabidir.
       //    Yüzde: aynı aralıkta giriş yapmış tüm müşterilere göre.
       const rangeRooms = rooms.filter(r => r.customerName && (dashboardRange === 'all' ? true : inDashboardRange(parseAnyDate(r.entryDate), dashboardRange)));
       const sembolCustomerSet = new Set(rangeRooms.filter(r => r.broughtBy === 'sembol').map(r => r.customerName));
       const rangeCustomerSet = new Set(rangeRooms.map(r => r.customerName));
-      const sembolCount = sembolCustomerSet.size;
-      const sembolPct = rangeCustomerSet.size > 0 ? Math.round((sembolCount / rangeCustomerSet.size) * 100) : 0;
+      const sembolGetirenCount = sembolCustomerSet.size;
+      const sembolPct = rangeCustomerSet.size > 0 ? Math.round((sembolGetirenCount / rangeCustomerSet.size) * 100) : 0;
+
+      // YENİ: Sembol Nakliyat ile ÇIKIŞ yapılanlar — oda geçmişindeki (history) exitBy==='sembol' kayıtları,
+      //       çıkış tarihine göre dashboardRange filtresiyle. Tüm odaların history'si taranır.
+      let sembolCikisCount = 0;
+      rooms.forEach(r => {
+          (r.history || []).forEach(h => {
+              if (h.exitBy === 'sembol' && (dashboardRange === 'all' ? true : inDashboardRange(parseAnyDate(h.exitDate), dashboardRange))) {
+                  sembolCikisCount++;
+              }
+          });
+      });
+      const sembolToplam = sembolGetirenCount + sembolCikisCount;
+      // Kartta gösterilecek değer, seçili moda göre
+      const sembolCount = sembolCardMode === 'cikis' ? sembolCikisCount : (sembolCardMode === 'toplam' ? sembolToplam : sembolGetirenCount);
 
       // 2) Cari borcu olan müşteriler — yüzde, MEVCUT ODASI OLAN müşteri sayısına göre.
       const roomOwnerSet = new Set(rooms.filter(r => r.customerName).map(r => r.customerName));
@@ -6650,12 +6947,12 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
           return inDashboardRange(parseAnyDate(a.date), dashboardRange);
       }).length;
 
-      return { sembolCount, sembolPct, debtorCount, debtorPct, todayEntryRooms, todayEntryPct, invoicedCount, invoicedPct, legalCount, legalPct, apptCount };
+      return { sembolCount, sembolGetirenCount, sembolCikisCount, sembolToplam, sembolPct, debtorCount, debtorPct, todayEntryRooms, todayEntryPct, invoicedCount, invoicedPct, legalCount, legalPct, apptCount };
   })();
 
   // Yeni 5 kart (id 9-13). Mevcut kartlarla aynı görsel yapıyı kullanır; tag alanında yüzdelik pay gösterilir.
   const extraDashboardCards = [
-      { id: 9, title: 'SEMBOL NAKLİYAT İLE GETİREN MÜŞTERİ', value: extraCardStats.sembolCount.toString(), desc: `${rangeLabel} Sembol Nakliyat ile eşya getiren müşteriler`, tag: `Girişlerin %${extraCardStats.sembolPct} payı`, tagColor: 'text-teal-700 bg-teal-100', borderColor: 'border-teal-500', iconColor: 'text-teal-500 bg-teal-50', icon: Box, chartData: [8, 12, 10, 15, 14, 18, 20], chartColor: '#14b8a6' },
+      { id: 9, title: 'SEMBOL NAKLİYAT', value: extraCardStats.sembolCount.toString(), desc: sembolCardMode === 'cikis' ? `${rangeLabel} Sembol Nakliyat ile çıkış yapılanlar` : (sembolCardMode === 'toplam' ? `${rangeLabel} Sembol Nakliyat toplam (getiren + çıkış)` : `${rangeLabel} Sembol Nakliyat ile eşya getiren müşteriler`), tag: sembolCardMode === 'getiren' ? `Girişlerin %${extraCardStats.sembolPct} payı` : (sembolCardMode === 'cikis' ? 'Sembol ile çıkış' : 'Getiren + Çıkış'), tagColor: 'text-teal-700 bg-teal-100', borderColor: 'border-teal-500', iconColor: 'text-teal-500 bg-teal-50', icon: Box, chartData: [8, 12, 10, 15, 14, 18, 20], chartColor: '#14b8a6', sembolSegment: true },
       { id: 10, title: 'CARİ BORCU OLAN MÜŞTERİ', value: extraCardStats.debtorCount.toString(), desc: 'Carisinde ödenmemiş borcu bulunan müşteriler', tag: `Odası olanların %${extraCardStats.debtorPct} payı`, tagColor: 'text-red-700 bg-red-100', borderColor: 'border-red-500', iconColor: 'text-red-500 bg-red-50', icon: Wallet, chartData: [15, 14, 16, 13, 15, 12, 14], chartColor: '#ef4444' },
       { id: 11, title: 'BUGÜN GİRİŞ YAPILAN ODA', value: extraCardStats.todayEntryRooms.toString(), desc: 'Giriş tarihi bugün olan odalar', tag: `Dolu odaların %${extraCardStats.todayEntryPct} payı`, tagColor: 'text-indigo-700 bg-indigo-100', borderColor: 'border-indigo-500', iconColor: 'text-indigo-500 bg-indigo-50', icon: Calendar, chartData: [2, 4, 3, 6, 5, 7, 8], chartColor: '#6366f1' },
       { id: 12, title: 'FATURA KESİLMİŞ CARİ', value: extraCardStats.invoicedCount.toString(), desc: 'En az bir e-fatura kesilmiş müşteriler', tag: `Tüm carilerin %${extraCardStats.invoicedPct} payı`, tagColor: 'text-purple-700 bg-purple-100', borderColor: 'border-purple-500', iconColor: 'text-purple-500 bg-purple-50', icon: FileTextIcon, chartData: [10, 12, 14, 13, 16, 18, 19], chartColor: '#a855f7' },
@@ -7152,6 +7449,14 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                     <div className="p-5 pl-6">
                       <div className="flex justify-between items-start mb-4"><div className={`p-2 rounded-lg ${card.iconColor}`}><card.icon size={20} /></div><Sparkline data={card.chartData} color={card.chartColor} /></div>
                       <div><h3 className="text-[11px] font-bold text-gray-400 tracking-wider uppercase mb-1">{card.title}</h3><div className="text-3xl font-bold text-gray-800 mb-1">{card.value}</div><p className="text-xs text-gray-400 mb-4 h-4">{card.desc}</p></div>
+                      {/* YENİ: Sembol Nakliyat kartı segmenti — Getiren / Çıkış Yapan / Toplam */}
+                      {card.sembolSegment && (
+                        <div className="flex gap-1 mb-3">
+                          {[['getiren','Getiren'],['cikis','Çıkış Yapan'],['toplam','Toplam']].map(([val,lbl]) => (
+                            <button key={val} onClick={(e) => { e.stopPropagation(); setSembolCardMode(val); }} className={`flex-1 px-1.5 py-1 rounded-md text-[10px] font-bold transition-colors ${sembolCardMode === val ? 'bg-[#1bc5bd] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{lbl}</button>
+                          ))}
+                        </div>
+                      )}
                       <div><span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-semibold ${card.tagColor}`}>{card.tag}</span></div>
                     </div>
                   </div>
@@ -7324,10 +7629,15 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                          </div>
                          
                          <div className="flex flex-col items-end gap-3 text-[10px] sm:text-xs font-bold">
-                             <div className="flex flex-wrap justify-end items-center gap-4">
-                                 {Object.entries(appointmentPurposes).slice(0, 3).map(([key, data]) => (
-                                     <div key={key} className="flex items-center gap-1.5"><div className={`w-2.5 h-2.5 rounded-full ${data.color}`}></div><span className="text-gray-600">{data.label.split(' ')[0]}</span></div>
-                                 ))}
+                             <div className="flex flex-wrap justify-end items-center gap-x-4 gap-y-2">
+                                 {/* GÜNCELLENDİ: Tüm randevu türleri kendi renkleriyle gösterilir (Odadan Tüm Eşya + Depo Temizlik dahil) */}
+                                 {Object.entries(appointmentPurposes).map(([key, data]) => {
+                                     // Kısa, anlaşılır etiketler
+                                     const shortLabels = { 'giris-cikis': 'Odadan', 'ziyaret': 'Ziyaret', 'esya-getirme': 'Eşya Getirme', 'tahliye': 'Tüm Eşya Çıkış', 'temizlik': 'Temizlik' };
+                                     return (
+                                        <div key={key} className="flex items-center gap-1.5"><div className={`w-2.5 h-2.5 rounded-full ${data.color}`}></div><span className="text-gray-600">{shortLabels[key] || data.label.split(' ')[0]}</span></div>
+                                     );
+                                 })}
                              </div>
                              <div className="flex flex-wrap justify-end items-center gap-3 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
                                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full border border-gray-300 bg-white"></div><span className="text-gray-500">Boş (0)</span></div>
@@ -7711,6 +8021,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                    <div className="flex flex-col gap-2">
                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center justify-between">
                                           {customer.type === 'bireysel' ? 'Kimlik Belgesi (Ön ve Arka)' : 'Vergi Levhası / Ek Belgeler'}
+                                          {/* YENİ: Düzenleme butonu — tıklanınca Değiştir/Sil butonları görünür/gizlenir */}
+                                          <button onClick={() => setIsEditingIdDocs(!isEditingIdDocs)} className={`ml-2 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold normal-case transition-colors ${isEditingIdDocs ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-gray-100 hover:bg-gray-200 text-gray-500 border border-gray-200'}`} title="Düzenle"><Edit size={11}/> {isEditingIdDocs ? 'Bitir' : 'Düzenle'}</button>
                                        </span>
                                        <div className="flex flex-wrap gap-4">
                                            {/* ÖN YÜZ — görsel + ekle/değiştir/sil butonları */}
@@ -7727,6 +8039,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                        <span className="text-xs text-gray-400 font-medium text-center px-2">Ön Yüz Yok</span>
                                                    </div>
                                                )}
+                                               {isEditingIdDocs && (
                                                <div className="flex gap-1.5">
                                                    <label className="flex-1 cursor-pointer text-center bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors flex items-center justify-center gap-1">
                                                        <Upload size={12} /> {(customer.documentPhotoFront || customer.documentPhoto) ? 'Değiştir' : 'Ekle'}
@@ -7736,6 +8049,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                        <button onClick={() => { if (window.confirm('Ön yüz görselini silmek istediğinize emin misiniz?')) handleUpdateCustomerDocument('front', null); }} className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-2 py-1.5 rounded-lg transition-colors flex items-center justify-center"><Trash2 size={12} /></button>
                                                    )}
                                                </div>
+                                               )}
                                            </div>
 
                                            {/* ARKA YÜZ — görsel + ekle/değiştir/sil butonları */}
@@ -7752,6 +8066,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                        <span className="text-xs text-gray-400 font-medium text-center px-2">Arka Yüz Yok</span>
                                                    </div>
                                                )}
+                                               {isEditingIdDocs && (
                                                <div className="flex gap-1.5">
                                                    <label className="flex-1 cursor-pointer text-center bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors flex items-center justify-center gap-1">
                                                        <Upload size={12} /> {customer.documentPhotoBack ? 'Değiştir' : 'Ekle'}
@@ -7761,6 +8076,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                        <button onClick={() => { if (window.confirm('Arka yüz görselini silmek istediğinize emin misiniz?')) handleUpdateCustomerDocument('back', null); }} className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-2 py-1.5 rounded-lg transition-colors flex items-center justify-center"><Trash2 size={12} /></button>
                                                    )}
                                                </div>
+                                               )}
                                            </div>
                                        </div>
                                    </div>
@@ -7792,9 +8108,9 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                ) : (
                                                    [...customer.invoices].sort((a,b)=>b.id-a.id).map((inv) => (
                                                        <div key={inv.id} className="relative group border border-gray-200 rounded-lg p-2 bg-cyan-50/40 flex flex-col items-center gap-1 w-24 shadow-sm hover:shadow-md transition-all">
-                                                           <a href={inv.file || '#'} target="_blank" rel="noreferrer" className="w-full h-14 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden">
+                                                           <button type="button" onClick={() => openArchiveFile(inv.file)} className="w-full h-14 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden cursor-pointer">
                                                                {inv.file && !String(inv.file).includes('pdf') && String(inv.file).startsWith('data:image') ? <img src={inv.file} alt="Fatura" className="w-full h-full object-cover"/> : <FileTextIcon size={22} className="text-cyan-500" />}
-                                                           </a>
+                                                           </button>
                                                            <span className="text-[9px] text-gray-600 font-bold truncate w-full text-center">{inv.invoiceNo || 'Fatura'}</span>
                                                            <span className="text-[8px] text-gray-400">{inv.date ? new Date(inv.date).toLocaleDateString('tr-TR') : ''}</span>
                                                            <button onClick={() => handleDeleteInvoiceFromArchive(customer.id, inv.id)} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" title="Faturayı Sil"><X size={10} strokeWidth={3} /></button>
@@ -7814,9 +8130,9 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                ) : (
                                                    [...customer.contracts].sort((a,b)=>b.id-a.id).map((ct) => (
                                                        <div key={ct.id} className="relative group border border-gray-200 rounded-lg p-2 bg-violet-50/40 flex flex-col items-center gap-1 w-24 shadow-sm hover:shadow-md transition-all">
-                                                           <a href={ct.file || '#'} target="_blank" rel="noreferrer" className="w-full h-14 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden">
+                                                           <button type="button" onClick={() => openArchiveFile(ct.file)} className="w-full h-14 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden cursor-pointer">
                                                                {ct.file && String(ct.file).startsWith('data:image') ? <img src={ct.file} alt="Sözleşme" className="w-full h-full object-cover"/> : <FileTextIcon size={22} className="text-violet-500" />}
-                                                           </a>
+                                                           </button>
                                                            <span className="text-[9px] text-gray-600 font-bold truncate w-full text-center" title={ct.label}>{ct.label || 'Sözleşme'}</span>
                                                            <span className="text-[8px] text-gray-400">{ct.date ? new Date(ct.date).toLocaleDateString('tr-TR') : ''}</span>
                                                            <button onClick={() => { if (customer.id === selectedCustomerId) handleDeleteContract(ct.id); else { setSelectedCustomerId(customer.id); handleDeleteContract(ct.id); } }} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" title="Sözleşmeyi Sil"><X size={10} strokeWidth={3} /></button>
@@ -7838,11 +8154,11 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                        const isVideo = /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i.test(String(ph.url || '')) || String(ph.url || '').startsWith('data:video') || ph.mediaType === 'video';
                                                        return (
                                                        <div key={ph.key} className="relative group border border-gray-200 rounded-lg p-2 bg-indigo-50/40 flex flex-col items-center gap-1 w-24 shadow-sm hover:shadow-md transition-all">
-                                                           <a href={ph.url} target="_blank" rel="noreferrer" className="w-full h-14 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden">
+                                                           <button type="button" onClick={() => openArchiveFile(ph.url)} className="w-full h-14 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden cursor-pointer">
                                                                {isVideo
                                                                   ? <video src={ph.url} className="w-full h-full object-cover bg-black" muted playsInline />
                                                                   : <img src={ph.url} alt={ph.label} className="w-full h-full object-cover transition-transform group-hover:scale-105" />}
-                                                           </a>
+                                                           </button>
                                                            <span className="text-[9px] text-gray-600 font-medium truncate w-full text-center" title={ph.label}>{isVideo ? '🎬 ' : ''}{ph.label}</span>
                                                            <button onClick={() => handleDeleteRoomPhoto(ph)} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" title="Görseli Kaldır"><X size={10} strokeWidth={3} /></button>
                                                        </div>
@@ -7869,13 +8185,13 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                    ) : (
                                                        customer.extraDocuments.map((doc, idx) => (
                                                            <div key={idx} className="relative group border border-gray-200 rounded-lg p-1 bg-gray-50 flex flex-col items-center gap-1.5 w-20 sm:w-24 shadow-sm hover:shadow-md transition-all">
-                                                               <a href={doc.url} target="_blank" rel="noreferrer" className="w-full h-14 sm:h-16 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden">
+                                                               <button type="button" onClick={() => openArchiveFile(doc.url)} className="w-full h-14 sm:h-16 flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden cursor-pointer">
                                                                    {doc.url.includes('pdf') || doc.url.startsWith('data:application/pdf') ? (
                                                                        <FileTextIcon size={24} className="text-red-500" />
                                                                    ) : (
                                                                        <img src={doc.url} alt={`Ek Belge ${idx+1}`} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                                                                    )}
-                                                               </a>
+                                                               </button>
                                                                <span className="text-[9px] text-gray-500 font-medium truncate w-full text-center px-1" title={doc.name}>{doc.name || `Belge ${idx+1}`}</span>
                                                                <button onClick={() => handleDeleteExtraDocument(customer.id, doc.id)} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" title="Belgeyi Sil">
                                                                    <X size={10} strokeWidth={3} />
@@ -7891,6 +8207,51 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                             </div>
                          </div>
                       </div>
+
+                      {/* YENİ: MÜŞTERİ ODA GEÇMİŞİ — müşteri bir odadan çıkış yaptığında burada listelenir (her oda ayrı satır) */}
+                      {(customer.roomHistory && customer.roomHistory.length > 0) && (
+                      <div className="mt-2 mb-4 bg-white rounded-2xl shadow-sm border border-rose-100 p-5">
+                          <div className="flex items-center gap-2 mb-1"><Clock size={18} className="text-rose-500"/><h4 className="text-sm font-bold text-gray-700">Oda Geçmişi</h4></div>
+                          <p className="text-[11px] text-gray-400 mb-4">Müşterinin geçmişte kalıp çıkış yaptığı odalar, süreleri, kira bedelleri ve çıkış/giriş görselleri.</p>
+                          <div className="overflow-x-auto border border-gray-100 rounded-xl">
+                              <table className="w-full text-left text-sm min-w-[640px]">
+                                  <thead className="bg-gray-50 border-b border-gray-100 text-[10px] uppercase text-gray-500 font-bold">
+                                      <tr>
+                                          <th className="px-3 py-2.5">Oda</th>
+                                          <th className="px-3 py-2.5">Giriş</th>
+                                          <th className="px-3 py-2.5">Çıkış</th>
+                                          <th className="px-3 py-2.5">Süre</th>
+                                          <th className="px-3 py-2.5 text-right">Aylık Kira</th>
+                                          <th className="px-3 py-2.5 text-center">Nakliye İşlemi</th>
+                                          <th className="px-3 py-2.5 text-center">Görseller</th>
+                                          <th className="px-3 py-2.5 text-center">Durum</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-50">
+                                      {customer.roomHistory.map((h) => (
+                                          <tr key={h.id} className="hover:bg-rose-50/30 transition-colors">
+                                              <td className="px-3 py-2.5 font-bold text-gray-700">{h.roomName || '-'}</td>
+                                              <td className="px-3 py-2.5 text-gray-600">{h.entryDate || '-'}</td>
+                                              <td className="px-3 py-2.5 text-gray-600">{h.exitDate || '-'}</td>
+                                              <td className="px-3 py-2.5"><span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md text-xs font-bold border border-gray-200">{h.duration || '-'}</span></td>
+                                              <td className="px-3 py-2.5 text-right font-bold text-rose-600">{h.monthlyFee ? Number(h.monthlyFee).toLocaleString('tr-TR') + ' TL' : '-'}</td>
+                                              <td className="px-3 py-2.5 text-center">{h.exitBy === 'sembol' ? <span className="bg-teal-50 text-teal-600 px-2 py-0.5 rounded-md text-[10px] font-bold border border-teal-200">Sembol Nakliyat</span> : <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md text-[10px] font-bold border border-slate-200">Kendisi</span>}</td>
+                                              <td className="px-3 py-2.5">
+                                                  <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                                      {(h.exitPhoto || h.photo) && <button onClick={() => window.open(h.exitPhoto || h.photo, '_blank')} className="text-[10px] bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2 py-1 rounded-md font-bold transition-colors flex items-center gap-1"><Eye size={11}/> Çıkış</button>}
+                                                      {h.entryPhoto && <button onClick={() => window.open(h.entryPhoto, '_blank')} className="text-[10px] bg-teal-50 hover:bg-teal-100 text-teal-600 border border-teal-200 px-2 py-1 rounded-md font-bold transition-colors flex items-center gap-1"><Eye size={11}/> Giriş</button>}
+                                                      {h.roomListPhoto && <button onClick={() => window.open(h.roomListPhoto, '_blank')} className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 px-2 py-1 rounded-md font-bold transition-colors flex items-center gap-1"><Eye size={11}/> Oda</button>}
+                                                      {!(h.exitPhoto || h.photo) && !h.entryPhoto && !h.roomListPhoto && <span className="text-[10px] text-gray-400 italic">Görsel yok</span>}
+                                                  </div>
+                                              </td>
+                                              <td className="px-3 py-2.5 text-center"><span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md text-[10px] font-bold border border-slate-200">{h.status || 'Çıkış Yaptı'}</span></td>
+                                          </tr>
+                                      ))}
+                                  </tbody>
+                              </table>
+                          </div>
+                      </div>
+                      )}
 
                       {/* CARİ HESAP EKSTRESİ YUKARIYA TAŞINDI */}
                       <div className="mt-2 mb-2">
@@ -9829,12 +10190,17 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 </>
               ) : (
                 <div className="bg-slate-50 w-full animate-in fade-in duration-300 pb-16">
-                  <div className="flex justify-between items-start mb-6">
-                    <div>
-                       <button onClick={() => setSelectedRoomId(null)} className="text-[10px] font-bold text-gray-400 hover:text-[#1bc5bd] tracking-widest uppercase mb-1.5 flex items-center gap-1 transition-colors"><ArrowLeft size={12} /> {warehouses.find(w=>w.id===selectedWarehouseId)?.name} - {blocks.find(b=>b.id===selectedBlockId)?.name}</button>
-                       <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2">{selectedRoomDetail?.name} - {selectedRoomDetail?.m3}m³</h2>
+                  {/* Üst geri linki */}
+                  <button onClick={() => setSelectedRoomId(null)} className="text-[10px] font-bold text-gray-400 hover:text-[#1bc5bd] tracking-widest uppercase mb-3 flex items-center gap-1 transition-colors"><ArrowLeft size={12} /> {warehouses.find(w=>w.id===selectedWarehouseId)?.name} - {blocks.find(b=>b.id===selectedBlockId)?.name}</button>
+                  {/* GÜNCELLENDİ: Oda adı ve m³ ortada, çerçeveli kart; oda no şube rengiyle (teal) aynı; göz butonuyla giriş görseli */}
+                  <div className="mb-6 flex justify-center">
+                    <div className="relative inline-flex flex-col items-center gap-1 bg-white border border-[#1bc5bd]/30 rounded-2xl px-8 py-4 shadow-sm">
+                       {/* Göz butonu — oda listesindeki göz ile AYNI görseli/görüntüleyiciyi açar (roomListPhoto) */}
+                       <button onClick={() => setRoomPhotoViewer(selectedRoomDetail?.id)} title="Oda Fotoğrafı" className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors bg-teal-50 hover:bg-teal-100 text-[#1bc5bd] border border-teal-200"><Eye size={16}/></button>
+                       <div className="flex items-center gap-2 text-[#1bc5bd]"><Box size={20}/><span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Oda</span></div>
+                       <h2 className="text-3xl font-extrabold text-[#1bc5bd] tracking-tight text-center">{selectedRoomDetail?.name}</h2>
+                       <span className="text-sm font-bold text-[#1bc5bd] bg-teal-50 px-3 py-0.5 rounded-full border border-teal-100">{selectedRoomDetail?.m3} m³</span>
                     </div>
-                    {selectedRoomDetail?.customerName && (<button onClick={() => setIsRoomHistoryModalOpen(true)} className="bg-[#f64e60] hover:bg-red-600 text-white px-4 py-2 rounded text-sm font-semibold transition-colors shadow-sm">Depo Geçmişi</button>)}
                   </div>
 {(() => {
                       const customerRooms = rooms.filter(r => r.customerName === selectedRoomDetail?.customerName); // EKLENDİ: eksikti, beyaz ekran hatasına sebep oluyordu
@@ -9923,19 +10289,21 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                            <div className="mb-8 border border-gray-200 rounded-2xl p-6 shadow-sm bg-gradient-to-br from-white to-slate-50/50">
                               <div className="flex flex-wrap justify-between items-center gap-3 mb-6 pb-4 border-b border-gray-100">
                                  <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2"><Box size={16} className="text-[#1bc5bd]"/> Oda Bilgileri</h3>
-                                 {/* YENİ: Sağ üstte hızlı işlem butonları */}
-                                 <div className="flex flex-wrap gap-2">
+                                 {/* GÜNCELLENDİ: 3 hızlı işlem butonu yan yana eşit boyutlandırıldı (Giriş Düzenle / Oda İcra / Oda Geçmişi) */}
+                                 <div className="grid grid-cols-3 gap-2 w-full sm:w-auto">
                                     <button onClick={() => { 
                                        if(!checkActionPerm('action-giris-bilgi-duzenle')) return;
                                        setEditRentData({
                                          customerName: selectedRoomDetail.customerName || '', entryDate: selectedRoomDetail.entryDate || '', paymentDate: selectedRoomDetail.paymentDate || '', monthlyFee: selectedRoomDetail.monthlyFee || '', hasKdv: selectedRoomDetail.hasKdv !== undefined ? selectedRoomDetail.hasKdv : true, sealNo: selectedRoomDetail.sealNo || '', broughtBy: selectedRoomDetail.broughtBy || 'kendisi', teamList: selectedRoomDetail.teamList || ''
                                        }); setIsEditRentModalOpen(true); 
-                                    }} className="flex items-center gap-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm"><Edit size={14}/> Giriş Bilgilerini Düzenle</button>
+                                    }} className="flex items-center justify-center gap-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm text-center"><Edit size={14} className="shrink-0"/> Giriş Bilgilerini Düzenle</button>
                                     {selectedRoomDetail?.isUnderLegalAction ? (
-                                       <button onClick={() => { setLegalActionData({ reason: '', type: 'stop' }); setIsLegalActionModalOpen(true); }} className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm"><Shield size={14}/> İcrayı Kaldır</button>
+                                       <button onClick={() => { setLegalActionData({ reason: '', type: 'stop' }); setIsLegalActionModalOpen(true); }} className="flex items-center justify-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm text-center"><Shield size={14} className="shrink-0"/> İcrayı Kaldır</button>
                                     ) : (
-                                       <button onClick={() => { if(!checkActionPerm('action-oda-icra')) return; setLegalActionData({ reason: '', type: 'start' }); setIsLegalActionModalOpen(true); }} className="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-900 border border-red-200 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm"><Shield size={14}/> Oda İcra</button>
+                                       <button onClick={() => { if(!checkActionPerm('action-oda-icra')) return; setLegalActionData({ reason: '', type: 'start' }); setIsLegalActionModalOpen(true); }} className="flex items-center justify-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-900 border border-red-200 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm text-center"><Shield size={14} className="shrink-0"/> Oda İcra</button>
                                     )}
+                                    {/* YENİ: Oda Geçmişi (eski üstteki "Depo Geçmişi" butonu buraya taşındı) */}
+                                    <button onClick={() => setIsRoomHistoryModalOpen(true)} className="flex items-center justify-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:shadow-sm text-center"><Clock size={14} className="shrink-0"/> Oda Geçmişi</button>
                                  </div>
                               </div>
 
@@ -9976,7 +10344,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 </div>
                                 <div className="flex flex-col gap-1.5"><label className="text-[11px] text-gray-500 font-semibold">Giriş Tarihi</label><input type="text" readOnly value={selectedRoomDetail?.entryDate || '01.01.2026'} className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium" /></div>
                                 <div className="flex flex-col gap-1.5">
-                                   <label className="text-[11px] text-gray-500 font-semibold">Mühür Numarası {!selectedRoomDetail?.sealNo && <span className="text-gray-400 font-normal">(Önizleme)</span>}</label>
+                                   <label className="text-[11px] text-gray-500 font-semibold">Mühür Numarası</label>
                                    {selectedRoomDetail?.sealNo ? (
                                        <input type="text" readOnly value={selectedRoomDetail.sealNo} className="border border-gray-200 bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 font-medium" />
                                    ) : (
@@ -10055,7 +10423,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 </div>
                                 {/* YENİ: Oda İlk Giriş Görseli — HER ZAMAN görünür; ekle/değiştir/sil; altında tarih + ekleyen ismi */}
                                 <div className="flex flex-col gap-1.5 md:col-span-2">
-                                   <label className="text-[11px] text-gray-500 font-semibold">Oda İlk Giriş Görseli</label>
+                                   <label className="text-[11px] text-gray-500 font-semibold flex items-center justify-between">
+                                      <span>Oda İlk Giriş Görseli</span>
+                                      {/* YENİ: Düzenleme butonu — tıklanınca Değiştir/Sil butonları görünür/gizlenir (yalnızca görsel varken) */}
+                                      {selectedRoomDetail?.entryPhoto && (
+                                        <button onClick={() => setIsEditingEntryMedia(!isEditingEntryMedia)} className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${isEditingEntryMedia ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-gray-100 hover:bg-gray-200 text-gray-500 border border-gray-200'}`} title="Düzenle"><Edit size={11}/> {isEditingEntryMedia ? 'Bitir' : 'Düzenle'}</button>
+                                      )}
+                                   </label>
                                    {selectedRoomDetail?.entryPhoto ? (
                                        <div className="border border-gray-200 rounded-lg p-3 bg-white flex flex-col gap-2 w-max max-w-full">
                                           <a href={selectedRoomDetail.entryPhoto} target="_blank" rel="noreferrer" className="block">
@@ -10068,7 +10442,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                              <span className="flex items-center gap-1"><Calendar size={11} /> {selectedRoomDetail.entryPhotoDate ? new Date(selectedRoomDetail.entryPhotoDate).toLocaleDateString('tr-TR') : (selectedRoomDetail.entryDate || '-')}</span>
                                              <span className="flex items-center gap-1"><UserCog size={11} /> Ekleyen: {selectedRoomDetail.entryPhotoBy || selectedRoomDetail.rentedBy || 'Bilinmiyor'}</span>
                                           </div>
-                                          {/* Değiştir / Sil butonları */}
+                                          {/* Değiştir / Sil butonları — sadece düzenleme modunda görünür */}
+                                          {isEditingEntryMedia && (
                                           <div className="flex gap-2 mt-1">
                                              <label className="flex-1 cursor-pointer flex items-center justify-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 px-3 py-2 rounded-lg text-xs font-bold transition-colors">
                                                 <RefreshCcw size={13} /> Değiştir
@@ -10076,6 +10451,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                              </label>
                                              <button onClick={() => { if(window.confirm('Giriş görselini silmek istediğinize emin misiniz?')) handleUpdateEntryMedia(null); }} className="flex-1 flex items-center justify-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 px-3 py-2 rounded-lg text-xs font-bold transition-colors"><Trash2 size={13} /> Sil</button>
                                           </div>
+                                          )}
                                        </div>
                                    ) : (
                                        /* Görsel yoksa: sonradan yükleme alanı (her zaman açık) */
@@ -10148,7 +10524,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                     <div className="w-10 h-10 rounded-xl bg-indigo-500 text-white flex items-center justify-center shadow-sm shadow-indigo-500/30 group-hover:scale-110 transition-transform"><RefreshCcw size={18}/></div>
                                     <span className="text-center leading-tight">Oda Giriş-Çıkış İşlemi</span>
                                  </button>
-                                 <button onClick={() => { if(!checkActionPerm('action-depodan-cikis')) return; setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null }); setIsEndRentModalOpen(true); }} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-red-50 hover:bg-red-100 border border-red-100 text-red-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
+                                 {/* Buton herkese GÖRÜNÜR; izni olan çıkış yapar, izni olmayan tıklayınca uyarı alır (yöneticinize danışın) */}
+                                 <button onClick={() => { if(!checkActionPerm('action-depodan-cikis')) return; setEndRentData({ exitDate: new Date().toISOString().split('T')[0], photo: null, carrierName: '', carrierVkn: '', carrierAuthorized: '', exitBy: '' }); setIsEndRentModalOpen(true); }} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-red-50 hover:bg-red-100 border border-red-100 text-red-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
                                     <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center shadow-sm shadow-red-500/30 group-hover:scale-110 transition-transform"><LogOut size={18}/></div>
                                     <span className="text-center leading-tight">Odadan Çıkış Yap</span>
                                  </button>
@@ -10544,6 +10921,69 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  })()}
               </div>
             </div>
+          ) : activeMenu === 'islem-geri-yukle' ? (
+            <div className="max-w-5xl mx-auto pb-10 animate-in fade-in duration-300">
+              <div className="mb-6">
+                <h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Sistem Ayarları</h1>
+                <h2 className="text-2xl font-bold text-slate-800">İşlem Geri Yükle</h2>
+                <p className="text-sm text-gray-500 mt-1">Sistemden silinen müşteri, oda, şube, blok ve diğer kayıtları buradan geri getirebilirsiniz. Her kaydın kim tarafından ve ne zaman silindiği gösterilir.</p>
+              </div>
+              {(() => {
+                  // Zaman filtresine göre süz + en yeni silinen en üstte
+                  const filtered = deletedItems
+                      .filter(d => !d.restored)
+                      .filter(d => restoreRange === 'all' ? true : inDashboardRange(parseAnyDate(d.deletedAtISO), restoreRange))
+                      .sort((a, b) => new Date(b.deletedAtISO) - new Date(a.deletedAtISO));
+                  const typeColors = { 'Müşteri': 'bg-rose-50 text-rose-600 border-rose-200', 'Oda': 'bg-teal-50 text-teal-600 border-teal-200', 'Şube/Depo': 'bg-indigo-50 text-indigo-600 border-indigo-200', 'Blok': 'bg-amber-50 text-amber-600 border-amber-200' };
+                  return (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                      {/* Zaman filtresi */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 border-b border-gray-100 pb-4">
+                          <div className="flex items-center gap-2"><RefreshCcw size={18} className="text-[#1bc5bd]"/><span className="text-sm font-bold text-gray-700">Silinen Kayıtlar ({filtered.length})</span></div>
+                          <div className="flex flex-wrap gap-1.5">
+                              {[['today','Bugün'],['week','Bu Hafta'],['month','Bu Ay'],['year','Bu Sene'],['all','Tümü']].map(([val,label]) => (
+                                  <button key={val} onClick={() => setRestoreRange(val)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors shadow-sm ${restoreRange === val ? 'bg-[#1bc5bd] text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>{label}</button>
+                              ))}
+                          </div>
+                      </div>
+                      {filtered.length === 0 ? (
+                          <div className="text-center py-12 text-sm text-gray-400 font-medium">
+                              <Trash2 size={28} className="mx-auto mb-2 text-gray-300"/>
+                              Seçili dönemde geri yüklenebilecek silinmiş kayıt bulunmuyor.
+                              <p className="text-[11px] text-gray-400 mt-2 max-w-md mx-auto">Not: Yalnızca bu özellik eklendikten sonra silinen kayıtlar burada görünür. Daha önce silinmiş kayıtlar geri getirilemez.</p>
+                          </div>
+                      ) : (
+                          <div className="overflow-x-auto border border-gray-100 rounded-xl">
+                              <table className="w-full text-left text-sm min-w-[640px]">
+                                  <thead className="bg-gray-50 border-b border-gray-100 text-[10px] uppercase text-gray-500 font-bold">
+                                      <tr>
+                                          <th className="px-3 py-2.5">Tür</th>
+                                          <th className="px-3 py-2.5">Kayıt</th>
+                                          <th className="px-3 py-2.5">Silen Kişi</th>
+                                          <th className="px-3 py-2.5">Silinme Tarihi</th>
+                                          <th className="px-3 py-2.5 text-center">İşlem</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-50">
+                                      {filtered.map((d) => (
+                                          <tr key={d.id} className="hover:bg-gray-50/50 transition-colors">
+                                              <td className="px-3 py-2.5"><span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${typeColors[d.entityType] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>{d.entityType}</span></td>
+                                              <td className="px-3 py-2.5 font-bold text-gray-700">{d.label}</td>
+                                              <td className="px-3 py-2.5 text-gray-600"><span className="flex items-center gap-1"><UserCog size={12}/> {d.deletedBy}{d.deletedByRole ? ` (${d.deletedByRole})` : ''}</span></td>
+                                              <td className="px-3 py-2.5 text-gray-500 text-xs">{d.deletedAtISO ? new Date(d.deletedAtISO).toLocaleString('tr-TR') : '-'}</td>
+                                              <td className="px-3 py-2.5 text-center">
+                                                  <button onClick={() => { if (window.confirm(`"${d.label}" kaydını geri yüklemek istediğinize emin misiniz?`)) handleRestoreDeletedItem(d); }} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors flex items-center gap-1.5 mx-auto"><RefreshCcw size={12}/> Geri Yükle</button>
+                                              </td>
+                                          </tr>
+                                      ))}
+                                  </tbody>
+                              </table>
+                          </div>
+                      )}
+                    </div>
+                  );
+              })()}
+            </div>
           ) : activeMenu === 'sistem-yedekleme' ? (
             <div className="max-w-5xl mx-auto pb-10 animate-in fade-in duration-300">
               <div className="mb-6">
@@ -10590,7 +11030,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                      <div className="flex flex-wrap bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm w-full sm:w-auto">
                          <button onClick={() => setFinansReportFilter('today')} className={`px-4 py-2.5 text-sm font-bold transition-colors flex-1 sm:flex-none ${finansReportFilter === 'today' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Günlük</button>
                          <button onClick={() => setFinansReportFilter('week')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'week' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Haftalık</button>
-                         <button onClick={() => setFinansReportFilter('month')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'month' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Aylık</button>
+                         <button onClick={() => setFinansReportFilter('month')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'month' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Ay</button>
                          <button onClick={() => setFinansReportFilter('year')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'year' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Bu Sene</button>
                          <button onClick={() => setFinansReportFilter('lastYear')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'lastYear' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Geçen Yıl</button>
                          <button onClick={() => setFinansReportFilter('all')} className={`px-4 py-2.5 text-sm font-bold border-l border-gray-200 transition-colors flex-1 sm:flex-none ${finansReportFilter === 'all' ? 'bg-indigo-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Tümü</button>
@@ -10988,7 +11428,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                </tr>
                                            </thead>
                                            <tbody className="divide-y divide-gray-50">
-                                               {giftSummary.detailRows.map((row, i) => (
+                                               {(giftShowAll ? giftSummary.detailRows : giftSummary.detailRows.slice(0, 10)).map((row, i) => (
                                                    <tr key={`${row.roomId}-${i}`} className="hover:bg-pink-50/30 transition-colors">
                                                        <td className="px-4 py-3 font-bold text-gray-700">{row.roomName}</td>
                                                        <td className="px-4 py-3 text-gray-600">{row.customerName}</td>
@@ -10998,6 +11438,14 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                ))}
                                            </tbody>
                                        </table>
+                                       {/* YENİ: 10'dan fazla kayıt varsa "Tümünü Göster / Daha Az" butonu en altta */}
+                                       {giftSummary.detailRows.length > 10 && (
+                                           <div className="border-t border-gray-100 p-3 text-center bg-gray-50/50">
+                                               <button onClick={() => setGiftShowAll(!giftShowAll)} className="text-xs font-bold text-pink-600 hover:text-pink-700 transition-colors">
+                                                   {giftShowAll ? '▲ Daha Az Göster' : `▼ Tümünü Göster (${giftSummary.detailRows.length} kayıt)`}
+                                               </button>
+                                           </div>
+                                       )}
                                    </div>
                                ) : (
                                    <div className="text-center py-8 text-sm text-gray-400 font-medium bg-gray-50/50 rounded-xl border border-gray-100">Seçili dönemde hediye ay kaydı bulunmuyor.</div>
@@ -12233,6 +12681,17 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
              <div className="p-5 sm:p-8 overflow-y-auto flex-1">
                <div className="flex flex-col gap-4 mb-6">
                  <div className="flex flex-col gap-2"><label className="text-xs font-semibold text-gray-600">Çıkış Tarihi</label><input type="date" value={endRentData.exitDate} onChange={(e) => setEndRentData({...endRentData, exitDate: e.target.value})} className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-cyan-500" /></div>
+
+                 {/* YENİ: Eşyanın çıkışını kim yaptı? (ZORUNLU) — Kendisi / Sembol Nakliyat */}
+                 <div className="flex flex-col gap-2">
+                   <label className="text-xs font-semibold text-gray-600">Eşyanın Çıkışını Kim Yaptı? <span className="text-red-500">*</span></label>
+                   <div className="grid grid-cols-2 gap-2">
+                     <button type="button" onClick={() => setEndRentData({...endRentData, exitBy: 'kendisi'})} className={`px-3 py-2.5 rounded-lg text-sm font-bold border-2 transition-colors ${endRentData.exitBy === 'kendisi' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>Kendisi</button>
+                     <button type="button" onClick={() => setEndRentData({...endRentData, exitBy: 'sembol'})} className={`px-3 py-2.5 rounded-lg text-sm font-bold border-2 transition-colors ${endRentData.exitBy === 'sembol' ? 'bg-[#1bc5bd] text-white border-[#1bc5bd]' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>Sembol Nakliyat</button>
+                   </div>
+                   {!endRentData.exitBy && <span className="text-[11px] text-red-500 font-medium">Çıkışı onaylamak için bu seçim zorunludur.</span>}
+                 </div>
+
                  <div className="flex flex-col gap-2 mt-2 relative">
                    <label className="text-xs font-semibold text-gray-600">Boş Depo Görseli / Videosu (İsteğe Bağlı)</label>
                    <button type="button" onClick={() => setEndRentUploadMenu(!endRentUploadMenu)} className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 transition-colors cursor-pointer group w-full">
@@ -12305,7 +12764,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                    </div>
                  </div>
                </div>
-               <div className="flex justify-end gap-3"><button onClick={() => setIsEndRentModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded text-sm font-medium">İptal</button><button onClick={handleEndRentConfirm} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded text-sm font-medium flex items-center gap-2"><LogOut size={16} /> Çıkışı Onayla</button></div>
+               <div className="flex justify-end gap-3"><button onClick={() => setIsEndRentModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded text-sm font-medium">İptal</button><button onClick={handleEndRentConfirm} disabled={!endRentData.exitBy} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded text-sm font-medium flex items-center gap-2"><LogOut size={16} /> Çıkışı Onayla</button></div>
              </div>
           </div>
         </div>
@@ -12320,7 +12779,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <button onClick={() => setIsApplyIncreaseModalOpen(false)} className="text-indigo-400 hover:text-indigo-600 bg-white p-1 rounded shadow-sm"><X size={20} /></button>
              </div>
              <div className="p-6 md:p-8">
-               <p className="text-sm text-gray-500 mb-6 text-center"><strong>{increaseModalData.customerName}</strong> müşterisinin <strong>{increaseModalData.targetYear}</strong> yılı zammını uygulamak üzeresiniz. Zam Baz Alınan Kira (Bir Önceki Ay): <strong>{Math.round(Number(increaseModalData.increaseBaseFee ?? increaseModalData.monthlyFee)).toLocaleString('tr-TR')} TL</strong></p>
+               <p className="text-sm text-gray-500 mb-6 text-center"><strong>{increaseModalData.customerName}</strong> müşterisinin <strong>{increaseModalData.targetYear}</strong> yılı zammını uygulamak üzeresiniz. Zam Baz Alınan Kira (Mevcut Kira): <strong>{Math.round(Number(increaseModalData.increaseBaseFee ?? increaseModalData.monthlyFee)).toLocaleString('tr-TR')} TL</strong></p>
                
                <div className="flex gap-4 mb-6 border-b border-gray-200 pb-4">
                    <label className="flex items-center gap-2 cursor-pointer">
@@ -12361,11 +12820,33 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
       {isChangeRoomModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg animate-in fade-in zoom-in overflow-visible">
-             <div className="p-5 border-b border-gray-100 flex justify-between items-center"><h3 className="text-xl font-medium text-gray-600 mx-auto w-full text-center">Oda Değiştir</h3><button onClick={() => setIsChangeRoomModalOpen(false)} className="absolute right-5 text-gray-400 hover:text-gray-600"><X size={20} /></button></div>
-             <div className="p-8">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg animate-in fade-in zoom-in overflow-visible max-h-[90vh] flex flex-col">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center shrink-0 relative"><h3 className="text-xl font-medium text-gray-600 mx-auto w-full text-center">Oda Değiştir</h3><button onClick={() => setIsChangeRoomModalOpen(false)} className="absolute right-5 text-gray-400 hover:text-gray-600"><X size={20} /></button></div>
+             <div className="p-8 overflow-y-auto">
                <p className="text-sm text-gray-500 mb-6 text-center">Müşteri ve tüm işlemleri yeni odaya taşınacaktır. Eski oda boşaltılıp geçmişine kayıt eklenecektir.</p>
-               
+
+               {/* YENİ: KİRA MODU SEÇİMİ — Aynı Kira Devam Etsin / Yeni Kira Belirle */}
+               <div className="mb-6 border border-gray-200 rounded-xl p-4 bg-gray-50/50">
+                   <label className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-3">Kira Durumu</label>
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                       <button type="button" onClick={() => setChangeRoomFeeMode('same')} className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${changeRoomFeeMode === 'same' ? 'border-orange-400 bg-orange-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                           <span className={`text-sm font-bold ${changeRoomFeeMode === 'same' ? 'text-orange-700' : 'text-gray-700'}`}>Aynı Kira Devam Etsin</span>
+                           <p className="text-[11px] text-gray-500 mt-0.5">Eski odanın kirası, giriş tarihi ve cari borçlanma şekli aynen yeni odaya taşınır.</p>
+                       </button>
+                       <button type="button" onClick={() => setChangeRoomFeeMode('new')} className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${changeRoomFeeMode === 'new' ? 'border-orange-400 bg-orange-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                           <span className={`text-sm font-bold ${changeRoomFeeMode === 'new' ? 'text-orange-700' : 'text-gray-700'}`}>Yeni Kira Belirle</span>
+                           <p className="text-[11px] text-gray-500 mt-0.5">Eski oda bugün çıkış yapmış gibi kapanır (kalan borç cariye işlenir); yeni odada bugünden itibaren YENİ kira ile sıfırdan kiralama ve yeni sözleşme başlar.</p>
+                       </button>
+                   </div>
+                   {changeRoomFeeMode === 'new' && (
+                       <div className="flex flex-col gap-1.5 mt-2 animate-in fade-in">
+                           <label className="text-xs font-semibold text-gray-600">Yeni Kira Bedeli (KDV Dahil, TL)</label>
+                           <input type="number" value={changeRoomNewFee} onChange={(e) => setChangeRoomNewFee(e.target.value)} placeholder="Örn: 6000" className="border-2 border-orange-300 rounded-lg px-3 py-2.5 text-sm font-bold text-slate-700 focus:outline-none focus:border-orange-500" />
+                           <p className="text-[10px] text-gray-400">Girilen tutar KDV dahil kabul edilir; aylık borçlanma bu tutar üzerinden başlar.</p>
+                       </div>
+                   )}
+               </div>
+
                <div className="flex flex-col gap-4 mb-6">
                  <div className="flex flex-col gap-1.5">
                    <label className="text-xs font-semibold text-gray-600">Depo (Şube) Seç</label>
@@ -12394,7 +12875,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                <div className="flex justify-end gap-3">
                  <button onClick={() => setIsChangeRoomModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded text-sm font-medium">İptal</button>
-                 <button onClick={handleChangeRoomConfirm} disabled={!changeRoomTargetRoomId} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-6 py-2 rounded text-sm font-medium flex items-center gap-2"><RefreshCcw size={16}/> Odayı Değiştir</button>
+                 <button onClick={handleChangeRoomConfirm} disabled={!changeRoomTargetRoomId || (changeRoomFeeMode === 'new' && !changeRoomNewFee)} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-6 py-2 rounded text-sm font-medium flex items-center gap-2"><RefreshCcw size={16}/> Odayı Değiştir</button>
                </div>
              </div>
           </div>
@@ -12660,7 +13141,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                <div className="overflow-x-auto border border-gray-200 rounded-lg max-h-[60vh] overflow-y-auto">
                  <table className="w-full text-left text-sm text-gray-600 min-w-[900px]">
                     <thead className="bg-gray-50 border-b border-gray-200 font-semibold text-gray-700 sticky top-0">
-                      <tr><th className="p-3 border-r border-gray-200">Müşteri Adı Soyadı</th><th className="p-3 border-r border-gray-200 text-center">Giriş Tarihi</th><th className="p-3 border-r border-gray-200 text-center">Çıkış Tarihi</th><th className="p-3 border-r border-gray-200 text-center">Kaldığı Süre</th><th className="p-3 border-r border-gray-200 text-center">Aylık Kira</th><th className="p-3 border-r border-gray-200 text-center">Çıkış Görseli</th><th className="p-3 border-r border-gray-200 text-center">Arşiv Belgeleri</th><th className="p-3 text-center">Durum</th></tr>
+                      <tr><th className="p-3 border-r border-gray-200">Müşteri Adı Soyadı</th><th className="p-3 border-r border-gray-200 text-center">Giriş Tarihi</th><th className="p-3 border-r border-gray-200 text-center">Çıkış Tarihi</th><th className="p-3 border-r border-gray-200 text-center">Kaldığı Süre</th><th className="p-3 border-r border-gray-200 text-center">Aylık Kira</th><th className="p-3 border-r border-gray-200 text-center">Nakliye İşlemi</th><th className="p-3 border-r border-gray-200 text-center">Çıkış Görseli</th><th className="p-3 border-r border-gray-200 text-center">Arşiv Belgeleri</th><th className="p-3 text-center">Durum</th></tr>
                     </thead>
                     <tbody>
                       {(selectedRoomDetail?.history || []).length > 0 ? selectedRoomDetail.history.map((h, i) => (
@@ -12670,6 +13151,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           <td className="p-3 border-r border-gray-200 text-center">{h.exitDate}</td>
                           <td className="p-3 border-r border-gray-200 text-center font-medium">{h.duration}</td>
                           <td className="p-3 border-r border-gray-200 text-center text-red-500 font-bold">{h.monthlyFee} TL</td>
+                          <td className="p-3 border-r border-gray-200 text-center">{h.exitBy === 'sembol' ? <span className="bg-teal-50 text-teal-600 px-2 py-1 rounded text-xs font-bold border border-teal-200">Sembol Nakliyat</span> : <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-bold border border-slate-200">Kendisi</span>}</td>
                           <td className="p-3 border-r border-gray-200 text-center">{h.photo ? <a href={h.photo} target="_blank" rel="noreferrer" className="text-cyan-600 hover:text-cyan-800 underline text-xs font-semibold">Görseli İncele</a> : <span className="text-gray-400 text-xs">Yok</span>}</td>
                           <td className="p-3 border-r border-gray-200 text-center text-xs">
                             <div className="flex flex-col gap-1 items-center">
@@ -12679,7 +13161,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           </td>
                           <td className="p-3 text-center"><span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs font-medium">{h.status}</span></td>
                         </tr>
-                      )) : (<tr><td colSpan="8" className="p-8 text-center text-gray-400">Bu oda için henüz geçmiş bir kayıt bulunmamaktadır.</td></tr>)}
+                      )) : (<tr><td colSpan="9" className="p-8 text-center text-gray-400">Bu oda için henüz geçmiş bir kayıt bulunmamaktadır.</td></tr>)}
                     </tbody>
                  </table>
                </div>
@@ -13825,12 +14307,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                   return { id: `${x.roomName}-${x.date}`, name: x.name, sub: `${x.roomName} • Giriş`, date: x.date, dateObj: x.dateObj, customerId: cust?.id || null, roomId: rm?.id || null };
               });
           } else if (dashboardDetail.type === 'overdueMovements') {
-              const entries = collectEntries(range).map(x => ({ ...x, hareket: 'Giriş' }));
-              const exits = collectExits(range).map(x => ({ ...x, hareket: 'Çıkış' }));
-              items = [...entries, ...exits].map(x => {
+              // GÜNCELLENDİ: Yalnızca "Giriş-Çıkış İşlemi" butonuyla eklenen hareketler (ilk kayıt sayılmaz)
+              items = collectEntryExitOps(range).map(x => {
                   const cust = customers.find(c => c.name === x.customerName);
                   const rm = rooms.find(r => r.name === x.roomName);
-                  return { id: `${x.roomName}-${x.date}-${x.hareket}`, name: x.name, sub: `${x.roomName} • ${x.hareket}`, date: x.date, dateObj: x.dateObj, customerId: cust?.id || null, roomId: rm?.id || null };
+                  return { id: `${x.roomName}-${x.date}-${x.id}`, name: x.name, sub: `${x.roomName} • Giriş-Çıkış İşlemi`, date: x.date, dateObj: x.dateObj, customerId: cust?.id || null, roomId: rm?.id || null };
               });
           }
           // En yeniden en eskiye sırala
