@@ -1176,7 +1176,7 @@ const handleAssignPendingPayment = async () => {
               // 1. Cariye tahsilat olarak ekle
               const existingPayments = customerToUpdate.payments || [];
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
-                  payments: [...existingPayments, { ...paymentToAssign, id: Date.now() }]
+                  payments: [...existingPayments, { ...paymentToAssign, id: Date.now(), createdAt: Date.now() }]
               }, { merge: true });
 
               // 2. Askıdan (pendingCollections) sil
@@ -2985,6 +2985,7 @@ const handleManualAddPayment = async () => {
 
         const newPayment = {
             id: Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString()),
+            createdAt: Date.now(), // YENİ: sisteme giriş anı (güvenilir sıralama için)
             amount: gross,
             date: newPaymentData.date,
             note: ccNote,
@@ -4092,6 +4093,7 @@ const handleCancelReservation = async () => {
                   const pId = Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString());
                   customersUpdates[matchedCustomer.id].push({
                       id: pId,
+                      createdAt: Date.now(), // YENİ: sisteme giriş anı (güvenilir sıralama için)
                       amount: amount,
                       date: validDate,
                       note: 'Toplu Banka Tahsilatı: ' + descStr
@@ -4752,6 +4754,7 @@ const handleGlobalPayment = async () => {
     const ccNote = isCC ? `Kredi Kartıyla Ödeme${globalPaymentData.note ? ' - ' + globalPaymentData.note : ''}` : globalPaymentData.note;
     const newPayment = {
         id: paymentId,
+        createdAt: Date.now(), // YENİ: sisteme giriş anı (güvenilir sıralama için)
         amount: gross,
         date: globalPaymentData.date,
         note: ccNote,
@@ -6144,7 +6147,7 @@ const newAppt = {
       if (tx.status === 'tahsilat' && tx.matchedCustomerId) {
           const cust = customers.find(c => c.id === tx.matchedCustomerId);
           if (cust) {
-              const payment = { id: Date.now(), amount: tx.amount, date: tx.rawDate ? new Date(tx.rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0], note: `Banka Otomatik: ${tx.description}`, hasEInvoice: false };
+              const payment = { id: Date.now(), createdAt: Date.now(), amount: tx.amount, date: tx.rawDate ? new Date(tx.rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0], note: `Banka Otomatik: ${tx.description}`, hasEInvoice: false };
               const updatedPayments = [...(cust.payments || []), payment];
               if (db && firebaseUser) {
                   try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updatedPayments }, { merge: true }); } catch(e){ console.error(e); }
@@ -9120,6 +9123,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           c.payments.forEach(p => {
                               allCollections.push({
                                   id: p.id,
+                                  createdAt: p.createdAt, // YENİ: sisteme giriş anı (varsa)
                                   customerId: c.id,
                                   customerName: c.name,
                                   customerNo: c.customerNo,
@@ -9133,8 +9137,22 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       }
                   });
                   
-// İşlem sırasına (sisteme eklenme zamanı ID'sine) göre yeniden eskiye sırala
-                  allCollections.sort((a, b) => b.id - a.id);
+                  // İşlem sırasına (sisteme eklenme zamanı) göre yeniden eskiye sırala.
+                  // Öncelik: createdAt (yeni kayıtlarda kesin giriş anı). Yoksa (eski kayıtlar) id'nin
+                  // ilk 13 hanesi = Date.now() ms zaman damgasına düşülür; ham id "Date.now()+rastgele"
+                  // birleştirmesinden dolayı tek başına güvenilir sıra vermiyordu.
+                  const _collTs = (x) => {
+                      if (x.createdAt != null && !isNaN(Number(x.createdAt))) return Number(x.createdAt);
+                      const s = String(x.id || '');
+                      return Number(s.slice(0, 13)) || 0;
+                  };
+                  allCollections.sort((a, b) => {
+                      const t = _collTs(b) - _collTs(a);
+                      if (t !== 0) return t;                          // en son giriş en üstte
+                      const d = new Date(b.date) - new Date(a.date);  // eşitse tahsilat tarihine göre
+                      if (d !== 0) return d;
+                      return (Number(String(b.id)) || 0) - (Number(String(a.id)) || 0); // son çare: ham id
+                  });
 
                   // Filtreleri uygula
                   const today = new Date();
