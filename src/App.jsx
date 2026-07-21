@@ -499,6 +499,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   }, []);
   
   const [systemUsers, setSystemUsers] = useState([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]);
+  const [userToDeleteId, setUserToDeleteId] = useState(null); // YENİ: panel kullanıcısı silme onay penceresi
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserData, setNewUserData] = useState({ username: '', password: '', name: '', role: 'Personel', email: '', phone: '' });
 
@@ -1176,7 +1177,7 @@ const handleAssignPendingPayment = async () => {
               // 1. Cariye tahsilat olarak ekle
               const existingPayments = customerToUpdate.payments || [];
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
-                  payments: [...existingPayments, { ...paymentToAssign, id: Date.now() }]
+                  payments: [...existingPayments, { ...paymentToAssign, id: Date.now(), createdAt: Date.now() }]
               }, { merge: true });
 
               // 2. Askıdan (pendingCollections) sil
@@ -2860,6 +2861,26 @@ const hasActivePaymentOnDate = (customer, dateStr, excludePaymentId = null) => {
     });
 };
 
+// YENİ: Aynı gün + AYNI TUTAR'lı aktif tahsilat var mı? (farklı tutar serbesttir;
+// yalnızca birebir kopya girişinde onay akışı tetiklenir.) Onay bekleyen (soluk) kayıtlar sayılmaz.
+const hasActiveSameAmountOnDate = (customer, dateStr, amount, excludePaymentId = null) => {
+    if (!customer || !dateStr) return false;
+    const overrides = customer.ledgerOverrides || [];
+    const amt = Number(amount);
+    return (customer.payments || []).some(p => {
+        if (excludePaymentId !== null && Number(p.id) === Number(excludePaymentId)) return false;
+        if (p.needsConfirm) return false; // henüz onaylanmamış (soluk) kayıtlar mükerrer saymaz
+        const ov = overrides.find(o => o.txId === `credit-global-${p.id}`);
+        if (ov && ov.isDeleted) return false;
+        let effDate = p.date;
+        if (ov && ov.date) {
+            const d = new Date(ov.date);
+            if (!isNaN(d.getTime())) effDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+        return effDate === dateStr && Number(p.amount) === amt;
+    });
+};
+
 const handleDeleteLedgerItem = async (txId) => {
       if(!checkActionPerm('action-cari-sil')) return;
       logActivity('Cari Hareket Silme', 'Bir cari hareket silindi.');
@@ -2970,10 +2991,12 @@ const handleManualAddPayment = async () => {
     const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
     if (customerToUpdate) {
         const existingPayments = customerToUpdate.payments || [];
-        // YENİ: Silinmiş veya tarihi değiştirilmiş tahsilatlar o günü "dolu" saymaz
-        if (hasActivePaymentOnDate(customerToUpdate, newPaymentData.date)) {
-            alert(`HATA: Bu müşteriye ait aynı günde (${newPaymentData.date}) zaten bir tahsilat kaydı bulunmaktadır. Aynı güne başka tahsilat girişi yapılamaz!`);
-            return;
+        // YENİ: Aynı gün FARKLI tutar serbest. Yalnızca aynı gün + aynı tutar tekrarında engellemek yerine,
+        // kayıt "onay bekliyor" (soluk) olarak eklenir ve caride Onayla / Sil / Askıya Gönder ile yönetilir.
+        const _dupAmount = Number(newPaymentData.amount);
+        const isSameDaySameAmount = hasActiveSameAmountOnDate(customerToUpdate, newPaymentData.date, _dupAmount);
+        if (isSameDaySameAmount) {
+            alert(`UYARI: Bu müşteride ${newPaymentData.date} tarihinde AYNI TUTARDA (${_dupAmount.toLocaleString('tr-TR')} ₺) bir tahsilat zaten var.\n\nKayıt caride SOLUK olarak eklendi ve bakiyeye şimdilik işlenmedi. Cari ekstreden "Onayla" (işle), "Sil" (kaldır) veya "Askıya Gönder" ile yönetebilirsiniz.`);
         }
 
         // YENİ EKLENEN: Kredi kartıyla tahsilat — cariye BRÜT (müşteriden alınan) tutar işlenir,
@@ -2985,6 +3008,8 @@ const handleManualAddPayment = async () => {
 
         const newPayment = {
             id: Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString()),
+            createdAt: Date.now(), // YENİ: sisteme giriş anı (güvenilir sıralama için)
+            needsConfirm: isSameDaySameAmount, // YENİ: aynı gün+aynı tutar ise onay bekler (soluk, bakiyeye işlenmez)
             amount: gross,
             date: newPaymentData.date,
             note: ccNote,
@@ -3008,8 +3033,76 @@ const handleManualAddPayment = async () => {
     setNewPaymentData({ amount: '', date: new Date().toISOString().split('T')[0], note: '', isCreditCard: false, netAmount: '' });
   };
 
+  // YENİ EKLENEN: Aynı gün + aynı tutarlı (onay bekleyen/soluk) tahsilat işlemleri
+  // Onayla → kaydı kesinleştir: soluk kalkar, bakiyeye normal tahsilat olarak işlenir.
+  const handleConfirmPendingPayment = async (payId) => {
+      const cust = customers.find(c => c.id === selectedCustomerId);
+      if (!cust) return;
+      const updated = (cust.payments || []).map(p => Number(p.id) === Number(payId) ? { ...p, needsConfirm: false } : p);
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updated }, { merge: true }); } catch (e) { console.error("Tahsilat Onaylama Hatası:", e); }
+      } else {
+          setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, payments: updated } : c));
+      }
+      logActivity('Tahsilat Onayı', `${cust.name} - aynı gün/aynı tutar tahsilat onaylandı ve cariye işlendi.`);
+  };
+
+  // Sil → kaydı tamamen kaldır (hiç işlenmemiş gibi).
+  const handleDeletePendingPayment = async (payId) => {
+      const cust = customers.find(c => c.id === selectedCustomerId);
+      if (!cust) return;
+      const updated = (cust.payments || []).filter(p => Number(p.id) !== Number(payId));
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updated }, { merge: true }); } catch (e) { console.error("Tahsilat Silme Hatası:", e); }
+      } else {
+          setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, payments: updated } : c));
+      }
+      logActivity('Tahsilat Silme', `${cust.name} - onay bekleyen tahsilat kaydı kaldırıldı.`);
+  };
+
+  // Askıya Gönder → cariden çıkar, askıdaki (pendingCollections) işlemlere ekle.
+  const handleSendPendingPaymentToAskida = async (payId) => {
+      const cust = customers.find(c => c.id === selectedCustomerId);
+      if (!cust) return;
+      const pay = (cust.payments || []).find(p => Number(p.id) === Number(payId));
+      if (!pay) return;
+      const pendingRecord = { id: Date.now(), amount: Number(pay.amount), date: pay.date, note: pay.note || 'Cariden askıya alındı', customerName: cust.name };
+      const updatedPayments = (cust.payments || []).filter(p => Number(p.id) !== Number(payId));
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pendingRecord.id)), pendingRecord);
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updatedPayments }, { merge: true });
+          } catch (e) { console.error("Tahsilat Askıya Gönderme Hatası:", e); }
+      } else {
+          setPendingCollections(prev => [...prev, pendingRecord]);
+          setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, payments: updatedPayments } : c));
+      }
+      logActivity('Tahsilat Askıya Alma', `${cust.name} - tahsilat askıdaki işlemlere gönderildi.`);
+  };
+
 const handleSaveCollectionNote = async () => {
       if (!collectionNoteData.customerId || !collectionNoteData.text) return;
+
+      // YENİ: Düzenleme modu — mevcut bir notu güncelle (yeni kayıt ekleme). isEdit ile ayrılır.
+      if (collectionNoteData.isEdit) {
+          const cust = customers.find(c => c.id === collectionNoteData.customerId);
+          if (cust) {
+              const updatedNotes = (cust.collectionNotes || []).map((n, i) =>
+                  ((collectionNoteData.editId != null && Number(n.id) === Number(collectionNoteData.editId)) || (collectionNoteData.editId == null && i === collectionNoteData.editIndex))
+                      ? { ...n, text: collectionNoteData.text, promiseDate: collectionNoteData.promiseDate, editedAt: new Date().toLocaleDateString('tr-TR') }
+                      : n
+              );
+              if (db && firebaseUser) {
+                  try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { collectionNotes: updatedNotes }, { merge: true }); } catch(e) { console.error("Firebase Not Güncelleme Hatası:", e); }
+              } else {
+                  setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, collectionNotes: updatedNotes } : c));
+              }
+              logActivity('Tahsilat Notu Düzenleme', `${cust.name} - bir tahsilat/ödeme sözü notu güncellendi.`);
+          }
+          setIsCollectionNoteModalOpen(false);
+          setCollectionNoteData({ customerId: null, text: '', promiseDate: '' });
+          return;
+      }
       
       const newNote = {
           id: Date.now(),
@@ -4092,6 +4185,7 @@ const handleCancelReservation = async () => {
                   const pId = Number(Date.now().toString() + Math.floor(Math.random() * 1000).toString());
                   customersUpdates[matchedCustomer.id].push({
                       id: pId,
+                      createdAt: Date.now(), // YENİ: sisteme giriş anı (güvenilir sıralama için)
                       amount: amount,
                       date: validDate,
                       note: 'Toplu Banka Tahsilatı: ' + descStr
@@ -4752,6 +4846,7 @@ const handleGlobalPayment = async () => {
     const ccNote = isCC ? `Kredi Kartıyla Ödeme${globalPaymentData.note ? ' - ' + globalPaymentData.note : ''}` : globalPaymentData.note;
     const newPayment = {
         id: paymentId,
+        createdAt: Date.now(), // YENİ: sisteme giriş anı (güvenilir sıralama için)
         amount: gross,
         date: globalPaymentData.date,
         note: ccNote,
@@ -6144,7 +6239,7 @@ const newAppt = {
       if (tx.status === 'tahsilat' && tx.matchedCustomerId) {
           const cust = customers.find(c => c.id === tx.matchedCustomerId);
           if (cust) {
-              const payment = { id: Date.now(), amount: tx.amount, date: tx.rawDate ? new Date(tx.rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0], note: `Banka Otomatik: ${tx.description}`, hasEInvoice: false };
+              const payment = { id: Date.now(), createdAt: Date.now(), amount: tx.amount, date: tx.rawDate ? new Date(tx.rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0], note: `Banka Otomatik: ${tx.description}`, hasEInvoice: false };
               const updatedPayments = [...(cust.payments || []), payment];
               if (db && firebaseUser) {
                   try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updatedPayments }, { merge: true }); } catch(e){ console.error(e); }
@@ -6744,10 +6839,9 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
                   let actualPayDay = Math.min(targetDay, maxDayInMonth); 
                   let txDate = new Date(year, month, actualPayDay);
 
-                  // YENİ EKLENEN: Borç, ödeme gününde DEĞİL, bir gün SONRASINDA cariye düşer.
-                  // (Aynı gün çıkış yapan müşteriden o ayın kirası alınmadığı için.)
-                  // Görünen tarih (txDate/dateStr) yine ödeme günüdür; sadece düşme koşulu ertelenir.
-                  let dueDate = new Date(year, month, actualPayDay + 1);
+                  // GÜNCELLENDİ: Borç, ödeme GÜNÜ GELİNCE (aynı gün) cariye düşer; 1 gün sonraya kaydırma kaldırıldı.
+                  // Görünen tarih (txDate/dateStr) da ödeme günüdür.
+                  let dueDate = new Date(year, month, actualPayDay);
                   dueDate.setHours(0, 0, 0, 0);
 
                   if (dueDate <= calculationEndDate) {
@@ -6847,7 +6941,11 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
                   debt: 0,
                   baseDebt: 0,
                   kdvDebt: 0,
-                  credit: Number(pay.amount)
+                  // YENİ: Onay bekleyen (aynı gün+aynı tutar) tahsilat bakiyeye İŞLENMEZ (credit=0); onaylanınca normal işlenir.
+                  credit: pay.needsConfirm ? 0 : Number(pay.amount),
+                  needsConfirm: !!pay.needsConfirm,                       // soluk gösterim + butonlar için
+                  pendingAmount: pay.needsConfirm ? Number(pay.amount) : 0, // soluk gösterilecek tutar
+                  payId: pay.id                                           // Onayla/Sil/Askıya işlemleri için
               });
           });
       }
@@ -7979,6 +8077,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                             <th className="px-4 py-3 font-semibold">İsim</th>
                             <th className="px-4 py-3 font-semibold">TC / VKN</th>
                             <th className="px-4 py-3 font-semibold">Telefon</th>
+                            <th className="px-4 py-3 font-semibold">Kayıt Tarihi</th>
                             <th className="px-4 py-3 font-semibold text-center w-32">İşlem</th>
                           </tr>
                         </thead>
@@ -7990,6 +8089,8 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <td className="px-4 py-3 font-bold text-gray-800 cursor-pointer hover:text-[#1bc5bd] hover:underline transition-all" onClick={() => setSelectedCustomerId(customer.id)} title="Müşteri Profilini Görüntüle">{customer.name}</td>
                               <td className="px-4 py-3">{customer.tc}</td>
                               <td className="px-4 py-3">{customer.phone}</td>
+                              {/* YENİ: Müşterinin kayıt tarihi */}
+                              <td className="px-4 py-3 whitespace-nowrap text-gray-500 font-medium">{customer.createdAt ? (typeof customer.createdAt === 'number' ? new Date(customer.createdAt).toLocaleDateString('tr-TR') : customer.createdAt) : '-'}</td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center gap-1.5 justify-center">
                                   <button onClick={() => setSelectedCustomerId(customer.id)} className="bg-slate-500 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1">Cari Hesap</button>
@@ -8425,13 +8526,23 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                   </thead>
                                   <tbody className="divide-y divide-gray-100">
                                      {filteredLedger.length > 0 ? filteredLedger.map((tx) => (
-                                        <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
+                                        <tr key={tx.id} className={`hover:bg-gray-50 transition-colors ${tx.needsConfirm ? 'opacity-70 bg-amber-50/50' : ''}`}>
                                            <td className="px-6 py-3 whitespace-nowrap font-medium">{tx.dateStr}</td>
-                                           <td className="px-6 py-3">{tx.desc}</td>
+                                           <td className="px-6 py-3">
+                                              {tx.desc}
+                                              {tx.needsConfirm && (
+                                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                                   <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Aynı gün / aynı tutar — onay bekliyor (bakiyeye işlenmedi)</span>
+                                                   <button onClick={() => handleConfirmPendingPayment(tx.payId)} className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white text-[10px] font-bold px-2 py-1 rounded-md transition-colors"><Check size={11}/> Onayla</button>
+                                                   <button onClick={() => handleDeletePendingPayment(tx.payId)} className="flex items-center gap-1 bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded-md transition-colors"><Trash2 size={11}/> Sil</button>
+                                                   <button onClick={() => handleSendPendingPaymentToAskida(tx.payId)} className="flex items-center gap-1 bg-slate-500 hover:bg-slate-600 text-white text-[10px] font-bold px-2 py-1 rounded-md transition-colors"><Clock size={11}/> Askıya Gönder</button>
+                                                </div>
+                                              )}
+                                           </td>
 <td className="px-6 py-3 text-right font-semibold text-red-500">{tx.debt > 0 ? `${(tx.baseDebt || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL` : '-'}</td>
                                            <td className="px-6 py-3 text-right font-semibold text-orange-500">{tx.debt > 0 ? `${(tx.kdvDebt || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL` : '-'}</td>
                                            <td className="px-6 py-3 text-right font-black text-indigo-600">{tx.debt > 0 ? `${tx.debt.toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL` : '-'}</td>
-                                           <td className="px-6 py-3 text-right font-semibold text-green-600">{tx.credit > 0 ? `${tx.credit.toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL` : '-'}</td>                                           <td className="px-6 py-3 text-right">
+                                           <td className="px-6 py-3 text-right font-semibold text-green-600">{tx.needsConfirm ? <span className="text-amber-500 italic">{(tx.pendingAmount || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL <span className="text-[10px] not-italic">(onay bekliyor)</span></span> : (tx.credit > 0 ? `${tx.credit.toLocaleString('tr-TR', {maximumFractionDigits: 0})} TL` : '-')}</td>                                           <td className="px-6 py-3 text-right">
                                                <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-black border shadow-sm ${tx.balance > 0 ? 'bg-red-50 text-red-700 border-red-200' : tx.balance < 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                                                    {tx.balance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL
                                                </span>
@@ -9050,7 +9161,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                                   <div key={note.id || idx} className="bg-yellow-50 border border-yellow-200 rounded-lg p-2.5 relative shadow-inner shrink-0">
                                                                       <div className="flex justify-between items-start mb-1">
                                                                           <span className="text-[9px] font-bold text-yellow-700">Not {idx + 1}</span>
-                                                                          <span className="text-[9px] text-gray-400">{note.date}</span>
+                                                                          <div className="flex items-center gap-1.5">
+                                                                             <span className="text-[9px] text-gray-400">{note.date}{note.editedAt ? ' • düzenlendi' : ''}</span>
+                                                                             {/* YENİ: Notu düzenle — yanlış girilen not sonradan değiştirilebilir */}
+                                                                             <button onClick={() => { setCollectionNoteData({ customerId: customer.id, isEdit: true, editId: note.id ?? null, editIndex: idx, text: note.text, promiseDate: note.promiseDate || '' }); setIsCollectionNoteModalOpen(true); }} className="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded p-0.5 border border-blue-200 transition-colors" title="Notu Düzenle"><Edit size={10}/></button>
+                                                                          </div>
                                                                       </div>
                                                                       <p className="text-xs text-gray-700 italic">"{note.text}"</p>
                                                                       {note.promiseDate && (
@@ -9120,6 +9235,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           c.payments.forEach(p => {
                               allCollections.push({
                                   id: p.id,
+                                  createdAt: p.createdAt, // YENİ: sisteme giriş anı (varsa)
                                   customerId: c.id,
                                   customerName: c.name,
                                   customerNo: c.customerNo,
@@ -9133,8 +9249,22 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       }
                   });
                   
-// İşlem sırasına (sisteme eklenme zamanı ID'sine) göre yeniden eskiye sırala
-                  allCollections.sort((a, b) => b.id - a.id);
+                  // İşlem sırasına (sisteme eklenme zamanı) göre yeniden eskiye sırala.
+                  // Öncelik: createdAt (yeni kayıtlarda kesin giriş anı). Yoksa (eski kayıtlar) id'nin
+                  // ilk 13 hanesi = Date.now() ms zaman damgasına düşülür; ham id "Date.now()+rastgele"
+                  // birleştirmesinden dolayı tek başına güvenilir sıra vermiyordu.
+                  const _collTs = (x) => {
+                      if (x.createdAt != null && !isNaN(Number(x.createdAt))) return Number(x.createdAt);
+                      const s = String(x.id || '');
+                      return Number(s.slice(0, 13)) || 0;
+                  };
+                  allCollections.sort((a, b) => {
+                      const t = _collTs(b) - _collTs(a);
+                      if (t !== 0) return t;                          // en son giriş en üstte
+                      const d = new Date(b.date) - new Date(a.date);  // eşitse tahsilat tarihine göre
+                      if (d !== 0) return d;
+                      return (Number(String(b.id)) || 0) - (Number(String(a.id)) || 0); // son çare: ham id
+                  });
 
                   // Filtreleri uygula
                   const today = new Date();
@@ -12285,7 +12415,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                               <button onClick={() => { setEditUserData({...user}); setIsEditUserModalOpen(true); }} className="bg-blue-50 hover:bg-blue-100 text-blue-600 p-2 rounded-lg transition-colors" title="Kullanıcıyı Düzenle">
                                                   <Edit size={16}/>
                                               </button>
-                                              <button onClick={() => handleDeleteSystemUser(user.id)} disabled={user.id === currentUserProfile.id || systemUsers.length === 1} className="bg-red-50 hover:bg-red-100 disabled:opacity-30 disabled:cursor-not-allowed text-red-600 p-2 rounded-lg transition-colors" title="Kullanıcıyı Sil">
+                                              <button onClick={() => setUserToDeleteId(user.id)} disabled={user.id === currentUserProfile.id || systemUsers.length === 1} className="bg-red-50 hover:bg-red-100 disabled:opacity-30 disabled:cursor-not-allowed text-red-600 p-2 rounded-lg transition-colors" title="Kullanıcıyı Sil">
                                                   <Trash2 size={16}/>
                                               </button>
                                           </div>
@@ -14279,7 +14409,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
              <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-yellow-50 rounded-t-2xl">
-                 <h3 className="text-lg font-bold text-yellow-700 flex items-center gap-2"><Edit size={18} /> Tahsilat Notu / Ödeme Sözü Ekle</h3>
+                 <h3 className="text-lg font-bold text-yellow-700 flex items-center gap-2"><Edit size={18} /> {collectionNoteData.isEdit ? 'Tahsilat Notu Düzenle' : 'Tahsilat Notu / Ödeme Sözü Ekle'}</h3>
                  <button onClick={() => setIsCollectionNoteModalOpen(false)}><X size={20} className="text-yellow-500 hover:text-yellow-700"/></button>
              </div>
              <div className="p-6">
@@ -14297,7 +14427,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-gray-100">
                   <button onClick={() => setIsCollectionNoteModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors">İptal</button>
                   <button onClick={handleSaveCollectionNote} disabled={!collectionNoteData.text} className="bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-yellow-500/30 transition-colors flex items-center gap-2">
-                      <Check strokeWidth={3} size={18} /> Notu Kaydet
+                      <Check strokeWidth={3} size={18} /> {collectionNoteData.isEdit ? 'Değişikliği Kaydet' : 'Notu Kaydet'}
                   </button>
                 </div>
              </div>
@@ -14846,6 +14976,27 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
       )}
 
       {/* YENİ KULLANICI EKLEME MODALI */}
+      {/* YENİ EKLENEN: PANEL KULLANICISI SİLME ONAY PENCERESİ
+          Sil butonuna basınca doğrudan silmek yerine bu "emin misiniz?" penceresi açılır. */}
+      {userToDeleteId !== null && (() => {
+        const _u = systemUsers.find(u => String(u.id) === String(userToDeleteId));
+        return (
+          <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in overflow-hidden">
+              <div className="p-6 sm:p-8 flex flex-col items-center text-center">
+                <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mb-4"><Trash2 size={30}/></div>
+                <h3 className="text-lg font-bold text-slate-800 mb-2">Kullanıcıyı Sil</h3>
+                <p className="text-sm text-gray-600 leading-relaxed mb-6"><b>{_u?.name || 'Bu kullanıcı'}</b> adlı panel kullanıcısını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.</p>
+                <div className="flex gap-2 w-full">
+                  <button onClick={() => setUserToDeleteId(null)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors">Vazgeç</button>
+                  <button onClick={() => { const id = userToDeleteId; setUserToDeleteId(null); handleDeleteSystemUser(id); }} className="flex-1 bg-red-500 hover:bg-red-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-1.5"><Trash2 size={16}/> Evet, Sil</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {isAddUserModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-[90] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-in fade-in zoom-in flex flex-col">
@@ -14870,6 +15021,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     <div className="flex flex-col gap-1.5 sm:col-span-2">
                         <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Sistem Yetkisi (Rol)</label>
                         <select value={newUserData.role} onChange={(e) => setNewUserData({...newUserData, role: e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400 font-bold text-slate-700 cursor-pointer bg-white">
+                            {/* YENİ: Yönetici rolü listede yoksa otomatik eklenir */}
+                            {!userRoles.some(r => r.name === 'Yönetici') && <option value="Yönetici">Yönetici</option>}
                             {userRoles.map(r => (
                                 <option key={r.id} value={r.name}>{r.name}</option>
                             ))}
@@ -14918,6 +15071,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     <div className="flex flex-col gap-1.5 sm:col-span-2">
                         <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Sistem Yetkisi (Rol)</label>
                         <select value={editUserData.role} onChange={(e) => setEditUserData({...editUserData, role: e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-400 font-bold text-slate-700 cursor-pointer bg-white">
+                            {/* YENİ: Yönetici rolü listede yoksa otomatik eklenir */}
+                            {!userRoles.some(r => r.name === 'Yönetici') && <option value="Yönetici">Yönetici</option>}
                             {userRoles.map(r => (
                                 <option key={r.id} value={r.name}>{r.name}</option>
                             ))}
