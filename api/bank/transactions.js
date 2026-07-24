@@ -5,21 +5,17 @@ import { XMLParser } from 'fast-xml-parser';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Sadece POST desteklenir' });
   }
 
   const { apiKey, apiSecret, customerNo } = req.body;
 
-  // Vercel Ortam Değişkenlerinden Fixie ve Kimlik Bilgilerini Al
   const proxyUrl = process.env.FIXIE_URL;
   const httpsAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
-  
-  // Arayüzden musteriNo gelmezse (ki gelmiyor), banka kullanıcı adını musteriNo olarak kullan
-  const mNo = customerNo || pId; 
+  const mNo = customerNo || pId;
 
-  // Banka formatına uygun tarih (yyyyMMdd) - Son 3 günü tarar
   const today = new Date();
   const pastDate = new Date(today);
   pastDate.setDate(pastDate.getDate() - 3);
@@ -31,7 +27,6 @@ export default async function handler(req, res) {
     return `${y}${m}${d}`;
   };
 
-  // Albaraka SOAP XML İsteği
   const xmlPayload = `
   <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://services.albaraka.com/">
      <soapenv:Header/>
@@ -63,29 +58,38 @@ export default async function handler(req, res) {
       }
     );
 
-    // XML Yanıtını JSON'a Çevirme
-    const parser = new XMLParser({ ignoreAttributes: true });
+    // BANKANIN PAKETİNİ (SOAPENV vb.) ZORLA AÇAN KISIM (removeNSPrefix: true)
+    const parser = new XMLParser({ ignoreAttributes: true, removeNSPrefix: true });
     const jsonObj = parser.parse(response.data);
 
-    const responseBody = jsonObj['soap:Envelope']?.['soap:Body']?.['getHesapHareketleriResponse']?.['return'] || [];
+    // Eğer Banka arka planda bir hata döndürüyorsa bunu Vercel loglarına yazdır
+    if (jsonObj?.Envelope?.Body?.Fault) {
+        console.error("BANKA REDDETTİ / HATA:", jsonObj.Envelope.Body.Fault);
+        return res.status(400).json({ success: false, error: 'Bankadan hata döndü.' });
+    }
+
+    const responseBody = jsonObj?.Envelope?.Body?.getHesapHareketleriResponse?.return || [];
+    
     let hareketler = Array.isArray(responseBody) ? responseBody : (responseBody.hareket ? (Array.isArray(responseBody.hareket) ? responseBody.hareket : [responseBody.hareket]) : []);
 
     const transactions = hareketler.map(t => {
-       const rawDate = String(t.Tarih);
-       const formattedDate = rawDate ? `${rawDate.substring(0,4)}-${rawDate.substring(4,6)}-${rawDate.substring(6,8)}` : new Date().toISOString().split('T')[0];
+       const rawDate = String(t.Tarih || '');
+       const formattedDate = rawDate.length >= 8 ? `${rawDate.substring(0,4)}-${rawDate.substring(4,6)}-${rawDate.substring(6,8)}` : new Date().toISOString().split('T')[0];
        
        return {
          id: t.fisNo || Date.now() + Math.random(),
          date: formattedDate,
          amount: parseFloat(t.islemTutari || 0),
          description: t.Aciklama || '',
-         isCredit: t.borcAlacak === 'A' 
+         isCredit: String(t.borcAlacak).toUpperCase().startsWith('A') 
        }
     }).filter(t => t.isCredit);
 
+    console.log(`Banka baglantisi basarili. ${transactions.length} adet tahsilat bulundu.`);
     res.status(200).json({ success: true, transactions });
+    
   } catch (error) {
-    console.error('Banka API Hatası:', error.message);
-    res.status(500).json({ success: false, error: 'Albaraka servisine bağlanırken hata oluştu.' });
+    console.error('Banka Bağlantı Hatası:', error?.response?.data || error.message);
+    res.status(500).json({ success: false, error: 'Sunucu hatası' });
   }
 }
