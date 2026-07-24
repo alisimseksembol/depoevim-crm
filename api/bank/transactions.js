@@ -72,16 +72,24 @@ export default async function handler(req, res) {
       }
     );
 
-    // GEÇİCİ DEBUG: boş transactions dönme sebebini teşhis etmek için ham yanıtı logla
-    console.log('Banka ham XML yanıtı:', response.data);
-
     // XML Yanıtını JSON'a Çevirme
     const parser = new XMLParser({ ignoreAttributes: true });
     const jsonObj = parser.parse(response.data);
 
-    console.log('Banka parse edilmiş yanıt:', JSON.stringify(jsonObj));
+    const hesapHareketleriResponse = jsonObj?.['soap:Envelope']?.['soap:Body']?.['getHesapHareketleriResponse'];
+    const bankaSonucu = hesapHareketleriResponse?.responseData?.result;
 
-    const responseBody = jsonObj['soap:Envelope']?.['soap:Body']?.['getHesapHareketleriResponse']?.['return'] || [];
+    // Banka kimlik dogrulama/istek hatasini (orn. "Sifre yanlis") sessizce bos listeye
+    // cevirmek yerine gercek hata olarak dondur.
+    if (bankaSonucu?.code && bankaSonucu.code !== 0) {
+      return res.status(400).json({
+        success: false,
+        error: bankaSonucu.message || 'Banka hata döndü',
+        kod: bankaSonucu.code
+      });
+    }
+
+    const responseBody = hesapHareketleriResponse?.responseData?.return || hesapHareketleriResponse?.return || [];
     let hareketler = Array.isArray(responseBody) ? responseBody : (responseBody.hareket ? (Array.isArray(responseBody.hareket) ? responseBody.hareket : [responseBody.hareket]) : []);
 
     const transactions = hareketler.map(t => {
