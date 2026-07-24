@@ -61,6 +61,9 @@ export default async function handler(req, res) {
           'SOAPAction': 'http://services.albaraka.com/getHesapHareketleri'
         },
         httpsAgent,
+        proxy: false, // axios'un HTTP(S)_PROXY env degiskeninden kendi proxy tunelini kurmasini engeller;
+                      // aksi halde axios/node_modules'daki farkli https-proxy-agent surumu yuzunden
+                      // yukaridaki httpsAgent yok sayilabiliyor (407 hatasinin sebebi buydu).
         timeout: 25000
       }
     );
