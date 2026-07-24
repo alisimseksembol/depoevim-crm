@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, limit, orderBy, deleteDoc } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
   Users, 
@@ -447,12 +447,9 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
       // YENİ EKLENEN: ROL İZİNLERİ FİREBASE DİNLEYİCİSİ (kaydedilen yetkiler geri yüklenir)
       const unsubUserRoles = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'userRoles'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setUserRoles(fetchedData); }, (error) => console.error("Rol Çekme Hatası:", error));
-      // YENİ EKLENEN: İŞLEM HAREKETLERİ (aktivite kaydı) DİNLEYİCİSİ
-      const unsubActivityLogs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'activityLogs'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); setActivityLogs(fetchedData); }, (error) => console.error("Log Çekme Hatası:", error));
-      // YENİ: SİLİNEN KAYITLAR (çöp kutusu) DİNLEYİCİSİ — İşlem Geri Yükle menüsü için
-      const unsubDeletedItems = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'deletedItems'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); setDeletedItems(fetchedData); }, (error) => console.error("Silinen Kayıt Çekme Hatası:", error));
-      // YENİ EKLENEN: KULLANICI HAREKETLERİ (oturum) DİNLEYİCİSİ
-      const unsubUserSessions = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'userSessions'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); setUserSessions(fetchedData); }, (error) => console.error("Oturum Çekme Hatası:", error));
+      // PERFORMANS/LİMİT: activityLogs, deletedItems ve userSessions artık SÜREKLİ DİNLENMEZ (onSnapshot kaldırıldı).
+      // Bu büyük log/geçmiş koleksiyonları, ilgili sayfaya girildiğinde veya "Yenile" ile TEK SEFERLİK
+      // getDocs + limit(100) ile çekilir (bkz. fetchActivityLogs / fetchDeletedItems / fetchUserSessions).
       
 // 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
       const unsubSettings = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'settings'), (snapshot) => {
@@ -462,18 +459,56 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           });
       }, (error) => console.error("Ayar Çekme Hatası:", error));
 
-      // YENİ EKLENEN: TOPLU YÜKLEME GEÇMİŞİ FİREBASE DİNLEYİCİSİ
-      const unsubBulkUploadHistory = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'bulkUploadHistory'), (snapshot) => {
-          const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.timestamp - a.timestamp);
-          setBulkUploadHistory(fetchedData);
-      }, (error) => console.error("Toplu Yükleme Hatası:", error));
+      // PERFORMANS/LİMİT: bulkUploadHistory da sürekli dinlenmez; Ödeme Girişi sayfasına girince
+      // tek seferlik getDocs + limit ile çekilir (bkz. fetchBulkUploadHistory).
 
       return () => { 
           unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); 
-          unsubSettings(); unsubBulkUploadHistory(); unsubUserRoles(); unsubActivityLogs(); unsubUserSessions(); unsubDeletedItems();
+          unsubSettings(); unsubUserRoles();
       };
   }, [firebaseUser]);
   // ============================================================================
+
+  // PERFORMANS: Büyük log/geçmiş koleksiyonlarını SÜREKLİ dinlemek yerine TEK SEFERLİK çeken fonksiyonlar.
+  // Her biri en fazla ~100 (toplu yükleme için 50) kayıt getirir; ilgili sayfaya girince veya "Yenile" ile çağrılır.
+  const fetchActivityLogs = async () => {
+      if (!db) return;
+      try {
+          const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'activityLogs'), orderBy('dateISO', 'desc'), limit(100)));
+          setActivityLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("İşlem kayıtları çekme hatası:", e); }
+  };
+  const fetchDeletedItems = async () => {
+      if (!db) return;
+      try {
+          const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'deletedItems'), orderBy('deletedAtISO', 'desc'), limit(100)));
+          setDeletedItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Silinen kayıtları çekme hatası:", e); }
+  };
+  const fetchUserSessions = async () => {
+      if (!db) return;
+      try {
+          const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'userSessions'), orderBy('loginISO', 'desc'), limit(100)));
+          setUserSessions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Oturumları çekme hatası:", e); }
+  };
+  const fetchBulkUploadHistory = async () => {
+      if (!db) return;
+      try {
+          const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'bulkUploadHistory'), orderBy('timestamp', 'desc'), limit(50)));
+          setBulkUploadHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Toplu yükleme geçmişi çekme hatası:", e); }
+  };
+
+  // İlgili sayfaya GİRİLDİĞİNDE ilgili koleksiyonu bir kez çeker (sürekli dinleme yerine).
+  useEffect(() => {
+      if (!db || !firebaseUser) return;
+      if (activeMenu === 'islem-hareketleri') fetchActivityLogs();
+      else if (activeMenu === 'islem-geri-yukle') fetchDeletedItems();
+      else if (activeMenu === 'kullanici-hareketleri') fetchUserSessions();
+      else if (activeMenu === 'odeme-girisi') fetchBulkUploadHistory();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMenu, firebaseUser]);
 
   // --- YENİ: AUTH VE KULLANICI STATE'LERİ ---
   const [loginData, setLoginData] = useState({ username: '', password: '' });
@@ -605,6 +640,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   };
 
   const handleDeleteRole = (roleId) => {
+      if (!window.confirm('Bu rolü silmek istediğinize emin misiniz?')) return;
       const role = userRoles.find(r => r.id === roleId);
       if(role?.isSuper) return alert("Süper yönetici rolü silinemez.");
       
@@ -867,9 +903,10 @@ const [apptCustomerSearch, setApptCustomerSearch] = useState('');
   // --- ASKIDA KALAN TAHSİLATLAR STATE'LERİ ---
 
   // --- ASKIDA KALAN TAHSİLATLAR STATE'LERİ ---
-  const [pendingCollections, setPendingCollections] = useState([
-      { id: 8001, amount: 6600, date: new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0], note: 'Belirsiz Banka Tahsilatı: HAVALE GELEN - AÇIKLAMA YOK' }
-  ]); // NOT: Örnek/sahte askıda kalan tahsilat verisi
+  const [pendingCollections, setPendingCollections] = useState([]); // TEMİZLENDİ: Örnek askıda tahsilat (8001) kaldırıldı — askıda veriler yalnızca Firebase'den çekilir.
+  // YENİ: Manuel askıda ödeme ekleme modalı
+  const [isAddPendingModalOpen, setIsAddPendingModalOpen] = useState(false);
+  const [manualPendingData, setManualPendingData] = useState({ date: new Date().toISOString().split('T')[0], amount: '', note: '' });
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignData, setAssignData] = useState({ paymentId: null, customerId: '' });
   const [pendingSearchTerm, setPendingSearchTerm] = useState('');
@@ -2524,6 +2561,7 @@ const handleAddExtraDocument = async (e, customerId) => {
 
   const handleDeleteExtraDocument = async (customerId, docId) => {
       if(!checkActionPerm('action-arsiv-sil')) return;
+      if (!window.confirm('Bu belgeyi silmek istediğinize emin misiniz?')) return;
       const customerToUpdate = customers.find(c => c.id === customerId);
       if (!customerToUpdate) return;
       const updatedDocs = (customerToUpdate.extraDocuments || []).filter(d => d.id !== docId);
@@ -2539,6 +2577,7 @@ const handleAddExtraDocument = async (e, customerId) => {
   // YENİ EKLENEN: Cari profildeki Faturalar sekmesinden fatura silme (önizleme + canlı)
   const handleDeleteInvoiceFromArchive = async (customerId, invId) => {
       if(!checkActionPerm('action-arsiv-sil')) return;
+      if (!window.confirm('Bu faturayı arşivden silmek istediğinize emin misiniz?')) return;
       const customerToUpdate = customers.find(c => c.id === customerId);
       if (!customerToUpdate) return;
       const updatedInvoices = (customerToUpdate.invoices || []).filter(i => i.id !== invId);
@@ -2567,6 +2606,7 @@ const handleAddExtraDocument = async (e, customerId) => {
   // Oda fotoğrafını odadan kaldır (önizleme + canlı)
   const handleDeleteRoomPhoto = async (photo) => {
       if(!checkActionPerm('action-arsiv-sil')) return;
+      if (!window.confirm('Bu fotoğrafı silmek istediğinize emin misiniz?')) return;
       const room = rooms.find(r => r.id === photo.roomId);
       if (!room) return;
       let update = {};
@@ -2883,6 +2923,7 @@ const hasActiveSameAmountOnDate = (customer, dateStr, amount, excludePaymentId =
 
 const handleDeleteLedgerItem = async (txId) => {
       if(!checkActionPerm('action-cari-sil')) return;
+      if (!window.confirm('Bu cari hareketi/borcu silmek istediğinize emin misiniz? Bu işlem cari hesabı etkiler.')) return;
       logActivity('Cari Hareket Silme', 'Bir cari hareket silindi.');
     const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
     
@@ -3049,6 +3090,7 @@ const handleManualAddPayment = async () => {
 
   // Sil → kaydı tamamen kaldır (hiç işlenmemiş gibi).
   const handleDeletePendingPayment = async (payId) => {
+      if (!window.confirm('Bu tahsilat kaydını silmek istediğinize emin misiniz?')) return;
       const cust = customers.find(c => c.id === selectedCustomerId);
       if (!cust) return;
       const updated = (cust.payments || []).filter(p => Number(p.id) !== Number(payId));
@@ -3078,6 +3120,26 @@ const handleManualAddPayment = async () => {
           setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, payments: updatedPayments } : c));
       }
       logActivity('Tahsilat Askıya Alma', `${cust.name} - tahsilat askıdaki işlemlere gönderildi.`);
+  };
+
+  // YENİ EKLENEN: Askıda Kalan Tahsilatlar sayfasından MANUEL askıda ödeme ekler (pendingCollections'a yazar).
+  const handleAddManualPending = async () => {
+      const amt = Number(manualPendingData.amount);
+      if (!manualPendingData.date || !amt || amt <= 0) { alert('Lütfen geçerli bir tarih ve tutar girin.'); return; }
+      const record = {
+          id: Date.now(),
+          amount: amt,
+          date: manualPendingData.date,
+          note: (manualPendingData.note || '').trim() || 'Manuel Askıda Tahsilat'
+      };
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(record.id)), record); } catch (e) { console.error("Manuel Askıda Ekleme Hatası:", e); }
+      } else {
+          setPendingCollections(prev => [record, ...prev]);
+      }
+      logActivity('Manuel Askıda Tahsilat', `${amt.toLocaleString('tr-TR')} TL tutarında manuel askıda tahsilat eklendi.`);
+      setIsAddPendingModalOpen(false);
+      setManualPendingData({ date: new Date().toISOString().split('T')[0], amount: '', note: '' });
   };
 
 const handleSaveCollectionNote = async () => {
@@ -3177,6 +3239,7 @@ const handleAddInvoice = async () => {
   };
 
   const handleDeleteInvoice = async (invId) => {
+      if (!window.confirm('Bu faturayı silmek istediğinize emin misiniz?')) return;
       const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
       if (customerToUpdate && db && firebaseUser) {
           try {
@@ -3213,6 +3276,7 @@ const handleAddInvoice = async () => {
 
   const handleDeleteContract = async (contractId) => {
       if(!checkActionPerm('action-arsiv-sil')) return;
+      if (!window.confirm('Bu sözleşmeyi silmek istediğinize emin misiniz?')) return;
       const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
       if (!customerToUpdate) return;
       const updated = (customerToUpdate.contracts || []).filter(c => c.id !== contractId);
@@ -3469,9 +3533,7 @@ const handleAddInvoice = async () => {
   const [isDeleteRoomModalOpen, setIsDeleteRoomModalOpen] = useState(false);
   const [roomToDelete, setRoomToDelete] = useState(null);
 
-  const [rooms, setRooms] = useState([
-      { id: 2001, blockId: 201, name: 'K-501', customerName: null, m3: 9, isReserved: false, paidMonths: [], orderIndex: 0 }
-  ]); // TEMİZLENDİ: A BLOK (101) ve B BLOK (102) ile birlikte A-101, A-102, A-103, B-201, B-202 örnek odaları kaldırıldı.
+  const [rooms, setRooms] = useState([]); // TEMİZLENDİ: Örnek/boş oda (K-501) kaldırıldı — oda verileri yalnızca Firebase'den çekilir.
 
   const handleAddRoom = async () => {
       if(!checkActionPerm('action-yeni-oda')) return;
@@ -3927,6 +3989,7 @@ const handleEntryExitSave = async () => {
   };
 
   const handleRemoveFreeRoom = async () => {
+      if (!window.confirm('Ücretsiz oda durumunu kaldırmak istediğinize emin misiniz?')) return;
       if (db && firebaseUser) {
           try {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { isFreeRoom: false, freeRoomReason: null }, { merge: true });
@@ -4166,7 +4229,13 @@ const handleCancelReservation = async () => {
 
           // Son çare: Müşteri Numarası varsa onunla eşleştir
           if (!matchedCustomer) {
-              matchedCustomer = customers.find(c => c.customerNo && descUpper.includes(c.customerNo));
+              // YENİ / DÜZELTME: Müşteri no artık TAM SAYI (kelime sınırı) olarak eşleştirilir.
+              // Eskiden descUpper.includes(customerNo) idi; bu, SN/FastRef gibi uzun referans
+              // numaralarının İÇİNDE müşteri no'yu alt-dize olarak yakalayıp YANLIŞ müşteriye
+              // tahsilat işliyordu (örn. "SN:4688393996" içinde "88393" → yanlış eşleşme).
+              // Artık müşteri no yalnızca bağımsız bir sayı olarak geçiyorsa eşleşir.
+              const descNumberTokens = (descStr.match(/\d+/g) || []);
+              matchedCustomer = customers.find(c => c.customerNo && descNumberTokens.includes(String(c.customerNo)));
           }
 
           if (matchedCustomer) {
@@ -6134,7 +6203,12 @@ const newAppt = {
       if (!description) return null;
       const desc = description.toLocaleLowerCase('tr');
       // 1) Müşteri No ile eşleştir
-      let found = customers.find(c => c.customerNo && desc.includes(String(c.customerNo).toLowerCase()));
+      // DÜZELTME: Müşteri no artık TAM SAYI (kelime sınırı) olarak eşleştirilir. Eskiden
+      // desc.includes(customerNo) idi; bu, SN/FastRef gibi uzun referans numaralarının İÇİNDE
+      // müşteri no'yu alt-dize olarak yakalayıp YANLIŞ müşteriye tahsilat işliyordu
+      // (örn. "SN:4688393996" içinde "88393"). Artık yalnızca bağımsız bir sayı olarak geçiyorsa eşleşir.
+      const descNumberTokens = (String(description).match(/\d+/g) || []);
+      let found = customers.find(c => c.customerNo && descNumberTokens.includes(String(c.customerNo)));
       if (found) return found;
       // 2) İsim ile eşleştir
       found = customers.find(c => c.name && desc.includes(c.name.toLocaleLowerCase('tr')));
@@ -6272,6 +6346,7 @@ const newAppt = {
       } catch (e) { console.error('Oda Fotoğrafı Yükleme Hatası:', e); }
   };
   const handleRemoveRoomListPhoto = async (roomId) => {
+      if (!window.confirm('Oda liste fotoğrafını kaldırmak istediğinize emin misiniz?')) return;
       if (db && firebaseUser) {
           try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomId)), { roomListPhoto: null }, { merge: true }); } catch(e){ console.error(e); }
       } else {
@@ -6295,6 +6370,7 @@ const newAppt = {
       } catch (e) { console.error('Fotoğraf Yükleme Hatası:', e); }
   };
   const handleRemoveEntityPhoto = async (type, id) => {
+      if (!window.confirm('Liste fotoğrafını kaldırmak istediğinize emin misiniz?')) return;
       const coll = type === 'warehouse' ? 'warehouses' : 'blocks';
       if (db && firebaseUser) {
           try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', coll, String(id)), { listPhoto: null }, { merge: true }); } catch(e){ console.error(e); }
@@ -7436,7 +7512,9 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                 const matchNo = item.customer.customerNo?.includes(term);
                                 const matchPhone = item.customer.phone?.includes(term);
                                 const matchRoom = item.rooms.some(r => normalizeStr(r.name).includes(term));
-                                return matchName || matchNo || matchPhone || matchRoom;
+                                // YENİ: Vekalet eden kişi (vekil) ad / TC / telefon üzerinden de arama — vekil adı yazınca müşterinin carisi/odası bulunur
+                                const matchProxy = normalizeStr(item.customer.proxyName || '').includes(term) || (item.customer.proxyTc || '').includes(term) || (item.customer.proxyPhone || '').includes(term);
+                                return matchName || matchNo || matchPhone || matchRoom || matchProxy;
                             });
 
                             // YENİ: Boş oda araması — müşterisi olmayan ve rezerve olmayan odalar arasında ad eşleşmesi
@@ -7456,6 +7534,10 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                 <div className="text-[10px] text-gray-500 flex flex-wrap gap-2 mt-1">
                                                     <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 font-semibold text-gray-600">No: {item.customer.customerNo}</span>
                                                     <span className="flex items-center gap-0.5 font-medium"><Phone size={10}/> {item.customer.phone}</span>
+                                                    {/* YENİ: Vekil adı/TC/telefonu aranan terimle eşleşiyorsa vekil bilgisini göster */}
+                                                    {item.customer.proxyName && (normalizeStr(item.customer.proxyName).includes(normalizeStr(globalSearchTerm)) || (item.customer.proxyTc || '').includes(normalizeStr(globalSearchTerm)) || (item.customer.proxyPhone || '').includes(normalizeStr(globalSearchTerm))) && (
+                                                        <span className="flex items-center gap-0.5 font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100"><Shield size={10}/> Vekil: {item.customer.proxyName}</span>
+                                                    )}
                                                     {item.rooms.length > 0 && (
                                                         <span className="text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 truncate">
                                                             Oda: {item.rooms.map(r=>r.name).join(', ')}
@@ -8629,7 +8711,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                      <div><h5 className="font-bold text-gray-800 text-lg">{room.name}</h5><p className="text-xs text-gray-500 font-medium">Giriş: {room.entryDate} • {room.m3} m³</p></div>
                                   </div>
                                   <div className="bg-gray-50 rounded-xl p-4 mb-4 border border-gray-100 flex flex-col gap-2">
-                                     <div className="flex justify-between items-center"><span className="text-xs text-gray-500 font-semibold">Aylık Kira Bedeli:</span><span className="text-sm font-bold text-gray-700">{monthlyTotal} TL {hasKdv && <span className="text-[9px] text-gray-400 font-normal">(KDV Dahil)</span>}</span></div>
+                                     <div className="flex justify-between items-center"><span className="text-xs text-gray-500 font-semibold">Aylık Kira Bedeli:</span><span className="text-sm font-bold text-gray-700">{Math.round(monthlyTotal).toLocaleString('tr-TR')} TL {hasKdv && <span className="text-[9px] text-gray-400 font-normal">(KDV Dahil)</span>}</span></div>
                                   </div>
                                   <div className="flex items-center justify-end pt-2 mt-auto">
                                      <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(blocks.find(b => b.id === room.blockId)?.warehouseId); setSelectedBlockId(room.blockId); setSelectedRoomId(room.id); setSelectedCustomerId(null); }} className="bg-gray-800 hover:bg-gray-900 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5">Odaya Git &rarr;</button>
@@ -9933,6 +10015,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                 {hasBeenIncreased ? (
                                                     <div className="flex items-center justify-center gap-2">
                                                         <span className="bg-green-100 text-green-700 px-3 py-2 rounded-xl text-xs font-bold border border-green-200 flex items-center gap-1.5"><Check size={14}/> Zam Yapıldı</span>
+                                                        {/* YENİ: Zam tutarını düzenle — yanlış girilen zam sonradan düzeltilebilir (modal tekrar açılır, doğru tutar üzerine yazılır) */}
+                                                        <button onClick={() => { if(!checkActionPerm('action-zam-yap')) return; handleOpenApplyIncreaseModal(room, anniversaryYear); }} className="bg-amber-50 hover:bg-amber-100 text-amber-600 px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm border border-amber-200 flex items-center gap-1" title="Zam Tutarını Düzenle"><Edit size={14}/> Düzenle</button>
                                                         <button onClick={sendIncreaseNotification} className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm border border-blue-200 flex items-center gap-1" title="Zammı WhatsApp'tan Bildir"><MessageCircle size={14}/> Bildir</button>
                                                         <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(warehouseInfo?.id); setSelectedBlockId(room.blockId); setSelectedRoomId(room.id); setSelectedCustomerId(null); }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm">Odaya Git</button>
                                                     </div>
@@ -9961,6 +10045,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                    <h2 className="text-2xl font-bold text-slate-800">Askıda Kalan Tahsilatlar</h2>
                    <p className="text-sm text-gray-500 mt-1">Kime ait olduğu tespit edilemeyen, belirsiz gelen ödemelerin havuzu.</p>
                  </div>
+                 {/* YENİ: Manuel askıda ödeme ekle */}
+                 <button onClick={() => { setManualPendingData({ date: new Date().toISOString().split('T')[0], amount: '', note: '' }); setIsAddPendingModalOpen(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm shadow-orange-500/30 transition-colors flex items-center gap-2 shrink-0"><Plus size={16}/> Manuel Ödeme Ekle</button>
                </div>
 
                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex-1 flex flex-col">
@@ -11111,6 +11197,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <p className="text-sm text-gray-500 mt-1">Tüm kullanıcıların yaptığı işlemleri (kayıt, silme, değişiklik, taşıma, tahsilat vb.) buradan takip edin.</p>
               </div>
 
+              {/* YENİ: Yenile — kayıtları tek seferlik yeniden çeker (arka planda sürekli dinleme yok) */}
+              <div className="flex justify-end mb-3">
+                <button onClick={fetchActivityLogs} className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 px-3 py-2 rounded-lg text-xs font-bold transition-colors"><RefreshCcw size={14}/> Yenile</button>
+              </div>
+
               {/* Filtreler */}
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4 flex flex-col sm:flex-row gap-3">
                  <div className="flex-1">
@@ -11188,6 +11279,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 <h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Sistem Ayarları</h1>
                 <h2 className="text-2xl font-bold text-slate-800">İşlem Geri Yükle</h2>
                 <p className="text-sm text-gray-500 mt-1">Sistemden silinen müşteri, oda, şube, blok ve diğer kayıtları buradan geri getirebilirsiniz. Her kaydın kim tarafından ve ne zaman silindiği gösterilir.</p>
+              </div>
+              {/* YENİ: Yenile — silinen kayıtları tek seferlik yeniden çeker (arka planda sürekli dinleme yok) */}
+              <div className="flex justify-end mb-3">
+                <button onClick={fetchDeletedItems} className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 px-3 py-2 rounded-lg text-xs font-bold transition-colors"><RefreshCcw size={14}/> Yenile</button>
               </div>
               {(() => {
                   // Zaman filtresine göre süz + en yeni silinen en üstte
@@ -12435,6 +12530,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <p className="text-sm text-gray-500 mt-1">Kullanıcıların ne zaman giriş/çıkış yaptığını ve kimlerin çevrimiçi olduğunu buradan takip edin.</p>
                </div>
 
+               {/* YENİ: Yenile — oturum kayıtlarını tek seferlik yeniden çeker (arka planda sürekli dinleme yok) */}
+               <div className="flex justify-end mb-3">
+                 <button onClick={fetchUserSessions} className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 px-3 py-2 rounded-lg text-xs font-bold transition-colors"><RefreshCcw size={14}/> Yenile</button>
+               </div>
+
                {/* Şu an çevrimiçi olanlar özeti */}
                {(() => {
                   const onlineList = userSessions.filter(s => s.online);
@@ -12996,6 +13096,36 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 {exitDebtBlock.customerId && (
                   <button onClick={() => { const cid = exitDebtBlock.customerId; setExitDebtBlock(null); setActiveMenu('tum-musteriler'); setSelectedCustomerId(cid); }} className="flex-1 bg-[#1bc5bd] hover:bg-[#16a89f] text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors shadow-sm flex items-center justify-center gap-1.5"><Wallet size={16}/> Cari Hesaba Git</button>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* YENİ EKLENEN: MANUEL ASKIDA ÖDEME EKLE MODALI */}
+      {isAddPendingModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center relative">
+              <h3 className="text-lg font-bold text-orange-600 mx-auto w-full text-center flex items-center justify-center gap-2"><Plus size={18}/> Manuel Askıda Ödeme Ekle</h3>
+              <button onClick={() => setIsAddPendingModalOpen(false)} className="absolute right-5 text-gray-400 hover:text-red-500"><X size={20}/></button>
+            </div>
+            <div className="p-6 flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Tarih</label>
+                <input type="date" value={manualPendingData.date} onChange={(e) => setManualPendingData({...manualPendingData, date: e.target.value})} className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 font-medium text-slate-700" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Tutar (TL)</label>
+                <input type="number" value={manualPendingData.amount} onChange={(e) => setManualPendingData({...manualPendingData, amount: e.target.value})} placeholder="Örn: 5000" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 font-medium text-slate-700" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Açıklama / Dekont Notu</label>
+                <textarea value={manualPendingData.note} onChange={(e) => setManualPendingData({...manualPendingData, note: e.target.value})} rows={2} placeholder="Örn: Havale geldi, gönderen belirsiz" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 font-medium text-slate-700 resize-none" />
+              </div>
+              <div className="flex justify-end gap-3 mt-2">
+                <button onClick={() => setIsAddPendingModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl text-sm font-bold">İptal</button>
+                <button onClick={handleAddManualPending} disabled={!manualPendingData.amount || !manualPendingData.date} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 flex items-center gap-2"><Check size={16}/> Kaydet</button>
               </div>
             </div>
           </div>
