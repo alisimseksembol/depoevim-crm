@@ -72,9 +72,14 @@ export default async function handler(req, res) {
       }
     );
 
+    // GEÇİCİ DEBUG: boş transactions dönme sebebini teşhis etmek için ham yanıtı logla
+    console.log('Banka ham XML yanıtı:', response.data);
+
     // XML Yanıtını JSON'a Çevirme
     const parser = new XMLParser({ ignoreAttributes: true });
     const jsonObj = parser.parse(response.data);
+
+    console.log('Banka parse edilmiş yanıt:', JSON.stringify(jsonObj));
 
     const responseBody = jsonObj['soap:Envelope']?.['soap:Body']?.['getHesapHareketleriResponse']?.['return'] || [];
     let hareketler = Array.isArray(responseBody) ? responseBody : (responseBody.hareket ? (Array.isArray(responseBody.hareket) ? responseBody.hareket : [responseBody.hareket]) : []);
