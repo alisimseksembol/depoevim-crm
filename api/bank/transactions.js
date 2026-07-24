@@ -88,8 +88,13 @@ export default async function handler(req, res) {
     console.log(`Banka baglantisi basarili. ${transactions.length} adet tahsilat bulundu.`);
     res.status(200).json({ success: true, transactions });
     
-  } catch (error) {
-    console.error('Banka Bağlantı Hatası:', error?.response?.data || error.message);
-    res.status(500).json({ success: false, error: 'Sunucu hatası' });
+ } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: 'Banka Baglanti Hatasi',
+      hataMesaji: error.message,
+      hataKodu: error.code,
+      detay: error.response?.data || "Banka yanit vermedi veya baglanti koptu"
+    });
   }
 }
