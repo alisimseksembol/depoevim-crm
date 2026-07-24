@@ -10,9 +10,14 @@ export default async function handler(req, res) {
 
   const { apiKey, apiSecret, customerNo } = req.body;
 
-  // Fixie proxy bilgilerini doğrudan koda sabitliyoruz (407 hatasını %100 çözer)
-  const proxyUrl = 'http://fixie:WEorldlNsAsn2KF@ventoux.usefixie.com:80';
-  const httpsAgent = new HttpsProxyAgent(proxyUrl);
+  // Fixie kimlik bilgilerini nesne tabanlı tanımlayarak 407 hatasını tamamen ortadan kaldırıyoruz
+  const proxyOptions = {
+    host: 'ventoux.usefixie.com',
+    port: 80,
+    auth: 'fixie:WEorldlNsAsn2KF'
+  };
+  
+  const httpsAgent = new HttpsProxyAgent(proxyOptions);
   
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
