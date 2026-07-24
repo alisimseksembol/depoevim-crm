@@ -10,14 +10,11 @@ export default async function handler(req, res) {
 
   const { apiKey, apiSecret, customerNo } = req.body;
 
-  // Fixie kimlik bilgilerini nesne tabanlı tanımlayarak 407 hatasını tamamen ortadan kaldırıyoruz
-  const proxyOptions = {
-    host: 'ventoux.usefixie.com',
-    port: 80,
-    auth: 'fixie:WEorldlNsAsn2KF'
-  };
-  
-  const httpsAgent = new HttpsProxyAgent(proxyOptions);
+  // HttpsProxyAgent, kimlik bilgilerini proxy URL'sindeki username/password'den okur.
+  // { host, port, auth } seklinde nesne verilirse "auth" alani hic okunmaz ve
+  // Proxy-Authorization header'i eklenmeden istek gider (407 hatasinin sebebi buydu).
+  const proxyUrl = 'http://fixie:WEorldlNsAsn2KF@ventoux.usefixie.com:80';
+  const httpsAgent = new HttpsProxyAgent(proxyUrl);
   
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
