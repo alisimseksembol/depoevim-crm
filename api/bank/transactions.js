@@ -10,14 +10,14 @@ export default async function handler(req, res) {
 
   const { apiKey, apiSecret, customerNo } = req.body;
 
-  const proxyUrl = process.env.FIXIE_URL;
-  const httpsAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  // Fixie proxy bilgilerini doğrudan koda sabitliyoruz (407 hatasını %100 çözer)
+  const proxyUrl = 'http://fixie:WEorldlNsAsn2KF@ventoux.usefixie.com:80';
+  const httpsAgent = new HttpsProxyAgent(proxyUrl);
   
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
   const mNo = customerNo || pId;
 
-  // Dokümana uygun yyyyMMdd formatı (UTC bazlı net tarih)
   const today = new Date();
   const pastDate = new Date();
   pastDate.setDate(today.getDate() - 3);
@@ -32,7 +32,6 @@ export default async function handler(req, res) {
   const basTarihStr = formatDate(pastDate);
   const sonTarihStr = formatDate(today);
 
-  // Albaraka resmi dokümanına birebir uygun SOAP XML şablonu
   const xmlPayload = `
   <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://services.albaraka.com/">
      <soapenv:Header/>
@@ -94,7 +93,8 @@ export default async function handler(req, res) {
       success: false, 
       error: 'Banka Baglanti Hatasi',
       hataMesaji: error.message,
-      detay: error.response?.data || "Zaman aşımı veya bağlantı reddi"
+      hataKodu: error.code,
+      detay: error.response?.data || "Zaman aşımı veya proxy hatası"
     });
   }
 }
