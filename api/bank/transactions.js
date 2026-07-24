@@ -12,9 +12,16 @@ export default async function handler(req, res) {
 
   // Vercel Ortam Değişkenlerinden Fixie ve Kimlik Bilgilerini Al
   const proxyUrl = process.env.FIXIE_URL;
-  // Albaraka SOAP servisi TLS handshake'inde ara sertifikayı (intermediate CA) göndermiyor,
-  // bu yüzden zincir doğrulanamıyor. rejectUnauthorized:false sadece bu bağlantı için doğrulamayı kapatır.
-  const httpsAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false }) : undefined;
+  let httpsAgent;
+  if (proxyUrl) {
+    httpsAgent = new HttpsProxyAgent(proxyUrl);
+    // Albaraka SOAP servisi TLS handshake'inde ara sertifikayı (intermediate CA) göndermiyor,
+    // bu yüzden zincir doğrulanamıyor. connect(), proxy CONNECT sonrası hedef sunucuyla asıl
+    // TLS upgrade'ini burada kurduğu için rejectUnauthorized'ı doğrudan bu adıma enjekte ediyoruz
+    // (constructor'a verilen seçenek sadece proxy'ye bağlanırken kullanılıyor, hedefe ulaşmıyor).
+    const originalConnect = httpsAgent.connect.bind(httpsAgent);
+    httpsAgent.connect = (req, opts) => originalConnect(req, { ...opts, rejectUnauthorized: false });
+  }
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
   
