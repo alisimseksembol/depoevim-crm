@@ -15,6 +15,9 @@ export default async function handler(req, res) {
   const httpsAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
+  
+  // Arayüzden musteriNo gelmezse (ki gelmiyor), banka kullanıcı adını musteriNo olarak kullan
+  const mNo = customerNo || pId; 
 
   // Banka formatına uygun tarih (yyyyMMdd) - Son 3 günü tarar
   const today = new Date();
@@ -37,7 +40,7 @@ export default async function handler(req, res) {
            <pId>${pId}</pId>
            <pIdPass>${pIdPass}</pIdPass>
            <pParams>
-              <musteriNo>${customerNo}</musteriNo>
+              <musteriNo>${mNo}</musteriNo>
               <hesapNo></hesapNo>
               <basTarih>${formatDate(pastDate)}</basTarih>
               <sonTarih>${formatDate(today)}</sonTarih>
@@ -76,7 +79,7 @@ export default async function handler(req, res) {
          date: formattedDate,
          amount: parseFloat(t.islemTutari || 0),
          description: t.Aciklama || '',
-         isCredit: t.borcAlacak === 'A' // Sadece (A)lacak, yani hesaba giren paraları filtrele
+         isCredit: t.borcAlacak === 'A' 
        }
     }).filter(t => t.isCredit);
 
