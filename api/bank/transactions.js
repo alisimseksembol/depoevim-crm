@@ -5,28 +5,34 @@ import { XMLParser } from 'fast-xml-parser';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Sadece POST desteklenir' });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { apiKey, apiSecret, customerNo } = req.body;
 
   const proxyUrl = process.env.FIXIE_URL;
   const httpsAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
   const mNo = customerNo || pId;
 
+  // Dokümana uygun yyyyMMdd formatı (UTC bazlı net tarih)
   const today = new Date();
-  const pastDate = new Date(today);
-  pastDate.setDate(pastDate.getDate() - 3);
+  const pastDate = new Date();
+  pastDate.setDate(today.getDate() - 3);
 
-  const formatDate = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}${m}${d}`;
+  const formatDate = (d) => {
+    const year = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
   };
 
+  const basTarihStr = formatDate(pastDate);
+  const sonTarihStr = formatDate(today);
+
+  // Albaraka resmi dokümanına birebir uygun SOAP XML şablonu
   const xmlPayload = `
   <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://services.albaraka.com/">
      <soapenv:Header/>
@@ -37,8 +43,8 @@ export default async function handler(req, res) {
            <pParams>
               <musteriNo>${mNo}</musteriNo>
               <hesapNo></hesapNo>
-              <basTarih>${formatDate(pastDate)}</basTarih>
-              <sonTarih>${formatDate(today)}</sonTarih>
+              <basTarih>${basTarihStr}</basTarih>
+              <sonTarih>${sonTarihStr}</sonTarih>
            </pParams>
         </ser:getHesapHareketleri>
      </soapenv:Body>
@@ -54,22 +60,19 @@ export default async function handler(req, res) {
           'SOAPAction': 'http://services.albaraka.com/getHesapHareketleri'
         },
         httpsAgent,
-        timeout: 20000
+        timeout: 25000
       }
     );
 
-    // BANKANIN PAKETİNİ (SOAPENV vb.) ZORLA AÇAN KISIM (removeNSPrefix: true)
     const parser = new XMLParser({ ignoreAttributes: true, removeNSPrefix: true });
     const jsonObj = parser.parse(response.data);
 
-    // Eğer Banka arka planda bir hata döndürüyorsa bunu Vercel loglarına yazdır
     if (jsonObj?.Envelope?.Body?.Fault) {
-        console.error("BANKA REDDETTİ / HATA:", jsonObj.Envelope.Body.Fault);
-        return res.status(400).json({ success: false, error: 'Bankadan hata döndü.' });
+        console.error("Banka SOAP Hatası:", jsonObj.Envelope.Body.Fault);
+        return res.status(400).json({ success: false, error: 'Bankadan hata döndü.', detay: jsonObj.Envelope.Body.Fault });
     }
 
     const responseBody = jsonObj?.Envelope?.Body?.getHesapHareketleriResponse?.return || [];
-    
     let hareketler = Array.isArray(responseBody) ? responseBody : (responseBody.hareket ? (Array.isArray(responseBody.hareket) ? responseBody.hareket : [responseBody.hareket]) : []);
 
     const transactions = hareketler.map(t => {
@@ -81,20 +84,17 @@ export default async function handler(req, res) {
          date: formattedDate,
          amount: parseFloat(t.islemTutari || 0),
          description: t.Aciklama || '',
-         isCredit: String(t.borcAlacak).toUpperCase().startsWith('A') 
+         isCredit: String(t.borcAlacak || '').toUpperCase().startsWith('A') 
        }
     }).filter(t => t.isCredit);
 
-    console.log(`Banka baglantisi basarili. ${transactions.length} adet tahsilat bulundu.`);
     res.status(200).json({ success: true, transactions });
-    
- } catch (error) {
+  } catch (error) {
     res.status(500).json({ 
       success: false, 
       error: 'Banka Baglanti Hatasi',
       hataMesaji: error.message,
-      hataKodu: error.code,
-      detay: error.response?.data || "Banka yanit vermedi veya baglanti koptu"
+      detay: error.response?.data || "Zaman aşımı veya bağlantı reddi"
     });
   }
 }
