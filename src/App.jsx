@@ -5813,13 +5813,17 @@ const handleChangeRoomConfirm = async () => {
       // GÜNCELLENDİ: Zam baz kirası, listede gösterilen "MEVCUT KIRA" ile birebir aynı olsun diye
       // getRoomLatestFee(room) kullanılır (en güncel/geçerli kira). Böylece zam, ekranda görülen
       // mevcut kira üzerinden yapılır ve tutarsızlık olmaz.
-      const base = Math.max(Number(getRoomLatestFee(room) || 0), Number(room.monthlyFee || 0));
+      const netBase = Math.max(Number(getRoomLatestFee(room) || 0), Number(room.monthlyFee || 0));
+      // GÜNCELLENDİ: Zam artık KDV DAHİL kira üzerinden yapılır. Baz kira ve girilen yeni tutar KDV dahildir.
+      // (KDV muaf odalarda çarpan 1'dir; muafiyet korunur.) Kaydederken net'e çevrilecek.
+      const kdvMult = (room.hasKdv !== undefined ? room.hasKdv : true) ? 1.20 : 1;
+      const base = Math.round(netBase * kdvMult); // KDV dahil baz kira (listedeki "Mevcut Kira" ile birebir aynı)
 
       const rate = Number(collectionRates.roomIncreaseRate || 50);
       const defaultNew = Math.round(base + (base * rate / 100));
 
-      // increaseModalData'ya baz kirayı da ekliyoruz ki yüzde/tutar hesapları bu baz üzerinden yürüsün
-      setIncreaseModalData({ ...room, targetYear: parseInt(year), increaseBaseFee: base });
+      // increaseModalData'ya KDV dahil baz kirayı ve çarpanı ekliyoruz (kaydederken net'e çevirmek için)
+      setIncreaseModalData({ ...room, targetYear: parseInt(year), increaseBaseFee: base, kdvMult });
       setIncreaseMode('percentage');
       setIncreasePercentage(rate.toString());
       setNewRentAmount(defaultNew.toString());
@@ -5844,9 +5848,13 @@ const handleChangeRoomConfirm = async () => {
       if (!increaseModalData || !newRentAmount) return;
 
       const room = increaseModalData;
-      const newFee = Number(newRentAmount);
-      // YENİ: Eski (baz) kira = zam ayından bir önceki ayın geçerli kirası
-      const oldFee = Number(increaseModalData.increaseBaseFee ?? increaseModalData.monthlyFee);
+      // GÜNCELLENDİ: Modal KDV DAHİL çalışır. Girilen tutar KDV dahildir; sistemde saklanan
+      // monthlyFee/baz NET (KDV hariç) olduğundan, çarpana bölerek net'e çeviriyoruz.
+      const kdvMult = Number(increaseModalData.kdvMult) || ((increaseModalData.hasKdv !== undefined ? increaseModalData.hasKdv : true) ? 1.20 : 1);
+      const enteredGross = Number(newRentAmount);                                              // kullanıcının girdiği KDV dahil tutar
+      const grossOld = Number(increaseModalData.increaseBaseFee ?? increaseModalData.monthlyFee); // KDV dahil baz kira
+      const newFee = enteredGross / kdvMult;   // NET yeni kira (monthlyFee olarak saklanır; ×KDV = girilen tutar)
+      const oldFee = grossOld / kdvMult;        // NET eski (baz) kira
       const percentage = Number(increasePercentage);
 
       const historyEntry = {
@@ -5877,7 +5885,7 @@ const handleChangeRoomConfirm = async () => {
       if (db && firebaseUser) {
           try {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(increaseModalData.id)), {
-                  monthlyFee: newRentAmount,
+                  monthlyFee: newFee,
                   increaseHistory: newIncreaseHistory,
                   priceHistory: [...(increaseModalData.priceHistory || []), historyEntry]
               }, { merge: true });
@@ -5885,7 +5893,7 @@ const handleChangeRoomConfirm = async () => {
       } else {
           // Önizleme modu: yerel state güncelle
           setRooms(prev => prev.map(r => r.id === increaseModalData.id
-              ? { ...r, monthlyFee: newRentAmount, increaseHistory: newIncreaseHistory, priceHistory: [...(r.priceHistory || []), historyEntry] }
+              ? { ...r, monthlyFee: newFee, increaseHistory: newIncreaseHistory, priceHistory: [...(r.priceHistory || []), historyEntry] }
               : r
           ));
       }
@@ -13286,7 +13294,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <button onClick={() => setIsApplyIncreaseModalOpen(false)} className="text-indigo-400 hover:text-indigo-600 bg-white p-1 rounded shadow-sm"><X size={20} /></button>
              </div>
              <div className="p-6 md:p-8">
-               <p className="text-sm text-gray-500 mb-6 text-center"><strong>{increaseModalData.customerName}</strong> müşterisinin <strong>{increaseModalData.targetYear}</strong> yılı zammını uygulamak üzeresiniz. Zam Baz Alınan Kira (Mevcut Kira): <strong>{Math.round(Number(increaseModalData.increaseBaseFee ?? increaseModalData.monthlyFee)).toLocaleString('tr-TR')} TL</strong></p>
+               <p className="text-sm text-gray-500 mb-6 text-center"><strong>{increaseModalData.customerName}</strong> müşterisinin <strong>{increaseModalData.targetYear}</strong> yılı zammını uygulamak üzeresiniz. Zam Baz Alınan Kira (Mevcut Kira, KDV Dahil): <strong>{Math.round(Number(increaseModalData.increaseBaseFee ?? increaseModalData.monthlyFee)).toLocaleString('tr-TR')} TL</strong></p>
                
                <div className="flex gap-4 mb-6 border-b border-gray-200 pb-4">
                    <label className="flex items-center gap-2 cursor-pointer">
@@ -13308,7 +13316,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                      </div>
                  </div>
                  <div className="flex flex-col gap-2">
-                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Yeni Kira Bedeli (TL)</label>
+                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Yeni Kira Bedeli (TL, KDV Dahil)</label>
                      <div className="relative">
                          <input type="number" disabled={increaseMode !== 'manual'} value={newRentAmount} onChange={(e) => handleAmountInput(e.target.value)} className={`w-full border-2 rounded-xl px-4 py-3 text-lg font-bold focus:outline-none transition-colors ${increaseMode === 'manual' ? 'border-indigo-300 focus:border-indigo-500 bg-white text-indigo-900' : 'border-gray-200 bg-gray-50 text-gray-400'}`} />
                          <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-gray-400">TL</span>
