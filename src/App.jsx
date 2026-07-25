@@ -8978,11 +8978,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   <label className="text-xs font-bold text-gray-600 uppercase">API Secret</label>
                                   <input type="password" value={bankApiConfig.apiSecret} onChange={(e) => setBankApiConfig({...bankApiConfig, apiSecret: e.target.value})} disabled={bankApiConnected} placeholder="••••••••••••" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 font-medium text-slate-700 disabled:bg-gray-50" />
                               </div>
-                              <div className="flex flex-col gap-1.5">
-                                  <label className="text-xs font-bold text-gray-600 uppercase">Müşteri No (Banka Müşteri Numarası)</label>
-                                  <input type="text" value={bankApiConfig.customerNo} onChange={(e) => setBankApiConfig({...bankApiConfig, customerNo: e.target.value})} disabled={bankApiConnected} placeholder="Bankanın verdiği müşteri numarası" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 font-medium text-slate-700 disabled:bg-gray-50" />
-                                  <span className="text-[11px] text-gray-400">API Key ile aynı olmayabilir — boş bırakılırsa API Key kullanılır.</span>
-                              </div>
                           </div>
 
                           {/* Kontrol butonları */}
