@@ -24,26 +24,50 @@ export const formatAlbarakaDate = (date) => {
   return `${y}${m}${d}`;
 };
 
+// XML gövdesine gömülen kullanıcı girdilerini (pId/pIdPass/musteriNo vb.) güvene alır:
+// - Baş/son boşluk, sekme veya satır sonu karakterlerini temizler (kopyala-yapıştırdan
+//   sızan görünmez karakterler "Şifre yanlış" (Kod 882) gibi hatalara yol açabiliyor).
+// - XML özel karakterlerini (&, <, >) escape eder, aksi halde şifre/kullanıcı adında
+//   bu karakterler varsa SOAP gövdesi bozulur.
+const sanitizeForXml = (value) => {
+  if (value === undefined || value === null) return '';
+  return String(value)
+    .trim()
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+};
+
 // Albaraka getHesapHareketleri SOAP servisini çağırır ve ayrıştırılmış sonucu döner.
 // Banka tarafı bir hata koduyla (örn. şifre yanlış) dönerse bankaSonucu doldurulur,
 // ağ/bağlantı hatalarında ise exception fırlatılır.
 export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, sonTarih }) {
+  const safePId = sanitizeForXml(pId);
+  const safePIdPass = sanitizeForXml(pIdPass);
+  const safeMNo = sanitizeForXml(mNo);
+  const safeBasTarih = sanitizeForXml(basTarih);
+  const safeSonTarih = sanitizeForXml(sonTarih);
+
   const xmlPayload = `
   <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://services.albaraka.com/">
      <soapenv:Header/>
      <soapenv:Body>
         <ser:getHesapHareketleri>
-           <pId>${pId}</pId>
-           <pIdPass>${pIdPass}</pIdPass>
+           <pId>${safePId}</pId>
+           <pIdPass>${safePIdPass}</pIdPass>
            <pParams>
-              <musteriNo>${mNo}</musteriNo>
+              <musteriNo>${safeMNo}</musteriNo>
               <hesapNo></hesapNo>
-              <basTarih>${basTarih}</basTarih>
-              <sonTarih>${sonTarih}</sonTarih>
+              <basTarih>${safeBasTarih}</basTarih>
+              <sonTarih>${safeSonTarih}</sonTarih>
            </pParams>
         </ser:getHesapHareketleri>
      </soapenv:Body>
   </soapenv:Envelope>`;
+
+  // DEBUG: pId/musteriNo'nun bankaya ne olarak gittiğini teyit etmek için geçici log.
+  // pIdPass bilerek loglanmıyor (şifreyi log'a yazmayın).
+  console.log('[Albaraka] Giden istek -> pId:', JSON.stringify(safePId), 'musteriNo:', JSON.stringify(safeMNo), 'pIdPass uzunluk:', safePIdPass.length);
 
   const response = await axios.post(
     'https://eservice.albarakaturk.com.tr:10214/invoiceincomingsite/HesapBilgileriService.asmx',
@@ -54,6 +78,7 @@ export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, son
         'SOAPAction': 'http://services.albaraka.com/getHesapHareketleri'
       },
       httpsAgent: createAlbarakaHttpsAgent(),
+      proxy: false, // axios'un HTTP(S)_PROXY env değişkenlerini otomatik algılayıp httpsAgent ile çakışmasını engeller
       timeout: 20000
     }
   );
@@ -63,6 +88,9 @@ export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, son
 
   const hesapHareketleriResponse = jsonObj?.['soap:Envelope']?.['soap:Body']?.['getHesapHareketleriResponse'];
   const bankaSonucu = hesapHareketleriResponse?.responseData?.result;
+
+  // DEBUG: Bankadan dönen ham sonuç kodu/mesajını görmek için geçici log.
+  console.log('[Albaraka] Banka sonucu:', JSON.stringify(bankaSonucu));
 
   const responseBody = hesapHareketleriResponse?.responseData?.return || hesapHareketleriResponse?.return || [];
   const hareketler = Array.isArray(responseBody)
