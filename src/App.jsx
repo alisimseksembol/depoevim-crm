@@ -510,6 +510,45 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMenu, firebaseUser]);
 
+  // YENİ: Sayfa YENİLENDİĞİNDE mevcut sayfada kalınsın + YENİ SEKMEDE açma desteği (URL hash ile).
+  const skipFirstHashWriteRef = useRef(true);
+  // 1) Açılışta URL hash'ini oku ve ilgili sayfaya/seçime dön (yenileme veya yeni sekme).
+  useEffect(() => {
+      try {
+          const h = (window.location.hash || '').replace(/^#/, '');
+          if (!h) return;
+          const params = new URLSearchParams(h);
+          const m = params.get('m');
+          const c = params.get('c');
+          const r = params.get('r');
+          if (m) setActiveMenu(m);
+          if (c) setSelectedCustomerId(c);   // CANLI'da müşteri id = Firestore doc.id (string) → strict eşleşir
+          if (r) setSelectedRoomId(r);
+      } catch (e) { /* URL erişilemezse yoksay */ }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // 2) Aktif sayfa/seçim değiştikçe URL hash'ini güncelle (böylece yenilemede aynı sayfa açılır).
+  useEffect(() => {
+      if (skipFirstHashWriteRef.current) { skipFirstHashWriteRef.current = false; return; }
+      try {
+          const params = new URLSearchParams();
+          if (activeMenu) params.set('m', activeMenu);
+          if (selectedCustomerId) params.set('c', String(selectedCustomerId));
+          if (selectedRoomId) params.set('r', String(selectedRoomId));
+          const newHash = params.toString();
+          window.history.replaceState(null, '', window.location.pathname + window.location.search + (newHash ? '#' + newHash : ''));
+      } catch (e) { /* yoksay */ }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMenu, selectedCustomerId, selectedRoomId]);
+
+  // YENİ: <a href> linklerinde SOL tık uygulama içi gezinir; Ctrl/Cmd/orta tık ise tarayıcının
+  // "yeni sekmede aç" varsayılanına bırakılır. Böylece sağ tıkta "Yeni sekmede aç" seçeneği çıkar.
+  const handleNavClick = (e, navFn) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return; // tarayıcı yeni sekmede açsın
+      e.preventDefault();
+      navFn();
+  };
+
   // --- YENİ: AUTH VE KULLANICI STATE'LERİ ---
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
@@ -7554,14 +7593,14 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                 </div>
                                             </div>
                                             <div className="flex sm:flex-col gap-1.5 shrink-0 w-full sm:w-28 mt-2 sm:mt-0">
-                                                <button onClick={() => {
+                                                <a href={`#m=tum-musteriler&c=${item.customer.id}`} onClick={(e) => handleNavClick(e, () => {
                                                     setSelectedCustomerId(item.customer.id);
                                                     setActiveMenu('tum-musteriler');
                                                     setShowGlobalSearchResults(false);
                                                     setGlobalSearchTerm('');
-                                                }} className="text-[10px] bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg font-bold transition-colors flex items-center justify-center gap-1.5 shadow-sm flex-1 sm:w-full">
+                                                })} className="text-[10px] bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg font-bold transition-colors flex items-center justify-center gap-1.5 shadow-sm flex-1 sm:w-full no-underline">
                                                     <Settings size={12}/> Cariye Git
-                                                </button>
+                                                </a>
                                                 
                                                 {item.rooms.length > 0 && (
                                                     <button onClick={() => {
@@ -8183,7 +8222,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <td className="px-4 py-3 whitespace-nowrap text-gray-500 font-medium">{customer.createdAt ? (typeof customer.createdAt === 'number' ? new Date(customer.createdAt).toLocaleDateString('tr-TR') : customer.createdAt) : '-'}</td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center gap-1.5 justify-center">
-                                  <button onClick={() => setSelectedCustomerId(customer.id)} className="bg-slate-500 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1">Cari Hesap</button>
+                                  <a href={`#m=tum-musteriler&c=${customer.id}`} onClick={(e) => handleNavClick(e, () => setSelectedCustomerId(customer.id))} className="bg-slate-500 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1 text-center no-underline">Cari Hesap</a>
                                   <button onClick={(e) => { e.stopPropagation(); if(!checkActionPerm('action-musteri-sil')) return; setCustomerToDeleteId(customer.id); setIsDeleteCustomerModalOpen(true); }} className="bg-[#f64e60] hover:bg-red-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1" title="Kalıcı Olarak Sil">Sil</button>
                                 </div>
                               </td>
@@ -8938,6 +8977,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <div className="flex flex-col gap-1.5">
                                   <label className="text-xs font-bold text-gray-600 uppercase">API Secret</label>
                                   <input type="password" value={bankApiConfig.apiSecret} onChange={(e) => setBankApiConfig({...bankApiConfig, apiSecret: e.target.value})} disabled={bankApiConnected} placeholder="••••••••••••" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 font-medium text-slate-700 disabled:bg-gray-50" />
+                              </div>
+                              <div className="flex flex-col gap-1.5">
+                                  <label className="text-xs font-bold text-gray-600 uppercase">Müşteri No (Banka Müşteri Numarası)</label>
+                                  <input type="text" value={bankApiConfig.customerNo} onChange={(e) => setBankApiConfig({...bankApiConfig, customerNo: e.target.value})} disabled={bankApiConnected} placeholder="Bankanın verdiği müşteri numarası" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 font-medium text-slate-700 disabled:bg-gray-50" />
+                                  <span className="text-[11px] text-gray-400">API Key ile aynı olmayabilir — boş bırakılırsa API Key kullanılır.</span>
                               </div>
                           </div>
 
