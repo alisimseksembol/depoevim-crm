@@ -652,21 +652,20 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   };
 
   const handleTogglePermission = (roleId, type, permId) => {
-      setUserRoles(userRoles.map(role => {
-          if (role.id === roleId) {
-              const currentPerms = role.permissions[type] || [];
-              const hasPerm = currentPerms.includes(permId);
-              const newPermsList = hasPerm 
-                  ? currentPerms.filter(p => p !== permId)
-                  : [...currentPerms, permId];
-              
-              return {
-                  ...role,
-                  permissions: { ...role.permissions, [type]: newPermsList }
-              };
-          }
-          return role;
-      }));
+      const role = userRoles.find(r => r.id === roleId);
+      if (!role) return;
+      const currentPerms = role.permissions[type] || [];
+      const has = currentPerms.includes(permId);
+      const newPermsList = has ? currentPerms.filter(p => p !== permId) : [...currentPerms, permId];
+      const updatedRole = { ...role, permissions: { ...role.permissions, [type]: newPermsList } };
+      // Yerel state'i güncelle
+      setUserRoles(prev => prev.map(r => r.id === roleId ? updatedRole : r));
+      // YENİ / DÜZELTME: Değişiklik ANINDA Firebase'e de yazılır. Böylece "İzinleri kaydet" unutulsa veya
+      // userRoles dinleyicisi araya girse bile verilen yetki (örn. "Oda Giriş Çıkış İşlemi") kaybolmaz ve
+      // personelde anında etkinleşir. (Önizlemede db null olduğundan yalnızca yerel state güncellenir.)
+      if (db && firebaseUser) {
+          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'userRoles', String(updatedRole.id)), updatedRole, { merge: true }).catch(e => console.error('Rol İzni Otomatik Kaydetme Hatası:', e));
+      }
   };
 
   // YENİ EKLENEN: Rol izinlerini Firebase'e (ve state'e) kalıcı olarak kaydet
@@ -3622,6 +3621,46 @@ const handleAddInvoice = async () => {
 
   // --- ODA DETAY MODALLARI ---
   const [selectedRoomId, setSelectedRoomId] = useState(null);
+
+  // YENİ: Sayfa YENİLENDİĞİNDE mevcut sayfada kalınsın + YENİ SEKMEDE açma desteği (URL hash ile).
+  // NOT: activeMenu/selectedCustomerId/selectedRoomId TANIMLANDIKTAN SONRA yer almalı (aksi halde TDZ hatası).
+  const skipFirstHashWriteRef = useRef(true);
+  // 1) Açılışta URL hash'ini oku ve ilgili sayfaya/seçime dön (yenileme veya yeni sekme).
+  useEffect(() => {
+      try {
+          const h = (window.location.hash || '').replace(/^#/, '');
+          if (!h) return;
+          const params = new URLSearchParams(h);
+          const m = params.get('m');
+          const c = params.get('c');
+          const r = params.get('r');
+          if (m) setActiveMenu(m);
+          if (c) setSelectedCustomerId(c);   // CANLI'da müşteri id = Firestore doc.id (string) → strict eşleşir
+          if (r) setSelectedRoomId(r);
+      } catch (e) { /* URL erişilemezse yoksay */ }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // 2) Aktif sayfa/seçim değiştikçe URL hash'ini güncelle (böylece yenilemede aynı sayfa açılır).
+  useEffect(() => {
+      if (skipFirstHashWriteRef.current) { skipFirstHashWriteRef.current = false; return; }
+      try {
+          const params = new URLSearchParams();
+          if (activeMenu) params.set('m', activeMenu);
+          if (selectedCustomerId) params.set('c', String(selectedCustomerId));
+          if (selectedRoomId) params.set('r', String(selectedRoomId));
+          const newHash = params.toString();
+          window.history.replaceState(null, '', window.location.pathname + window.location.search + (newHash ? '#' + newHash : ''));
+      } catch (e) { /* yoksay */ }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMenu, selectedCustomerId, selectedRoomId]);
+
+  // YENİ: <a href> linklerinde SOL tık uygulama içi gezinir; Ctrl/Cmd/orta tık ise tarayıcının
+  // "yeni sekmede aç" varsayılanına bırakılır. Böylece sağ tıkta "Yeni sekmede aç" seçeneği çıkar.
+  const handleNavClick = (e, navFn) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return; // tarayıcı yeni sekmede açsın
+      e.preventDefault();
+      navFn();
+  };
   const [detailYear, setDetailYear] = useState(2026);
 
   const [activeSizeFilter, setActiveSizeFilter] = useState(null);
@@ -7098,6 +7137,21 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
       const activationTime = collectionRates.interestActivationDate || 0;
       const isCustomerExempt = customer.isInterestExempt === true;
 
+      // YENİ: Ödenip SIFIRLANMIŞ geçmiş dönemlere faiz İŞLENMEZ. Faiz yalnızca GÜNCEL borç dönemine
+      // (ana borcun en son sıfırlandığı andan sonrasına) uygulanır. Bunun için faiz hariç ana borcun
+      // en son sıfırlandığı (tam ödendiği) anı buluyoruz; faiz bu an ile aktivasyon tarihinden
+      // hangisi daha sonraysa ondan itibaren başlar. (Cariyi sıfırlamış müşterilerin o ayları işlenmez.)
+      let __principalBal = 0;
+      let lastSettleTime = 0;
+      modifiedLedger.forEach(t => {
+          __principalBal += (Number(t.debt) || 0) - (Number(t.credit) || 0);
+          if (__principalBal <= 0.01) {
+              const _td = (t.date instanceof Date) ? t.date : new Date(t.date);
+              if (!isNaN(_td.getTime())) lastSettleTime = _td.getTime();
+          }
+      });
+      const interestStartTime = Math.max(Number(activationTime) || 0, lastSettleTime);
+
       const baseTransactions = [...modifiedLedger];
       // Bugüne kadar olan faizleri tetiklemek için dummy bir hareket ekliyoruz.
       baseTransactions.push({ id: 'dummy-today', date: today, debt: 0, credit: 0, isDummy: true });
@@ -7108,21 +7162,26 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
               let nextInterestDate = addDays(lastInterestAppliedDate, 30);
               
               while (nextInterestDate <= tx.date) {
-                  // YENİ: Sadece global faiz aktif edildiği tarihten sonrasına faiz ekle
-                  if (nextInterestDate.getTime() >= activationTime) {
-                      const interestAmount = runningBalance * interestRate;
-                      const totalInterest = interestAmount * 1.20; // + %20 KDV
+                  // YENİ: Faiz yalnızca aktivasyon tarihinden VE ana borcun en son sıfırlandığı andan
+                  // (hangisi sonraysa) sonrasına işlenir. Böylece ödenip sıfırlanmış geçmiş dönemlere faiz gelmez.
+                  if (nextInterestDate.getTime() >= interestStartTime) {
+                      // YENİ: O ayın faiz oranını kullan (girilmemişse genel orana düş). Anahtar 'YYYY-AyIndex'.
+                      const _mKey = `${nextInterestDate.getFullYear()}-${nextInterestDate.getMonth()}`;
+                      const _mRateRaw = (collectionRates.monthlyInterestRates || {})[_mKey];
+                      const _effRate = (_mRateRaw !== undefined && _mRateRaw !== '' && _mRateRaw !== null) ? Number(_mRateRaw) / 100 : interestRate;
+                      // YENİ: Faiz, KDV'siz "EKSTRA FAİZ" olarak kalan borç üzerine işlenir (KDV eklenmez).
+                      const interestAmount = runningBalance * _effRate;
                       
-                      runningBalance += totalInterest;
+                      runningBalance += interestAmount;
                       
                       finalLedger.push({
                           id: `interest-${nextInterestDate.getTime()}`,
                           date: new Date(nextInterestDate),
                           dateStr: `${nextInterestDate.getDate().toString().padStart(2, '0')}.${(nextInterestDate.getMonth() + 1).toString().padStart(2, '0')}.${nextInterestDate.getFullYear()}`,
-                          desc: `1 Aylık Gecikme Faiz Ücreti`,
-                          debt: totalInterest,
+                          desc: `Ekstra Gecikme Faizi (%${(_effRate * 100).toLocaleString('tr-TR')})`,
+                          debt: interestAmount,
                           baseDebt: interestAmount,
-                          kdvDebt: interestAmount * 0.20,
+                          kdvDebt: 0,
                           credit: 0,
                           balance: runningBalance,
                           isInterest: true
@@ -7554,14 +7613,14 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                 </div>
                                             </div>
                                             <div className="flex sm:flex-col gap-1.5 shrink-0 w-full sm:w-28 mt-2 sm:mt-0">
-                                                <button onClick={() => {
+                                                <a href={`#m=tum-musteriler&c=${item.customer.id}`} onClick={(e) => handleNavClick(e, () => {
                                                     setSelectedCustomerId(item.customer.id);
                                                     setActiveMenu('tum-musteriler');
                                                     setShowGlobalSearchResults(false);
                                                     setGlobalSearchTerm('');
-                                                }} className="text-[10px] bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg font-bold transition-colors flex items-center justify-center gap-1.5 shadow-sm flex-1 sm:w-full">
+                                                })} className="text-[10px] bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg font-bold transition-colors flex items-center justify-center gap-1.5 shadow-sm flex-1 sm:w-full no-underline">
                                                     <Settings size={12}/> Cariye Git
-                                                </button>
+                                                </a>
                                                 
                                                 {item.rooms.length > 0 && (
                                                     <button onClick={() => {
@@ -8183,7 +8242,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                               <td className="px-4 py-3 whitespace-nowrap text-gray-500 font-medium">{customer.createdAt ? (typeof customer.createdAt === 'number' ? new Date(customer.createdAt).toLocaleDateString('tr-TR') : customer.createdAt) : '-'}</td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center gap-1.5 justify-center">
-                                  <button onClick={() => setSelectedCustomerId(customer.id)} className="bg-slate-500 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1">Cari Hesap</button>
+                                  <a href={`#m=tum-musteriler&c=${customer.id}`} onClick={(e) => handleNavClick(e, () => setSelectedCustomerId(customer.id))} className="bg-slate-500 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1 text-center no-underline">Cari Hesap</a>
                                   <button onClick={(e) => { e.stopPropagation(); if(!checkActionPerm('action-musteri-sil')) return; setCustomerToDeleteId(customer.id); setIsDeleteCustomerModalOpen(true); }} className="bg-[#f64e60] hover:bg-red-600 text-white px-3 py-1.5 rounded text-[11px] font-medium shadow-sm transition-colors flex-1" title="Kalıcı Olarak Sil">Sil</button>
                                 </div>
                               </td>
@@ -8938,11 +8997,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <div className="flex flex-col gap-1.5">
                                   <label className="text-xs font-bold text-gray-600 uppercase">API Secret</label>
                                   <input type="password" value={bankApiConfig.apiSecret} onChange={(e) => setBankApiConfig({...bankApiConfig, apiSecret: e.target.value})} disabled={bankApiConnected} placeholder="••••••••••••" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 font-medium text-slate-700 disabled:bg-gray-50" />
-                              </div>
-                              <div className="flex flex-col gap-1.5">
-                                  <label className="text-xs font-bold text-gray-600 uppercase">Müşteri No (Banka Müşteri Numarası)</label>
-                                  <input type="text" value={bankApiConfig.customerNo} onChange={(e) => setBankApiConfig({...bankApiConfig, customerNo: e.target.value})} disabled={bankApiConnected} placeholder="Bankanın verdiği müşteri numarası" className="border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 font-medium text-slate-700 disabled:bg-gray-50" />
-                                  <span className="text-[11px] text-gray-400">API Key ile aynı olmayabilir — boş bırakılırsa API Key kullanılır.</span>
                               </div>
                           </div>
 
@@ -11192,6 +11246,38 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              <input type="number" disabled={!collectionRates.isInterestActive} value={collectionRates.interestRate} onChange={(e) => setCollectionRates({...collectionRates, interestRate: e.target.value})} className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[#1bc5bd] focus:ring-1 focus:ring-[#1bc5bd] font-bold text-slate-700 disabled:bg-gray-100 disabled:opacity-60" />
                              <span className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 font-bold">%</span>
                          </div>
+                     </div>
+
+                     {/* YENİ: YIL / AY BAZLI FAİZ ORANLARI — 2021'den itibaren her ay için ayrı oran girilebilir.
+                         Boş bırakılan aylarda yukarıdaki genel oran kullanılır. Faiz, ilgili ayın oranıyla
+                         kalan borç üzerine KDV'siz "ekstra faiz" olarak işlenir. */}
+                     <div className="flex flex-col gap-3 md:col-span-2 border-t border-gray-100 pt-6 mt-2">
+                        <div>
+                           <label className="text-sm font-bold text-gray-700">Yıl / Ay Bazlı Faiz Oranları</label>
+                           <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">2021'den itibaren her ay için ayrı faiz oranı girebilirsiniz. Boş bırakılan aylarda yukarıdaki genel oran (%{collectionRates.interestRate}) kullanılır. Faiz, ilgili ayın oranıyla müşterinin <strong>kalan borcu</strong> üzerine <strong className="text-teal-600">KDV'siz (ekstra faiz)</strong> olarak aylık işlenir ve caride ayrı satır olarak gösterilir.</p>
+                        </div>
+                        {/* Yıl seçimi */}
+                        <div className="flex flex-wrap gap-1.5">
+                           {Array.from({ length: (new Date().getFullYear() + 1) - 2021 + 1 }, (_, i) => 2021 + i).map(y => (
+                              <button key={y} type="button" onClick={() => setInterestRateYear(y)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${interestRateYear === y ? 'bg-[#1bc5bd] text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{y}</button>
+                           ))}
+                        </div>
+                        {/* Ay bazlı oran girişleri */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-1">
+                           {['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'].map((mName, mIdx) => {
+                              const mKey = `${interestRateYear}-${mIdx}`;
+                              const val = (collectionRates.monthlyInterestRates || {})[mKey];
+                              return (
+                                 <div key={mKey} className="flex flex-col gap-1">
+                                    <label className="text-[11px] font-bold text-gray-500">{mName} {interestRateYear}</label>
+                                    <div className="relative">
+                                       <input type="number" value={val ?? ''} onChange={(e) => setCollectionRates(prev => ({ ...prev, monthlyInterestRates: { ...(prev.monthlyInterestRates || {}), [mKey]: e.target.value } }))} placeholder={String(collectionRates.interestRate)} className="w-full border border-gray-200 rounded-lg pl-3 pr-7 py-2 text-sm focus:outline-none focus:border-[#1bc5bd] focus:ring-1 focus:ring-[#1bc5bd] font-bold text-slate-700" />
+                                       <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">%</span>
+                                    </div>
+                                 </div>
+                              );
+                           })}
+                        </div>
                      </div>
 
                   </div>
