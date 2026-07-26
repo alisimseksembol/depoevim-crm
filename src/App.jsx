@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, limit, orderBy, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, limit, orderBy, deleteDoc, arrayUnion } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
   Users, 
@@ -956,9 +956,19 @@ const [apptCustomerSearch, setApptCustomerSearch] = useState('');
       confirmPassword: ''
   });
 
-const handleLogin = (e) => {
-      e.preventDefault();
-      const user = systemUsers.find(u => u.username === loginData.username && u.password === loginData.password);
+const handleLogin = async (e) => {
+      if (e) e.preventDefault();
+      let user = systemUsers.find(u => u.username === loginData.username && u.password === loginData.password);
+      // DÜZELTME: Yerel liste henüz Firebase'den yüklenmemiş olabilir (yeni eklenen kullanıcılar görünmez)
+      // → yerel eşleşme yoksa doğrudan Firebase'den TAZE okuma yapıp tekrar kontrol et.
+      if (!user && db && firebaseUser) {
+          try {
+              const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'));
+              const fresh = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+              if (fresh.length) setSystemUsers(fresh);
+              user = fresh.find(u => u.username === loginData.username && u.password === loginData.password);
+          } catch (err) { console.error('Kullanıcı doğrulama (taze okuma) hatası:', err); }
+      }
       if (user) {
           setCurrentUserProfile({...user, oldPassword: '', newPassword: '', confirmPassword: ''});
           setIsAuthenticated(true);
@@ -3253,24 +3263,41 @@ const handleAddInvoice = async () => {
   // YENİ EKLENEN: Herhangi bir müşterinin carisine sözleşme/tutanak belgesi kaydeder (önizleme + canlı).
   // record: { id, label, date, file, note }
   const saveContractToCustomer = async (customerId, record) => {
-      const customerToUpdate = customers.find(c => String(c.id) === String(customerId));
-      if (!customerToUpdate) return;
-      const updated = [...(customerToUpdate.contracts || []), record];
       if (db && firebaseUser) {
           try {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { contracts: updated }, { merge: true });
+              // DÜZELTME: arrayUnion ile ATOMİK ekleme — yerel liste eski olsa bile sunucudaki
+              // diziyi EZMEDEN ekler; böylece ardışık/eşzamanlı eklemede hiçbir sözleşme/sayfa kaybolmaz.
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { contracts: arrayUnion(record) }, { merge: true });
           } catch (e) { console.error("Sözleşme Kaydetme Hatası:", e); }
       } else {
-          setCustomers(prev => prev.map(c => String(c.id) === String(customerId) ? { ...c, contracts: updated } : c));
+          setCustomers(prev => prev.map(c => String(c.id) === String(customerId) ? { ...c, contracts: [...(c.contracts || []), record] } : c));
       }
   };
 
   // Cari profildeki "Sözleşmeler" modalından manuel belge ekleme
   const handleAddContract = async () => {
-      if (!newContract.date || !newContract.file || !selectedCustomerId) return;
-      const record = { id: Date.now(), label: newContract.label || 'Sözleşme', date: newContract.date, file: newContract.file, note: '' };
-      await saveContractToCustomer(selectedCustomerId, record);
-      setNewContract({ label: 'Sözleşme', date: new Date().toISOString().split('T')[0], file: null });
+      // YENİ: Birden fazla dosya (sayfa) seçilebilir; sınır yok. Her dosya sunucuya yüklenip URL olarak
+      // (base64 yerine) kaydedilir; böylece hiçbir sayfa kaybolmaz ve Firestore boyut sınırına takılmaz.
+      const files = (newContract.files && newContract.files.length) ? newContract.files : [];
+      if (!newContract.date || files.length === 0 || !selectedCustomerId) return;
+      const cust = customers.find(c => c.id === selectedCustomerId);
+      const baseLabel = newContract.label || 'Sözleşme';
+      try {
+          const newRecords = [];
+          for (let i = 0; i < files.length; i++) {
+              const url = await uploadImageToServer(files[i]);
+              if (!url) continue;
+              newRecords.push({ id: Date.now() + i, label: files.length > 1 ? `${baseLabel} (${i + 1}. Sayfa)` : baseLabel, date: newContract.date, file: url, note: '' });
+          }
+          if (newRecords.length === 0) { alert('Dosya(lar) yüklenemedi, lütfen tekrar deneyin.'); return; }
+          if (db && firebaseUser) {
+              // DÜZELTME: arrayUnion ile atomik ekleme — önceki sözleşmeler/sayfalar EZİLMEZ, kaybolmaz.
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), { contracts: arrayUnion(...newRecords) }, { merge: true });
+          } else {
+              setCustomers(prev => prev.map(c => c.id === selectedCustomerId ? { ...c, contracts: [...(c.contracts || []), ...newRecords] } : c));
+          }
+      } catch (e) { console.error("Sözleşme Ekleme Hatası:", e); }
+      setNewContract({ label: 'Sözleşme', date: new Date().toISOString().split('T')[0], file: null, files: [] });
   };
 
   const handleDeleteContract = async (contractId) => {
@@ -3314,11 +3341,11 @@ const handleAddInvoice = async () => {
               const url = await uploadImageToServer(f);
               newRecords.push({ id: Date.now() + Math.floor(Math.random() * 100000), label: `${selectedRoomDetail.name} Oda Sözleşmesi`, date: new Date().toISOString().split('T')[0], file: url, note: '', roomId: selectedRoomDetail.id, roomName: selectedRoomDetail.name });
           }
-          const updated = [...(cust.contracts || []), ...newRecords];
           if (db && firebaseUser) {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { contracts: updated }, { merge: true });
+              // DÜZELTME: arrayUnion ile atomik ekleme — önceki sözleşmeler/sayfalar ezilmez, kaybolmaz.
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { contracts: arrayUnion(...newRecords) }, { merge: true });
           } else {
-              setCustomers(prev => prev.map(c => String(c.id) === String(cust.id) ? { ...c, contracts: updated } : c));
+              setCustomers(prev => prev.map(c => String(c.id) === String(cust.id) ? { ...c, contracts: [...(c.contracts || []), ...newRecords] } : c));
           }
           logActivity('Oda Sözleşmesi Yükleme', `${cust.name} - ${selectedRoomDetail.name} odasına ${newRecords.length} sözleşme dosyası yüklendi.`);
       } catch (e) { console.error("Oda Sözleşmesi Yükleme Hatası:", e); }
@@ -14209,10 +14236,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         </div>
                         <div>
                             <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Dosya (Zorunlu)</label>
-                            <input type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const file = e.target.files[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => setNewContract({...newContract, file: reader.result}); reader.readAsDataURL(file); } else { setNewContract({...newContract, file: null}); } }} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100" />
+                            <input type="file" multiple accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => { const files = Array.from(e.target.files || []); setNewContract(prev => ({...prev, files, file: files.length ? 'secildi' : null})); }} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100" />
+                            {newContract.files && newContract.files.length > 1 && <p className="text-[10px] text-violet-500 font-bold mt-1">{newContract.files.length} dosya (sayfa) seçildi — hepsi eklenecek.</p>}
                         </div>
                         <div className="sm:col-span-3 flex justify-end mt-1">
-                            <button onClick={handleAddContract} disabled={!newContract.date || !newContract.file} className="bg-violet-500 hover:bg-violet-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors whitespace-nowrap">Ekle</button>
+                            <button onClick={handleAddContract} disabled={!newContract.date || !(newContract.files && newContract.files.length)} className="bg-violet-500 hover:bg-violet-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors whitespace-nowrap">Ekle</button>
                         </div>
                     </div>
                 </div>
