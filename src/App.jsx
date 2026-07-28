@@ -3688,6 +3688,27 @@ const handleAddInvoice = async () => {
       e.preventDefault();
       navFn();
   };
+
+  // YENİ: Müşteri listesindeki KAYDIRMA konumunu koru — bir cariye girip "Listeye Geri Dön" ile
+  // dönünce liste en başa dönmesin, kaldığı yerden devam etsin.
+  const mainScrollRef = useRef(null);
+  const listScrollTopRef = useRef(0);
+  const prevSelectedCustRef = useRef(null);
+  const handleMainScroll = () => {
+      // Cari profili KAPALIYKEN (liste görünürken) son kaydırma konumunu sakla.
+      if (!selectedCustomerId && mainScrollRef.current) {
+          listScrollTopRef.current = mainScrollRef.current.scrollTop;
+      }
+  };
+  React.useLayoutEffect(() => {
+      const prev = prevSelectedCustRef.current;
+      // Profilden (dolu) listeye (null) dönüldüğünde saklanan kaydırma konumunu geri yükle.
+      if (prev && !selectedCustomerId && mainScrollRef.current) {
+          mainScrollRef.current.scrollTop = listScrollTopRef.current;
+      }
+      prevSelectedCustRef.current = selectedCustomerId;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomerId]);
   const [detailYear, setDetailYear] = useState(2026);
 
   const [activeSizeFilter, setActiveSizeFilter] = useState(null);
@@ -7751,7 +7772,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-8 w-full block scroll-smooth relative">
+        <main ref={mainScrollRef} onScroll={handleMainScroll} className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-8 w-full block scroll-smooth relative">
           {(() => {
              // YENİ EKLENEN: Aktif sayfaya erişim izni kontrolü (süper yönetici hariç)
              if (currentRoleIsSuper()) return null;
