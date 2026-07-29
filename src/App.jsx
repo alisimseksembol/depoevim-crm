@@ -445,6 +445,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const unsubPendingCollections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pendingCollections'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setPendingCollections(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
       const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
+      // YENİ: Hatırlatmalar dinleyicisi (küçük operasyonel koleksiyon — bildirim ışığı için app genelinde gerekli)
+      const unsubReminders = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); setReminders(fetchedData); }, (error) => console.error("Hatırlatma Çekme Hatası:", error));
       // YENİ EKLENEN: ROL İZİNLERİ FİREBASE DİNLEYİCİSİ (kaydedilen yetkiler geri yüklenir)
       const unsubUserRoles = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'userRoles'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setUserRoles(fetchedData); }, (error) => console.error("Rol Çekme Hatası:", error));
       // PERFORMANS/LİMİT: activityLogs, deletedItems ve userSessions artık SÜREKLİ DİNLENMEZ (onSnapshot kaldırıldı).
@@ -463,7 +465,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       // tek seferlik getDocs + limit ile çekilir (bkz. fetchBulkUploadHistory).
 
       return () => { 
-          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); 
+          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); unsubReminders();
           unsubSettings(); unsubUserRoles();
       };
   }, [firebaseUser]);
@@ -545,7 +547,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const availablePermissions = {
       mainMenus: [
           { id: 'menu-dashboard', label: 'Anasayfa' },
-          { id: 'menu-takvim', label: 'Takvim' },
+          { id: 'menu-takvim', label: 'Randevular' },
+          { id: 'menu-hatirlatmalar', label: 'Hatırlatmalar' },
           { id: 'menu-musteri-listesi', label: 'Müşteri Listesi' },
           { id: 'menu-odeme-islemleri', label: 'Ödeme İşlemleri' },
           { id: 'menu-depo', label: 'Depo Listesi' },
@@ -563,6 +566,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           { id: 'page-gunu-gelen-odalar', label: 'Günü Gelen Odalar' },
           { id: 'page-senesi-dolan-odalar', label: 'Senesi Dolan Odalar' },
           { id: 'page-aylik-odeme', label: 'Aylık Borç Takip' },
+          { id: 'page-hatirlatmalar', label: 'Hatırlatmalar' },
           { id: 'page-kdvsiz-cariler', label: 'KDVsiz Cariler' },
           { id: 'page-icra-odalari', label: 'İcra Odaları' },
           { id: 'page-finans-rapor', label: 'Finans Rapor' },
@@ -880,6 +884,11 @@ const [firebaseUser, setFirebaseUser] = useState(null);
 
   // --- RANDEVU VE TAKVİM STATE'LERİ ---
   const [appointments, setAppointments] = useState([]); // TEMİZLENDİ: Örnek/sahte randevu kayıtları kaldırıldı, liste boş başlar.
+  // YENİ: Hatırlatmalar (muhasebe takvimi) — ödeme sözü / günlük not / görev. Her kayıt:
+  // { id, date:'YYYY-MM-DD', time:'HH:MM'|'', title, note, type:'promise'|'note'|'task', customerName, completed, createdAt }
+  const [reminders, setReminders] = useState([]);
+  const [reminderModal, setReminderModal] = useState(null); // null | {mode:'add'|'edit', data:{...}}
+  const [reminderSelectedDate, setReminderSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [appointmentData, setAppointmentData] = useState({
     customerType: 'registered',
     customerId: '',
@@ -3151,6 +3160,83 @@ const handleManualAddPayment = async () => {
       setManualPendingData({ date: new Date().toISOString().split('T')[0], amount: '', note: '' });
   };
 
+  // YENİ EKLENEN: HATIRLATMALAR (muhasebe takvimi) — kaydet / tamamla-geri al / sil
+  const handleSaveReminder = async () => {
+      if (!reminderModal || !reminderModal.data) return;
+      const d = reminderModal.data;
+      if (!d.date || !(d.title || '').trim()) { alert('Lütfen tarih ve başlık girin.'); return; }
+      const record = {
+          id: d.id || `rem_${Date.now()}`,
+          date: d.date,
+          time: d.time || '',
+          title: (d.title || '').trim(),
+          note: (d.note || '').trim(),
+          type: d.type || 'note',
+          customerName: d.customerName || '',
+          files: Array.isArray(d.files) ? d.files : [],
+          completed: !!d.completed,
+          createdBy: currentUserProfile?.name || '',
+          createdAt: d.createdAt || Date.now()
+      };
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reminders', String(record.id)), record, { merge: true }); } catch (e) { console.error('Hatırlatma Kaydetme Hatası:', e); }
+      } else {
+          setReminders(prev => { const ex = prev.some(r => String(r.id) === String(record.id)); return ex ? prev.map(r => String(r.id) === String(record.id) ? record : r) : [...prev, record]; });
+      }
+      logActivity(reminderModal.mode === 'edit' ? 'Hatırlatma Düzenleme' : 'Hatırlatma Ekleme', `${record.title} (${record.date})`);
+      setReminderModal(null);
+  };
+  const handleToggleReminder = async (rem) => {
+      const nextCompleted = !rem.completed;
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reminders', String(rem.id)), { completed: nextCompleted }, { merge: true }); } catch (e) { console.error('Hatırlatma Güncelleme Hatası:', e); }
+      } else {
+          setReminders(prev => prev.map(r => String(r.id) === String(rem.id) ? { ...r, completed: nextCompleted } : r));
+      }
+  };
+  const handleDeleteReminder = async (remId) => {
+      if (!window.confirm('Bu hatırlatmayı silmek istediğinize emin misiniz?')) return;
+      if (db && firebaseUser) {
+          try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reminders', String(remId))); } catch (e) { console.error('Hatırlatma Silme Hatası:', e); }
+      } else {
+          setReminders(prev => prev.filter(r => String(r.id) !== String(remId)));
+      }
+  };
+
+  // YENİ: Masaüstü bildirim izni iste (tarayıcı destekliyorsa) — hatırlatma uyarıları için.
+  useEffect(() => {
+      try { if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') { Notification.requestPermission().catch(() => {}); } } catch (e) { /* yoksay */ }
+  }, []);
+  // YENİ: Günü/saati gelmiş, tamamlanmamış hatırlatmalar için masaüstü bildirimi (dakikada bir kontrol; her kayıt için bir kez).
+  const notifiedReminderIdsRef = useRef({});
+  useEffect(() => {
+      const check = () => {
+          try {
+              if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') return;
+              const now = new Date();
+              const todayStr = now.toISOString().split('T')[0];
+              (reminders || []).forEach(r => {
+                  if (!r || r.completed || !r.date) return;
+                  if (notifiedReminderIdsRef.current[r.id]) return;
+                  let due = false;
+                  if (r.date < todayStr) due = true; // geçmiş günden kalan
+                  else if (r.date === todayStr) {
+                      if (!r.time) due = true;
+                      else { const parts = String(r.time).split(':'); const t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Number(parts[0]) || 0, Number(parts[1]) || 0); if (now >= t) due = true; }
+                  }
+                  if (due) {
+                      notifiedReminderIdsRef.current[r.id] = true;
+                      try { new Notification('Hatırlatma: ' + (r.title || ''), { body: (r.customerName ? r.customerName + ' • ' : '') + (r.note || r.title || ''), tag: String(r.id) }); } catch (e) { /* yoksay */ }
+                  }
+              });
+          } catch (e) { /* yoksay */ }
+      };
+      check();
+      const _id = setInterval(check, 60000);
+      return () => clearInterval(_id);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reminders]);
+
 const handleSaveCollectionNote = async () => {
       if (!collectionNoteData.customerId || !collectionNoteData.text) return;
 
@@ -3190,6 +3276,29 @@ const handleSaveCollectionNote = async () => {
                   collectionNotes: [newNote, ...existingNotes]
               }, { merge: true });
           } catch(e) { console.error("Firebase Not Ekleme Hatası:", e); }
+      }
+
+      // YENİ: Ödeme sözü tarihi girildiyse, aynı bilgiyi HATIRLATMALAR takvimine "Ödeme Sözü" olarak da ekle.
+      if (collectionNoteData.promiseDate) {
+          const _remId = `rem_promise_${newNote.id}`;
+          const _remRecord = {
+              id: _remId,
+              date: collectionNoteData.promiseDate, // YYYY-MM-DD
+              time: '',
+              title: 'Cari',
+              note: collectionNoteData.text || '',
+              type: 'promise',
+              customerName: customerToUpdate?.name || '',
+              files: [],
+              completed: false,
+              createdBy: currentUserProfile?.name || '',
+              createdAt: Date.now()
+          };
+          if (db && firebaseUser) {
+              try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reminders', String(_remId)), _remRecord, { merge: true }); } catch (e) { console.error('Ödeme sözü hatırlatma ekleme hatası:', e); }
+          } else {
+              setReminders(prev => [...prev.filter(r => String(r.id) !== String(_remId)), _remRecord]);
+          }
       }
 
       setIsCollectionNoteModalOpen(false);
@@ -3688,6 +3797,27 @@ const handleAddInvoice = async () => {
       e.preventDefault();
       navFn();
   };
+
+  // YENİ: Müşteri listesindeki KAYDIRMA konumunu koru — bir cariye girip "Listeye Geri Dön" ile
+  // dönünce liste en başa dönmesin, kaldığı yerden devam etsin.
+  const mainScrollRef = useRef(null);
+  const listScrollTopRef = useRef(0);
+  const prevSelectedCustRef = useRef(null);
+  const handleMainScroll = () => {
+      // Cari profili KAPALIYKEN (liste görünürken) son kaydırma konumunu sakla.
+      if (!selectedCustomerId && mainScrollRef.current) {
+          listScrollTopRef.current = mainScrollRef.current.scrollTop;
+      }
+  };
+  React.useLayoutEffect(() => {
+      const prev = prevSelectedCustRef.current;
+      // Profilden (dolu) listeye (null) dönüldüğünde saklanan kaydırma konumunu geri yükle.
+      if (prev && !selectedCustomerId && mainScrollRef.current) {
+          mainScrollRef.current.scrollTop = listScrollTopRef.current;
+      }
+      prevSelectedCustRef.current = selectedCustomerId;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomerId]);
   const [detailYear, setDetailYear] = useState(2026);
 
   const [activeSizeFilter, setActiveSizeFilter] = useState(null);
@@ -6496,7 +6626,8 @@ const newAppt = {
 
   const menuItems = [
     { id: 'dashboard', label: 'Anasayfa', icon: LayoutDashboard, permId: 'menu-dashboard' },
-    { id: 'takvim', label: 'Takvim', icon: Calendar, permId: 'menu-takvim' },
+    { id: 'takvim', label: 'Randevular', icon: Calendar, permId: 'menu-takvim' },
+    { id: 'hatirlatmalar', label: 'Hatırlatmalar', icon: Bell, permId: 'menu-hatirlatmalar' },
     { id: 'tum-musteriler', label: 'Müşteri Listesi', icon: Users, permId: 'menu-musteri-listesi' },
     { id: 'odeme-islemleri', label: 'Ödeme İşlemleri', icon: Wallet, permId: 'menu-odeme-islemleri', subItems: [
         { id: 'odeme-girisi', label: 'Tahsilat Girişi Yap', permId: 'page-odeme-girisi' }, 
@@ -7527,6 +7658,18 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                             {sub.label}
                             {sub.id === 'odeme-girisi' && <Plus size={14} className={isSubActive ? 'text-white' : 'text-teal-600'} />}
                             {sub.id === 'depo-odemeleri-guncelle' && <RefreshCcw size={14} className="text-white" />}
+                            {/* YENİ: Hatırlatmalarda günü gelmiş/geçmiş ve tamamlanmamış kayıt varsa yanıp sönen bildirim ışığı */}
+                            {sub.id === 'hatirlatmalar' && (() => {
+                                const _t = new Date().toISOString().split('T')[0];
+                                const _due = reminders.filter(r => !r.completed && r.date && r.date <= _t).length;
+                                if (_due === 0) return null;
+                                return (
+                                  <span className="ml-auto relative flex h-5 min-w-[20px] items-center justify-center shrink-0">
+                                     <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                                     <span className={`relative inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full text-[10px] font-bold ${isSubActive ? 'bg-white text-red-600' : 'bg-red-500 text-white'}`}>{_due}</span>
+                                  </span>
+                                );
+                            })()}
                           </button>
                         );
                       })}
@@ -7558,6 +7701,18 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                         <span className="relative inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">{upcomingAppointmentsCount}</span>
                      </span>
                   )}
+                  {/* YENİ: Hatırlatmalarda günü gelmiş/geçmiş ve tamamlanmamış kayıt varsa yanıp sönen bildirim ışığı */}
+                  {item.id === 'hatirlatmalar' && (() => {
+                      const _t = new Date().toISOString().split('T')[0];
+                      const _due = reminders.filter(r => !r.completed && r.date && r.date <= _t).length;
+                      if (_due === 0) return null;
+                      return (
+                         <span className="ml-auto relative flex h-5 min-w-[20px] items-center justify-center shrink-0">
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                            <span className="relative inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">{_due}</span>
+                         </span>
+                      );
+                  })()}
                 </button>
               )
             })}
@@ -7751,7 +7906,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-8 w-full block scroll-smooth relative">
+        <main ref={mainScrollRef} onScroll={handleMainScroll} className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-8 w-full block scroll-smooth relative">
           {(() => {
              // YENİ EKLENEN: Aktif sayfaya erişim izni kontrolü (süper yönetici hariç)
              if (currentRoleIsSuper()) return null;
@@ -8362,6 +8517,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                       </div>
                                   </>
                               )}
+                              <button onClick={() => setReminderModal({ mode: 'add', data: { date: new Date().toISOString().split('T')[0], time: '', title: 'Cari', note: '', type: 'promise', customerName: customer.name, completed: false, files: [] } })} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border border-emerald-100" title="Bu müşteri için ödeme sözü hatırlatması oluştur"><Bell size={14}/> Ödeme Sözü Hatırlat</button>
                               <button onClick={() => { if(!checkActionPerm('action-musteri-sil')) return; setCustomerToDeleteId(customer.id); setIsDeleteCustomerModalOpen(true); }} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm border border-red-100"><Trash2 size={14}/> Kalıcı Sil</button>
                            </div>
                          </div>
@@ -8640,6 +8796,34 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
 
                       {/* CARİ HESAP EKSTRESİ YUKARIYA TAŞINDI */}
                       <div className="mt-2 mb-2">
+                         {/* YENİ: Cari ekstre üstü bildirimler — kaç aydır tahsilat yok + kaç aylık borcu var.
+                             (Aylık Borç Takip'teki hesabın aynısı; cari borç ve güncel aylık kiradan hesaplanır.) */}
+                         {(() => {
+                             const _bal = Number(getCustomerLedger(customer).balance || 0);
+                             if (_bal <= 0) return null;
+                             const _rooms = rooms.filter(r => r.customerName === customer.name);
+                             let _rent = 0;
+                             _rooms.forEach(room => { const b = Number(room.monthlyFee || 0); const k = room.hasKdv !== undefined ? room.hasKdv : true; _rent += Math.round(k ? b * 1.20 : b); });
+                             const _monthsOwed = _rent > 0 ? Math.max(1, Math.round(_bal / _rent)) : 1;
+                             const _pays = customer.payments || [];
+                             let _msp = null;
+                             if (_pays.length > 0) {
+                                 const t = Math.max(..._pays.map(p => new Date(p.date).getTime()).filter(x => !isNaN(x)));
+                                 if (isFinite(t)) { const d = new Date(t); const n = new Date(); _msp = (n.getFullYear() - d.getFullYear()) * 12 + (n.getMonth() - d.getMonth()); if (_msp < 0) _msp = 0; }
+                             }
+                             return (
+                                 <div className="flex flex-wrap items-center gap-2 mb-3">
+                                     {_msp === null ? (
+                                         <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1.5"><History size={13}/> Hiç tahsilat yok</span>
+                                     ) : _msp >= 1 ? (
+                                         <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1.5"><History size={13}/> {_msp} aydır tahsilat yok</span>
+                                     ) : null}
+                                     {_monthsOwed > 0 && (
+                                         <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-700 border border-red-200 flex items-center gap-1.5"><AlertCircle size={13}/> {_monthsOwed} aylık borcu var</span>
+                                     )}
+                                 </div>
+                             );
+                         })()}
                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
                              <div className="flex items-center gap-4">
                                  <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><History size={16} /> Detaylı Cari Hesap Dökümü (Ekstre)</h4>
@@ -9109,15 +9293,16 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         <input type="text" placeholder="Müşteri Adı Ara..." value={debtSearchTerm} onChange={(e) => setDebtSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-50 shadow-sm font-medium" />
                     </div>
                     <select value={debtMonthFilter} onChange={(e) => setDebtMonthFilter(e.target.value)} className="w-full sm:w-auto px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 font-bold text-slate-700 shadow-sm cursor-pointer">
-                        <option value="all">Tüm Borçlular</option>
-                        <option value="0-30000">0 - 30.000 TL Arası</option>
-                        <option value="30000-50000">30.000 - 50.000 TL Arası</option>
-                        <option value="50000-100000">50.000 - 100.000 TL Arası</option>
-                        <option value="100000+">100.000 TL ve Üzeri</option>
+                        <option value="all">Tüm Aylık Borçlular</option>
+                        <option value="m1">1 Aylık Borçlular</option>
+                        <option value="m2">2 Aylık Borçlular</option>
+                        <option value="m3">3 Aylık Borçlular</option>
+                        <option value="m4">4 Aylık Borçlular</option>
+                        <option value="m5+">5 Ay ve Üzeri Borçlular</option>
                     </select>
                     {/* YENİ EKLENEN: Tahsilat durumu / Yeni Eklenen filtresi */}
                     <select value={debtPaymentFilter} onChange={(e) => setDebtPaymentFilter(e.target.value)} className="w-full sm:w-auto px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 font-bold text-slate-700 shadow-sm cursor-pointer">
-                        <option value="new">Yeni Eklenen</option>
+                        <option value="new">Tüm Tahsilatsızlar</option>
                         <option value="1">1 Aydır Tahsilat Yok</option>
                         <option value="2">2 Aydır Tahsilat Yok</option>
                         <option value="3">3 Aydır Tahsilat Yok</option>
@@ -9140,17 +9325,19 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           customerRooms.forEach(room => {
                               const baseAmt = Number(room.monthlyFee || 0);
                               const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
-                              const monthlyTotal = hasKdv ? baseAmt * 1.20 : baseAmt;
+                              // DÜZELTME: KDV çarpımı float hatası üretiyordu (6600 yerine 6599,99...). Yuvarlıyoruz.
+                              const monthlyTotal = Math.round(hasKdv ? baseAmt * 1.20 : baseAmt);
                               totalMonthlyRent += monthlyTotal;
                           });
             
-                          // YENİ EKLENDİ: Kalan borç, toplam aylık kiraya bölünür. 
-                          // Math.ceil (yukarı yuvarlama) kullanılarak 1 TL borç kalsa bile o ay gecikmiş sayılır.
-                          // Cari bakiye değiştikçe bu sayı anında otomatik güncellenir.
+                          // DÜZELTME: Kalan cari borç / güncel aylık kira → EN YAKIN tam aya YUVARLANIR (Math.round),
+                          // borç varsa en az 1 ay. (Eski Math.ceil float yüzünden 2 yerine 3 gösteriyordu.)
+                          // Örn: 13.200/6.600=2 → 2 ay | 12.000/10.000=1,2 → 1 ay | 20.000/10.000=2 → 2 ay | 4.800/6.000=0,8 → 1 ay.
+                          // Tahsilat yapıldıkça kalan bakiyeye göre otomatik revize olur.
                           let monthsOwed = 0;
                           if (finalBalance > 0) {
                               if (totalMonthlyRent > 0) {
-                                  monthsOwed = Math.ceil(finalBalance / totalMonthlyRent);
+                                  monthsOwed = Math.max(1, Math.round(finalBalance / totalMonthlyRent));
                               } else {
                                   // Müşterinin aktif odası yok ama geçmişten kalan borcu varsa
                                   monthsOwed = 1; 
@@ -9211,17 +9398,19 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                       let filteredDebtors = debtors.filter(c => c.name.toLowerCase().includes(debtSearchTerm.toLowerCase()));
 
-                      // YENİ EKLENEN: Borç tutarı aralığına göre filtreleme
-                      if (debtMonthFilter === '0-30000') {
-                          filteredDebtors = filteredDebtors.filter(c => c.totalDebt <= 30000);
-                      } else if (debtMonthFilter === '30000-50000') {
-                          filteredDebtors = filteredDebtors.filter(c => c.totalDebt > 30000 && c.totalDebt <= 50000);
-                      } else if (debtMonthFilter === '50000-100000') {
-                          filteredDebtors = filteredDebtors.filter(c => c.totalDebt > 50000 && c.totalDebt <= 100000);
-                      } else if (debtMonthFilter === '100000+') {
-                          filteredDebtors = filteredDebtors.filter(c => c.totalDebt > 100000);
+                      // YENİ: Aylık borç sayısına (toplam borç / aylık kira) göre filtreleme. Tahsilat yaptıkça revize olur.
+                      if (debtMonthFilter === 'm1') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed === 1);
+                      } else if (debtMonthFilter === 'm2') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed === 2);
+                      } else if (debtMonthFilter === 'm3') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed === 3);
+                      } else if (debtMonthFilter === 'm4') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed === 4);
+                      } else if (debtMonthFilter === 'm5+') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed >= 5);
                       }
-                      // "all" (Tüm Borçlular) seçiliyken tüm borçlular gösterilir, en yüksekten en düşüğe sıralanır (aşağıdaki .sort ile)
+                      // "all" (Tüm Aylık Borçlular) seçiliyken tüm borçlular gösterilir.
 
                       // YENİ EKLENEN: Kaç aydır tahsilat yok / Yeni Eklenen filtresi
                       if (debtPaymentFilter === '1') {
@@ -9319,6 +9508,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                       <span className="px-2 py-1 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 shadow-sm flex items-center gap-1">
                                                           <Box size={10} /> {customer.roomsCount} Oda
                                                       </span>
+                                                      {/* YENİ: Kaç AYLIK borcu olduğu (toplam cari borç / aylık kira). Tahsilat yapıldıkça otomatik revize olur. */}
+                                                      {customer.monthsOwed > 0 && (
+                                                          <span className="px-2 py-1 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200 shadow-sm flex items-center gap-1">
+                                                              <AlertCircle size={10} /> {customer.monthsOwed} Aylık Borcu Var
+                                                          </span>
+                                                      )}
                                                   </div>
 
                                                   <div className="bg-red-50 rounded-xl p-3 border border-red-100 mb-4">
@@ -9598,6 +9793,129 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               </div>
                           </div>
                       </>
+                  );
+              })()}
+            </div>
+          ) : activeMenu === 'hatirlatmalar' ? (
+            <div className="max-w-6xl mx-auto flex flex-col pb-10 animate-in fade-in duration-300">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
+                <div>
+                  <h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Hatırlatma Takvimi</h1>
+                  <h2 className="text-2xl font-bold text-slate-800">Hatırlatmalar</h2>
+                  <p className="text-sm text-gray-500 mt-1">Ödeme sözleri, günlük notlar ve görevleri takvim üzerinde takip edin; tamamlandı olarak işaretleyin.</p>
+                </div>
+                <button onClick={() => setReminderModal({ mode: 'add', data: { date: reminderSelectedDate, time: '', title: 'Şirket', note: '', type: 'promise', customerName: '', completed: false, files: [] } })} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm flex items-center gap-2 shrink-0"><Plus size={16}/> Yeni Hatırlatma</button>
+              </div>
+              {(() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  const pending = reminders.filter(r => !r.completed && r.date && r.date <= today).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+                  const selD = new Date(reminderSelectedDate + 'T00:00:00');
+                  const year = selD.getFullYear(); const month = selD.getMonth();
+                  const firstDay = new Date(year, month, 1);
+                  const startOffset = (firstDay.getDay() + 6) % 7;
+                  const daysInMonth = new Date(year, month + 1, 0).getDate();
+                  const monthNames = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+                  const pad = (n) => String(n).padStart(2, '0');
+                  const cells = [];
+                  for (let i = 0; i < startOffset; i++) cells.push(null);
+                  for (let d = 1; d <= daysInMonth; d++) cells.push(`${year}-${pad(month + 1)}-${pad(d)}`);
+                  const shiftMonth = (delta) => { const nd = new Date(year, month + delta, 1); setReminderSelectedDate(`${nd.getFullYear()}-${pad(nd.getMonth() + 1)}-01`); };
+                  const dayReminders = reminders.filter(r => r.date === reminderSelectedDate).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+                  const typeMeta = { promise: { label: 'Ödeme Sözü', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' }, note: { label: 'Not', cls: 'bg-blue-100 text-blue-700 border-blue-200' }, task: { label: 'Görev', cls: 'bg-purple-100 text-purple-700 border-purple-200' } };
+                  return (
+                    <div className="flex flex-col gap-6">
+                      {pending.length > 0 && (
+                        <div className="bg-red-50 border-2 border-red-100 rounded-2xl p-4">
+                           <div className="flex items-center gap-2 mb-2"><AlertCircle size={18} className="text-red-500"/><h3 className="font-bold text-red-700">Bekleyen Hatırlatmalar ({pending.length})</h3></div>
+                           <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
+                              {pending.slice(0, 30).map(r => (
+                                 <div key={r.id} className="flex items-center justify-between gap-2 bg-white rounded-lg px-3 py-2 border border-red-100">
+                                    <div className="min-w-0">
+                                       <span className="text-xs font-bold text-slate-700">{r.title}</span>
+                                       {r.customerName ? <span className="text-[11px] text-gray-500"> • {r.customerName}</span> : null}
+                                       <span className="text-[11px] text-red-500 font-bold"> • {new Date(r.date).toLocaleDateString('tr-TR')}{r.time ? ' ' + r.time : ''}</span>
+                                    </div>
+                                    <button onClick={() => handleToggleReminder(r)} className="shrink-0 bg-green-500 hover:bg-green-600 text-white text-[10px] font-bold px-2 py-1 rounded-md flex items-center gap-1"><Check size={11}/> Tamamlandı</button>
+                                 </div>
+                              ))}
+                           </div>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                            <div className="flex items-center justify-between mb-3">
+                               <button onClick={() => shiftMonth(-1)} className="w-9 h-9 rounded-lg hover:bg-gray-100 text-gray-500 font-bold text-lg flex items-center justify-center">‹</button>
+                               <h3 className="font-bold text-slate-800">{monthNames[month]} {year}</h3>
+                               <button onClick={() => shiftMonth(1)} className="w-9 h-9 rounded-lg hover:bg-gray-100 text-gray-500 font-bold text-lg flex items-center justify-center">›</button>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-gray-400 mb-1">
+                               {['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'].map(d => <div key={d}>{d}</div>)}
+                            </div>
+                            <div className="grid grid-cols-7 gap-1">
+                               {cells.map((ds, i) => {
+                                  if (!ds) return <div key={'e' + i} />;
+                                  const dayN = Number(ds.slice(-2));
+                                  const dr = reminders.filter(r => r.date === ds);
+                                  const hasPending = dr.some(r => !r.completed);
+                                  const isSel = ds === reminderSelectedDate;
+                                  const isToday = ds === today;
+                                  return (
+                                    <button key={ds} onClick={() => setReminderSelectedDate(ds)} className={`aspect-square rounded-lg text-xs font-bold flex flex-col items-center justify-center transition-colors ${isSel ? 'bg-indigo-600 text-white' : isToday ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'hover:bg-gray-100 text-slate-700'}`}>
+                                       {dayN}
+                                       {dr.length > 0 && <span className={`mt-0.5 w-1.5 h-1.5 rounded-full ${hasPending ? (isSel ? 'bg-white' : 'bg-red-500') : (isSel ? 'bg-white/70' : 'bg-green-500')}`}></span>}
+                                    </button>
+                                  );
+                               })}
+                            </div>
+                            <div className="flex items-center gap-4 mt-3 text-[10px] text-gray-400 font-bold">
+                               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span> Bekleyen</span>
+                               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span> Tamamlanan</span>
+                            </div>
+                         </div>
+                         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                            <div className="flex items-center justify-between mb-3">
+                               <h3 className="font-bold text-slate-800">{new Date(reminderSelectedDate + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</h3>
+                               <button onClick={() => setReminderModal({ mode: 'add', data: { date: reminderSelectedDate, time: '', title: 'Şirket', note: '', type: 'promise', customerName: '', completed: false, files: [] } })} className="text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg px-2 py-1 text-[11px] font-bold flex items-center gap-1 border border-indigo-100"><Plus size={12}/> Ekle</button>
+                            </div>
+                            {dayReminders.length === 0 ? (
+                               <div className="text-center py-10 text-gray-400 text-sm">Bu güne ait hatırlatma yok.</div>
+                            ) : (
+                               <div className="flex flex-col gap-2 max-h-[440px] overflow-y-auto pr-1">
+                                  {dayReminders.map(r => {
+                                     const tm = typeMeta[r.type] || typeMeta.note;
+                                     return (
+                                       <div key={r.id} className={`rounded-xl border p-3 ${r.completed ? 'bg-gray-50 border-gray-100 opacity-70' : 'bg-white border-gray-200'}`}>
+                                          <div className="flex items-start gap-2">
+                                             <button onClick={() => handleToggleReminder(r)} title={r.completed ? 'Tamamlanmadı yap' : 'Tamamlandı yap'} className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${r.completed ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 hover:border-green-400'}`}>{r.completed && <Check size={13} strokeWidth={3}/>}</button>
+                                             <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${tm.cls}`}>{tm.label}</span>
+                                                   {r.time ? <span className="text-[10px] font-bold text-gray-500 flex items-center gap-0.5"><Clock size={10}/> {r.time}</span> : null}
+                                                </div>
+                                                <div className={`text-sm font-bold text-slate-800 mt-1 ${r.completed ? 'line-through' : ''}`}>{r.title}</div>
+                                                {r.customerName ? <div className="text-[11px] text-gray-500">Müşteri: {r.customerName}</div> : null}
+                                                {r.note ? <div className="text-xs text-gray-600 mt-1 whitespace-pre-wrap">{r.note}</div> : null}
+                                                {Array.isArray(r.files) && r.files.length > 0 && (
+                                                   <div className="flex flex-wrap gap-1 mt-1.5">
+                                                      {r.files.map((f, i) => (
+                                                         <a key={f.id || i} href={f.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 bg-indigo-50 border border-indigo-100 rounded px-1.5 py-0.5 text-[10px] font-bold text-indigo-600 hover:underline max-w-[130px] truncate"><FileTextIcon size={10}/> {f.name || 'Belge'}</a>
+                                                      ))}
+                                                   </div>
+                                                )}
+                                             </div>
+                                             <div className="flex flex-col gap-1 shrink-0">
+                                                <button onClick={() => setReminderModal({ mode: 'edit', data: { ...r } })} className="text-blue-500 hover:text-blue-700 bg-blue-50 rounded p-1 border border-blue-100"><Edit size={12}/></button>
+                                                <button onClick={() => handleDeleteReminder(r.id)} className="text-red-500 hover:text-red-700 bg-red-50 rounded p-1 border border-red-100"><Trash2 size={12}/></button>
+                                             </div>
+                                          </div>
+                                       </div>
+                                     );
+                                  })}
+                               </div>
+                            )}
+                         </div>
+                      </div>
+                    </div>
                   );
               })()}
             </div>
@@ -13252,6 +13570,70 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
               <div className="flex justify-end gap-3 mt-2">
                 <button onClick={() => setIsAddPendingModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2.5 rounded-xl text-sm font-bold">İptal</button>
                 <button onClick={handleAddManualPending} disabled={!manualPendingData.amount || !manualPendingData.date} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 flex items-center gap-2"><Check size={16}/> Kaydet</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* YENİ EKLENEN: HATIRLATMA EKLE / DÜZENLE MODALI */}
+      {reminderModal && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in max-h-[92vh] overflow-y-auto">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center relative sticky top-0 bg-white">
+              <h3 className="text-lg font-bold text-indigo-600 mx-auto w-full text-center">{reminderModal.mode === 'edit' ? 'Hatırlatma Düzenle' : 'Yeni Hatırlatma'}</h3>
+              <button onClick={() => setReminderModal(null)} className="absolute right-5 text-gray-400 hover:text-red-500"><X size={20}/></button>
+            </div>
+            <div className="p-6 flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1"><label className="text-[11px] font-bold text-gray-500 uppercase">Tarih</label><input type="date" value={reminderModal.data.date} onChange={(e) => setReminderModal(m => ({ ...m, data: { ...m.data, date: e.target.value } }))} className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400"/></div>
+                <div className="flex flex-col gap-1"><label className="text-[11px] font-bold text-gray-500 uppercase">Saat (ops.)</label><input type="time" value={reminderModal.data.time} onChange={(e) => setReminderModal(m => ({ ...m, data: { ...m.data, time: e.target.value } }))} className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400"/></div>
+              </div>
+              <div className="flex flex-col gap-1"><label className="text-[11px] font-bold text-gray-500 uppercase">Tür</label>
+                <select value={reminderModal.data.type} onChange={(e) => setReminderModal(m => ({ ...m, data: { ...m.data, type: e.target.value } }))} className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400 font-bold text-slate-700 cursor-pointer">
+                  <option value="promise">Ödeme Sözü</option>
+                  <option value="note">Günlük Not</option>
+                  <option value="task">Görev</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-1"><label className="text-[11px] font-bold text-gray-500 uppercase">Başlık</label>
+                <select value={reminderModal.data.title || 'Şirket'} onChange={(e) => setReminderModal(m => ({ ...m, data: { ...m.data, title: e.target.value } }))} className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400 font-bold text-slate-700 cursor-pointer">
+                  <option value="Şirket">Şirket</option>
+                  <option value="Müşteri">Müşteri</option>
+                  <option value="Oda">Oda</option>
+                  <option value="Cari">Cari</option>
+                  <option value="Bilgi">Bilgi</option>
+                  <option value="Önemli">Önemli</option>
+                  <option value="Personel">Personel</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-1"><label className="text-[11px] font-bold text-gray-500 uppercase">Müşteri (ops.)</label>
+                <select value={reminderModal.data.customerName || ''} onChange={(e) => setReminderModal(m => ({ ...m, data: { ...m.data, customerName: e.target.value } }))} className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400 text-slate-700 cursor-pointer">
+                  <option value="">— Müşteri Seç (opsiyonel) —</option>
+                  {[...customers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr')).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1"><label className="text-[11px] font-bold text-gray-500 uppercase">Not / Açıklama</label><textarea rows={3} value={reminderModal.data.note} onChange={(e) => setReminderModal(m => ({ ...m, data: { ...m.data, note: e.target.value } }))} placeholder="Detay..." className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400 resize-none"/></div>
+              {/* YENİ: Çoklu belge / fotoğraf / PDF ekleme — eklenip kaldırılabilir */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-bold text-gray-500 uppercase">Belgeler (fotoğraf / PDF — birden fazla)</label>
+                <div className="flex flex-wrap gap-2">
+                   {(reminderModal.data.files || []).map((f, i) => (
+                      <div key={f.id || i} className="flex items-center gap-1 bg-indigo-50 border border-indigo-100 rounded-lg pl-2 pr-1 py-1 text-[11px] font-bold text-indigo-700">
+                         <a href={f.url} target="_blank" rel="noreferrer" className="hover:underline flex items-center gap-1 max-w-[140px] truncate"><FileTextIcon size={12}/> {f.name || 'Belge'}</a>
+                         <button onClick={() => setReminderModal(m => ({ ...m, data: { ...m.data, files: (m.data.files || []).filter((_, idx) => idx !== i) } }))} className="text-red-500 hover:text-red-700 p-0.5"><X size={12}/></button>
+                      </div>
+                   ))}
+                   <label className="cursor-pointer flex items-center gap-1 bg-white border-2 border-dashed border-indigo-200 hover:bg-indigo-50 rounded-lg px-2 py-1 text-[11px] font-bold text-indigo-600">
+                      <Plus size={12}/> Dosya Ekle
+                      <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={async (e) => { const fl = Array.from(e.target.files || []); e.target.value = ''; for (const file of fl) { try { const url = await uploadImageToServer(file); setReminderModal(m => ({ ...m, data: { ...m.data, files: [...(m.data.files || []), { id: Date.now() + Math.floor(Math.random() * 10000), name: file.name, url }] } })); } catch (err) { console.error('Belge yükleme hatası:', err); } } }}/>
+                   </label>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer"><input type="checkbox" checked={!!reminderModal.data.completed} onChange={(e) => setReminderModal(m => ({ ...m, data: { ...m.data, completed: e.target.checked } }))} className="w-4 h-4"/> Tamamlandı olarak işaretle</label>
+              <div className="flex justify-end gap-2 mt-2">
+                <button onClick={() => setReminderModal(null)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2 rounded-xl text-sm font-bold">İptal</button>
+                <button onClick={handleSaveReminder} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-bold flex items-center gap-2"><Check size={16}/> Kaydet</button>
               </div>
             </div>
           </div>
