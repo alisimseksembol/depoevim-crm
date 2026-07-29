@@ -8661,6 +8661,34 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
 
                       {/* CARİ HESAP EKSTRESİ YUKARIYA TAŞINDI */}
                       <div className="mt-2 mb-2">
+                         {/* YENİ: Cari ekstre üstü bildirimler — kaç aydır tahsilat yok + kaç aylık borcu var.
+                             (Aylık Borç Takip'teki hesabın aynısı; cari borç ve güncel aylık kiradan hesaplanır.) */}
+                         {(() => {
+                             const _bal = Number(getCustomerLedger(customer).balance || 0);
+                             if (_bal <= 0) return null;
+                             const _rooms = rooms.filter(r => r.customerName === customer.name);
+                             let _rent = 0;
+                             _rooms.forEach(room => { const b = Number(room.monthlyFee || 0); const k = room.hasKdv !== undefined ? room.hasKdv : true; _rent += k ? b * 1.20 : b; });
+                             const _monthsOwed = _rent > 0 ? Math.ceil(_bal / _rent) : 1;
+                             const _pays = customer.payments || [];
+                             let _msp = null;
+                             if (_pays.length > 0) {
+                                 const t = Math.max(..._pays.map(p => new Date(p.date).getTime()).filter(x => !isNaN(x)));
+                                 if (isFinite(t)) { const d = new Date(t); const n = new Date(); _msp = (n.getFullYear() - d.getFullYear()) * 12 + (n.getMonth() - d.getMonth()); if (_msp < 0) _msp = 0; }
+                             }
+                             return (
+                                 <div className="flex flex-wrap items-center gap-2 mb-3">
+                                     {_msp === null ? (
+                                         <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1.5"><History size={13}/> Hiç tahsilat yok</span>
+                                     ) : _msp >= 1 ? (
+                                         <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1.5"><History size={13}/> {_msp} aydır tahsilat yok</span>
+                                     ) : null}
+                                     {_monthsOwed > 0 && (
+                                         <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-700 border border-red-200 flex items-center gap-1.5"><AlertCircle size={13}/> {_monthsOwed} aylık borcu var</span>
+                                     )}
+                                 </div>
+                             );
+                         })()}
                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
                              <div className="flex items-center gap-4">
                                  <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><History size={16} /> Detaylı Cari Hesap Dökümü (Ekstre)</h4>
@@ -9130,15 +9158,16 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         <input type="text" placeholder="Müşteri Adı Ara..." value={debtSearchTerm} onChange={(e) => setDebtSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-50 shadow-sm font-medium" />
                     </div>
                     <select value={debtMonthFilter} onChange={(e) => setDebtMonthFilter(e.target.value)} className="w-full sm:w-auto px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 font-bold text-slate-700 shadow-sm cursor-pointer">
-                        <option value="all">Tüm Borçlular</option>
-                        <option value="0-30000">0 - 30.000 TL Arası</option>
-                        <option value="30000-50000">30.000 - 50.000 TL Arası</option>
-                        <option value="50000-100000">50.000 - 100.000 TL Arası</option>
-                        <option value="100000+">100.000 TL ve Üzeri</option>
+                        <option value="all">Tüm Aylık Borçlular</option>
+                        <option value="m1">1 Aylık Borçlular</option>
+                        <option value="m2">2 Aylık Borçlular</option>
+                        <option value="m3">3 Aylık Borçlular</option>
+                        <option value="m4">4 Aylık Borçlular</option>
+                        <option value="m5+">5 Ay ve Üzeri Borçlular</option>
                     </select>
                     {/* YENİ EKLENEN: Tahsilat durumu / Yeni Eklenen filtresi */}
                     <select value={debtPaymentFilter} onChange={(e) => setDebtPaymentFilter(e.target.value)} className="w-full sm:w-auto px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 font-bold text-slate-700 shadow-sm cursor-pointer">
-                        <option value="new">Yeni Eklenen</option>
+                        <option value="new">Tüm Tahsilatsızlar</option>
                         <option value="1">1 Aydır Tahsilat Yok</option>
                         <option value="2">2 Aydır Tahsilat Yok</option>
                         <option value="3">3 Aydır Tahsilat Yok</option>
@@ -9232,17 +9261,19 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                       let filteredDebtors = debtors.filter(c => c.name.toLowerCase().includes(debtSearchTerm.toLowerCase()));
 
-                      // YENİ EKLENEN: Borç tutarı aralığına göre filtreleme
-                      if (debtMonthFilter === '0-30000') {
-                          filteredDebtors = filteredDebtors.filter(c => c.totalDebt <= 30000);
-                      } else if (debtMonthFilter === '30000-50000') {
-                          filteredDebtors = filteredDebtors.filter(c => c.totalDebt > 30000 && c.totalDebt <= 50000);
-                      } else if (debtMonthFilter === '50000-100000') {
-                          filteredDebtors = filteredDebtors.filter(c => c.totalDebt > 50000 && c.totalDebt <= 100000);
-                      } else if (debtMonthFilter === '100000+') {
-                          filteredDebtors = filteredDebtors.filter(c => c.totalDebt > 100000);
+                      // YENİ: Aylık borç sayısına (toplam borç / aylık kira) göre filtreleme. Tahsilat yaptıkça revize olur.
+                      if (debtMonthFilter === 'm1') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed === 1);
+                      } else if (debtMonthFilter === 'm2') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed === 2);
+                      } else if (debtMonthFilter === 'm3') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed === 3);
+                      } else if (debtMonthFilter === 'm4') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed === 4);
+                      } else if (debtMonthFilter === 'm5+') {
+                          filteredDebtors = filteredDebtors.filter(c => c.monthsOwed >= 5);
                       }
-                      // "all" (Tüm Borçlular) seçiliyken tüm borçlular gösterilir, en yüksekten en düşüğe sıralanır (aşağıdaki .sort ile)
+                      // "all" (Tüm Aylık Borçlular) seçiliyken tüm borçlular gösterilir.
 
                       // YENİ EKLENEN: Kaç aydır tahsilat yok / Yeni Eklenen filtresi
                       if (debtPaymentFilter === '1') {
@@ -9340,6 +9371,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                       <span className="px-2 py-1 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 shadow-sm flex items-center gap-1">
                                                           <Box size={10} /> {customer.roomsCount} Oda
                                                       </span>
+                                                      {/* YENİ: Kaç AYLIK borcu olduğu (toplam cari borç / aylık kira). Tahsilat yapıldıkça otomatik revize olur. */}
+                                                      {customer.monthsOwed > 0 && (
+                                                          <span className="px-2 py-1 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200 shadow-sm flex items-center gap-1">
+                                                              <AlertCircle size={10} /> {customer.monthsOwed} Aylık Borcu Var
+                                                          </span>
+                                                      )}
                                                   </div>
 
                                                   <div className="bg-red-50 rounded-xl p-3 border border-red-100 mb-4">
