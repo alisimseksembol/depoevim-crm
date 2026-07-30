@@ -48,23 +48,23 @@ export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, son
   const safeBasTarih = sanitizeForXml(basTarih);
   const safeSonTarih = sanitizeForXml(sonTarih);
 
-  const xmlPayload = `
+const xmlPayload = `
   <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://services.albaraka.com/">
      <soapenv:Header/>
      <soapenv:Body>
         <ser:getHesapHareketleri>
-           <pId>${safePId}</pId>
-           <pIdPass>${safePIdPass}</pIdPass>
+           <pId><![CDATA[${pId}]]></pId>
+           <pIdPass><![CDATA[${pIdPass}]]></pIdPass>
            <pParams>
-              <musteriNo>${safeMNo}</musteriNo>
+              <musteriNo><![CDATA[${mNo}]]></musteriNo>
               <hesapNo></hesapNo>
-              <basTarih>${safeBasTarih}</basTarih>
-              <sonTarih>${safeSonTarih}</sonTarih>
+              <basTarih>${basTarihStr}</basTarih>
+              <sonTarih>${sonTarihStr}</sonTarih>
            </pParams>
         </ser:getHesapHareketleri>
      </soapenv:Body>
   </soapenv:Envelope>`;
-
+  
   // DEBUG: pId/musteriNo'nun bankaya ne olarak gittiğini teyit etmek için geçici log.
   // pIdPass bilerek loglanmıyor (şifreyi log'a yazmayın).
   console.log('[Albaraka] Giden istek -> pId:', JSON.stringify(safePId), 'musteriNo:', JSON.stringify(safeMNo), 'pIdPass uzunluk:', safePIdPass.length);
