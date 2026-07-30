@@ -6,18 +6,25 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { apiKey, apiSecret, customerNo } = req.body;
+  const { apiKey, apiSecret, customerNo, gunSayisi } = req.body;
 
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
-
-  // Arayüzden musteriNo gelmezse (ki gelmiyor), banka kullanıcı adını musteriNo olarak kullan
   const mNo = customerNo || pId;
 
-  // Banka formatına uygun tarih (yyyyMMdd) - Son 3 günü tarar
+  if (!pId || !pIdPass) {
+    return res.status(400).json({ success: false, error: 'Banka API bilgileri eksik.' });
+  }
+
+  // Varsayılan 30 gün (test amaçlı geniş aralık); istersen body'de
+  // gunSayisi göndererek override edebilirsin (örn. 3).
+  const gun = Number.isFinite(Number(gunSayisi)) && Number(gunSayisi) > 0
+    ? Number(gunSayisi)
+    : 30;
+
   const today = new Date();
   const pastDate = new Date(today);
-  pastDate.setDate(pastDate.getDate() - 3);
+  pastDate.setDate(pastDate.getDate() - gun);
 
   try {
     const { bankaSonucu, hareketler } = await callGetHesapHareketleri({
@@ -28,32 +35,50 @@ export default async function handler(req, res) {
       sonTarih: formatAlbarakaDate(today)
     });
 
-    // Banka kimlik dogrulama/istek hatasini (orn. "Sifre yanlis") sessizce bos listeye
-    // cevirmek yerine gercek hata olarak dondur.
-    if (bankaSonucu?.code && bankaSonucu.code !== 0) {
+    // code bazen string ("0") olarak dönebilir; Number() ile güvenli karşılaştırma.
+    const kod = bankaSonucu?.code !== undefined && bankaSonucu?.code !== null
+      ? Number(bankaSonucu.code)
+      : null;
+
+    if (kod !== null && kod !== 0) {
       return res.status(400).json({
         success: false,
         error: bankaSonucu.message || 'Banka hata döndü',
-        kod: bankaSonucu.code
+        kod
       });
     }
 
     const transactions = hareketler.map(t => {
-       const rawDate = String(t.Tarih);
-       const formattedDate = rawDate ? `${rawDate.substring(0,4)}-${rawDate.substring(4,6)}-${rawDate.substring(6,8)}` : new Date().toISOString().split('T')[0];
+      const rawDate = String(t.Tarih || '');
+      const formattedDate = rawDate.length >= 8
+        ? `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`
+        : new Date().toISOString().split('T')[0];
 
-       return {
-         id: t.fisNo || Date.now() + Math.random(),
-         date: formattedDate,
-         amount: parseFloat(t.islemTutari || 0),
-         description: t.Aciklama || '',
-         isCredit: t.borcAlacak === 'A'
-       }
-    }).filter(t => t.isCredit);
+      // Türk bankacılık formatı "1.250,50" -> "1250.50" dönüşümü.
+      // Bankadan düz "1250.50" gelirse de bu işlem zarar vermez.
+      const tutarStr = String(t.islemTutari ?? '0').replace(/\./g, '').replace(',', '.');
 
-    res.status(200).json({ success: true, transactions });
+      return {
+        id: t.fisNo || `${Date.now()}-${Math.random()}`,
+        date: formattedDate,
+        amount: parseFloat(tutarStr),
+        description: t.Aciklama || 'Açıklama Yok',
+        // Gelen/Giden kontrolü (A=Alacak, B=Borç, C=Credit vb. bankaya göre değişebilir)
+        isCredit: t.borcAlacak === 'A' || t.borcAlacak === 'C',
+        rawBorcAlacak: t.borcAlacak // Ekranda test için ham veriyi tutalım
+      };
+    });
+
+    // DİKKAT: filtre yok, 30 günlük tüm gelen/giden hareketler dönüyor.
+    // Sadece gelenleri (alacak) istersen: transactions.filter(t => t.isCredit)
+    res.status(200).json({ success: true, transactions, toplamKayit: transactions.length });
   } catch (error) {
     console.error('Banka API Hatası:', error.message);
-    res.status(500).json({ success: false, error: 'Albaraka servisine bağlanırken hata oluştu.' });
+    // detay alanı geçici: gerçek hatayı görmek için. Sorun çözülünce kaldırabilirsin.
+    res.status(500).json({
+      success: false,
+      error: 'Albaraka servisine bağlanırken hata oluştu.',
+      detay: error.message
+    });
   }
 }

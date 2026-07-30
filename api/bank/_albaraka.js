@@ -4,22 +4,19 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import { XMLParser } from 'fast-xml-parser';
 
 export function createAlbarakaHttpsAgent() {
-  // Fixie proxy URL'sini Vercel'in güvenli ortam değişkenlerinden tam haliyle çekiyoruz (407 hatasını çözer)
   const proxyUrl = process.env.FIXIE_URL;
-  
+
   if (!proxyUrl) {
     console.error('[Albaraka] Kritik Hata: FIXIE_URL bulunamadı!');
     return undefined;
   }
-  
-  const httpsAgent = new HttpsProxyAgent(proxyUrl);
-  
-  // Albaraka SOAP servisi TLS handshake'inde ara sertifikayı (intermediate CA) göndermiyor.
-  // Sertifika doğrulama uyarısını bypass ediyoruz.
-  const originalConnect = httpsAgent.connect.bind(httpsAgent);
-  httpsAgent.connect = (req, opts) => originalConnect(req, { ...opts, rejectUnauthorized: false });
-  
-  return httpsAgent;
+
+  // Albaraka SOAP servisi TLS handshake'inde ara sertifikayı (intermediate CA)
+  // göndermiyor. rejectUnauthorized'ı doğrudan constructor'a veriyoruz.
+  // (Önceki `.connect` monkey-patch yöntemi https-proxy-agent sürümüne göre
+  //  sessizce devre dışı kalabiliyordu; bu, "bazen bağlanıyor bazen
+  //  bağlanmıyor" davranışının olası nedenlerinden biriydi.)
+  return new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
 }
 
 export const formatAlbarakaDate = (date) => {
@@ -29,10 +26,47 @@ export const formatAlbarakaDate = (date) => {
   return `${y}${m}${d}`;
 };
 
+// ALBARAKA_DEBUG=1 ortam değişkenini Vercel'de tanımlarsan ham XML ve
+// parse edilmiş JSON'u loglara basar. Gerçek response yapısını görüp
+// aşağıdaki extractHareketler/extractBankaSonucu fonksiyonlarına doğru
+// yolu eklemek için kullan; sorunu bulduktan sonra kapatabilirsin.
+const DEBUG = process.env.ALBARAKA_DEBUG === '1';
+
+// Hareket listesinin bankanın döndüğü XML'de hangi anahtarın altında
+// olduğunu kesin bilmediğimiz için birkaç olası yolu sırayla deniyoruz.
+function extractHareketler(hesapHareketleriResponse) {
+  const candidates = [
+    hesapHareketleriResponse?.responseData?.return,
+    hesapHareketleriResponse?.return,
+    hesapHareketleriResponse?.getHesapHareketleriResult?.return,
+    hesapHareketleriResponse?.getHesapHareketleriResult?.hareketler,
+    hesapHareketleriResponse?.responseData?.hareketler,
+    hesapHareketleriResponse?.hareketler
+  ];
+
+  for (const c of candidates) {
+    if (!c) continue;
+    if (Array.isArray(c)) return c;
+    if (c.hareket) return Array.isArray(c.hareket) ? c.hareket : [c.hareket];
+    if (typeof c === 'object') return [c]; // tek kayıt objesi olarak dönmüş olabilir
+  }
+  return [];
+}
+
+function extractBankaSonucu(hesapHareketleriResponse) {
+  return (
+    hesapHareketleriResponse?.responseData?.result ||
+    hesapHareketleriResponse?.result ||
+    hesapHareketleriResponse?.getHesapHareketleriResult?.bankaSonucu ||
+    hesapHareketleriResponse?.getHesapHareketleriResult?.result ||
+    hesapHareketleriResponse?.bankaSonucu ||
+    null
+  );
+}
+
 // Albaraka getHesapHareketleri SOAP servisini çağırır ve ayrıştırılmış sonucu döner.
 export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, sonTarih }) {
-  
-  // XML CDATA ile zırhlandığı için ? ve %% gibi özel karakterler sunucuda bozulmadan okunur
+
   const xmlPayload = `
   <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://services.albaraka.com/">
      <soapenv:Header/>
@@ -49,9 +83,10 @@ export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, son
         </ser:getHesapHareketleri>
      </soapenv:Body>
   </soapenv:Envelope>`;
-  
-  // DEBUG: pId/musteriNo'nun bankaya ne olarak gittiğini teyit etmek için geçici log.
-  console.log('[Albaraka] Giden istek -> pId:', pId, 'musteriNo:', mNo, 'pIdPass uzunluk:', pIdPass?.length);
+
+  if (DEBUG) {
+    console.log('[Albaraka] Giden istek -> pId:', pId, 'musteriNo:', mNo, 'pIdPass uzunluk:', pIdPass?.length);
+  }
 
   const response = await axios.post(
     'https://eservice.albarakaturk.com.tr:10214/invoiceincomingsite/HesapBilgileriService.asmx',
@@ -67,19 +102,25 @@ export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, son
     }
   );
 
+  if (DEBUG) {
+    console.log('[Albaraka] HAM XML:', response.data);
+  }
+
   const parser = new XMLParser({ ignoreAttributes: true, removeNSPrefix: true });
   const jsonObj = parser.parse(response.data);
 
+  if (DEBUG) {
+    console.log('[Albaraka] PARSE EDİLMİŞ JSON:', JSON.stringify(jsonObj, null, 2));
+  }
+
   const hesapHareketleriResponse = jsonObj?.Envelope?.Body?.getHesapHareketleriResponse;
-  const bankaSonucu = hesapHareketleriResponse?.responseData?.result;
 
-  // DEBUG: Bankadan dönen ham sonuç kodu/mesajını görmek için geçici log.
-  console.log('[Albaraka] Banka sonucu:', JSON.stringify(bankaSonucu));
+  const bankaSonucu = extractBankaSonucu(hesapHareketleriResponse);
+  const hareketler = extractHareketler(hesapHareketleriResponse);
 
-  const responseBody = hesapHareketleriResponse?.responseData?.return || hesapHareketleriResponse?.return || [];
-  const hareketler = Array.isArray(responseBody)
-    ? responseBody
-    : (responseBody.hareket ? (Array.isArray(responseBody.hareket) ? responseBody.hareket : [responseBody.hareket]) : []);
+  if (DEBUG) {
+    console.log('[Albaraka] Banka sonucu:', JSON.stringify(bankaSonucu), '| hareket sayısı:', hareketler.length);
+  }
 
   return { bankaSonucu, hareketler };
 }
