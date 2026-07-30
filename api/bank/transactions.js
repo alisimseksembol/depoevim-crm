@@ -11,13 +11,12 @@ export default async function handler(req, res) {
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
 
-  // Arayüzden musteriNo gelmezse (ki gelmiyor), banka kullanıcı adını musteriNo olarak kullan
   const mNo = customerNo || pId;
 
-  // Banka formatına uygun tarih (yyyyMMdd) - Son 3 günü tarar
+  // Test için süreyi son 3 günden son 30 GÜNE çıkarıyoruz
   const today = new Date();
   const pastDate = new Date(today);
-  pastDate.setDate(pastDate.getDate() - 3);
+  pastDate.setDate(pastDate.getDate() - 30);
 
   try {
     const { bankaSonucu, hareketler } = await callGetHesapHareketleri({
@@ -28,8 +27,6 @@ export default async function handler(req, res) {
       sonTarih: formatAlbarakaDate(today)
     });
 
-    // Banka kimlik dogrulama/istek hatasini (orn. "Sifre yanlis") sessizce bos listeye
-    // cevirmek yerine gercek hata olarak dondur.
     if (bankaSonucu?.code && bankaSonucu.code !== 0) {
       return res.status(400).json({
         success: false,
@@ -39,17 +36,24 @@ export default async function handler(req, res) {
     }
 
     const transactions = hareketler.map(t => {
-       const rawDate = String(t.Tarih);
-       const formattedDate = rawDate ? `${rawDate.substring(0,4)}-${rawDate.substring(4,6)}-${rawDate.substring(6,8)}` : new Date().toISOString().split('T')[0];
+       const rawDate = String(t.Tarih || '');
+       const formattedDate = rawDate.length >= 8 
+         ? `${rawDate.substring(0,4)}-${rawDate.substring(4,6)}-${rawDate.substring(6,8)}` 
+         : new Date().toISOString().split('T')[0];
 
        return {
          id: t.fisNo || Date.now() + Math.random(),
          date: formattedDate,
          amount: parseFloat(t.islemTutari || 0),
-         description: t.Aciklama || '',
-         isCredit: t.borcAlacak === 'A'
+         description: t.Aciklama || 'Açıklama Yok',
+         // Gelen/Giden kontrolü (A=Alacak, B=Borç, C=Credit vb. bankaya göre değişebilir)
+         isCredit: t.borcAlacak === 'A' || t.borcAlacak === 'C',
+         rawBorcAlacak: t.borcAlacak // Ekranda test için ham veriyi tutalım
        }
-    }).filter(t => t.isCredit);
+    }); 
+    
+    // DİKKAT: .filter(t => t.isCredit) kısmını SİLDİK. 
+    // Artık gelen/giden tüm 30 günlük hareketler listelenecek!
 
     res.status(200).json({ success: true, transactions });
   } catch (error) {
