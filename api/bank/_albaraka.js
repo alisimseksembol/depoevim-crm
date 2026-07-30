@@ -4,8 +4,13 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import { XMLParser } from 'fast-xml-parser';
 
 export function createAlbarakaHttpsAgent() {
-  // Fixie proxy bağlantı URL'si (Kimlik doğrulamalı tam URL)
-  const proxyUrl = 'http://fixie:WEorldlNsAsn2KF@ventoux.usefixie.com:80';
+  // Fixie proxy URL'sini Vercel'in güvenli ortam değişkenlerinden tam haliyle çekiyoruz (407 hatasını çözer)
+  const proxyUrl = process.env.FIXIE_URL;
+  
+  if (!proxyUrl) {
+    console.error('[Albaraka] Kritik Hata: FIXIE_URL bulunamadı!');
+    return undefined;
+  }
   
   const httpsAgent = new HttpsProxyAgent(proxyUrl);
   
@@ -27,7 +32,7 @@ export const formatAlbarakaDate = (date) => {
 // Albaraka getHesapHareketleri SOAP servisini çağırır ve ayrıştırılmış sonucu döner.
 export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, sonTarih }) {
   
-  // XML CDATA ile zırhlandığı için özel karakterler sunucuda bozulmadan okunur
+  // XML CDATA ile zırhlandığı için ? ve %% gibi özel karakterler sunucuda bozulmadan okunur
   const xmlPayload = `
   <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://services.albaraka.com/">
      <soapenv:Header/>
