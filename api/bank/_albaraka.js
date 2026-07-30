@@ -12,11 +12,20 @@ export function createAlbarakaHttpsAgent() {
   }
 
   // Albaraka SOAP servisi TLS handshake'inde ara sertifikayı (intermediate CA)
-  // göndermiyor. rejectUnauthorized'ı doğrudan constructor'a veriyoruz.
-  // (Önceki `.connect` monkey-patch yöntemi https-proxy-agent sürümüne göre
-  //  sessizce devre dışı kalabiliyordu; bu, "bazen bağlanıyor bazen
-  //  bağlanmıyor" davranışının olası nedenlerinden biriydi.)
-  return new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
+  // göndermiyor -> "unable to verify the first certificate" hatası.
+  //
+  // NOT: Sadece constructor'a rejectUnauthorized:false vermek bu ortamda
+  // YETMEDİ (canlı logda hata devam etti) — https-proxy-agent, her istekte
+  // connect(req, opts) çağrısına giden opts içindeki rejectUnauthorized'ı
+  // constructor ayarının üzerine yazıyor gibi görünüyor. Bu yüzden hem
+  // constructor'a veriyoruz hem de connect'i sarmalayıp opts'u zorla
+  // eziyoruz — ikisi birlikte garantiye alır.
+  const httpsAgent = new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
+
+  const originalConnect = httpsAgent.connect.bind(httpsAgent);
+  httpsAgent.connect = (req, opts) => originalConnect(req, { ...opts, rejectUnauthorized: false });
+
+  return httpsAgent;
 }
 
 export const formatAlbarakaDate = (date) => {
