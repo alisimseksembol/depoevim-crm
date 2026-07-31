@@ -6,18 +6,19 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { apiKey, apiSecret, customerNo, gunSayisi } = req.body;
+  const { apiKey, apiSecret, customerNo, gunSayisi, accountSuffix } = req.body;
 
   const pId = apiKey || process.env.ALBARAKA_USERNAME;
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
   const mNo = customerNo || pId;
+  
+  // Test için ilk ALBARAKA hesabınızın (01) numarasını doğrudan kullanıyoruz
+  const hesapNo = accountSuffix || '1'; 
 
   if (!pId || !pIdPass) {
     return res.status(400).json({ success: false, error: 'Banka API bilgileri eksik.' });
   }
 
-  // Varsayılan 30 gün (test amaçlı geniş aralık); istersen body'de
-  // gunSayisi göndererek override edebilirsin (örn. 3).
   const gun = Number.isFinite(Number(gunSayisi)) && Number(gunSayisi) > 0
     ? Number(gunSayisi)
     : 30;
@@ -31,11 +32,11 @@ export default async function handler(req, res) {
       pId,
       pIdPass,
       mNo,
+      hesapNo, // XML'e spesifik hesap numarası gönderiliyor
       basTarih: formatAlbarakaDate(pastDate),
       sonTarih: formatAlbarakaDate(today)
     });
 
-    // code bazen string ("0") olarak dönebilir; Number() ile güvenli karşılaştırma.
     const kod = bankaSonucu?.code !== undefined && bankaSonucu?.code !== null
       ? Number(bankaSonucu.code)
       : null;
@@ -54,8 +55,6 @@ export default async function handler(req, res) {
         ? `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`
         : new Date().toISOString().split('T')[0];
 
-      // Türk bankacılık formatı "1.250,50" -> "1250.50" dönüşümü.
-      // Bankadan düz "1250.50" gelirse de bu işlem zarar vermez.
       const tutarStr = String(t.islemTutari ?? '0').replace(/\./g, '').replace(',', '.');
 
       return {
@@ -63,18 +62,14 @@ export default async function handler(req, res) {
         date: formattedDate,
         amount: parseFloat(tutarStr),
         description: t.Aciklama || 'Açıklama Yok',
-        // Gelen/Giden kontrolü (A=Alacak, B=Borç, C=Credit vb. bankaya göre değişebilir)
         isCredit: t.borcAlacak === 'A' || t.borcAlacak === 'C',
-        rawBorcAlacak: t.borcAlacak // Ekranda test için ham veriyi tutalım
+        rawBorcAlacak: t.borcAlacak 
       };
     });
 
-    // DİKKAT: filtre yok, 30 günlük tüm gelen/giden hareketler dönüyor.
-    // Sadece gelenleri (alacak) istersen: transactions.filter(t => t.isCredit)
     res.status(200).json({ success: true, transactions, toplamKayit: transactions.length });
   } catch (error) {
     console.error('Banka API Hatası:', error.message);
-    // detay alanı geçici: gerçek hatayı görmek için. Sorun çözülünce kaldırabilirsin.
     res.status(500).json({
       success: false,
       error: 'Albaraka servisine bağlanırken hata oluştu.',

@@ -11,17 +11,7 @@ export function createAlbarakaHttpsAgent() {
     return undefined;
   }
 
-  // Albaraka SOAP servisi TLS handshake'inde ara sertifikayı (intermediate CA)
-  // göndermiyor -> "unable to verify the first certificate" hatası.
-  //
-  // NOT: Sadece constructor'a rejectUnauthorized:false vermek bu ortamda
-  // YETMEDİ (canlı logda hata devam etti) — https-proxy-agent, her istekte
-  // connect(req, opts) çağrısına giden opts içindeki rejectUnauthorized'ı
-  // constructor ayarının üzerine yazıyor gibi görünüyor. Bu yüzden hem
-  // constructor'a veriyoruz hem de connect'i sarmalayıp opts'u zorla
-  // eziyoruz — ikisi birlikte garantiye alır.
   const httpsAgent = new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
-
   const originalConnect = httpsAgent.connect.bind(httpsAgent);
   httpsAgent.connect = (req, opts) => originalConnect(req, { ...opts, rejectUnauthorized: false });
 
@@ -35,14 +25,8 @@ export const formatAlbarakaDate = (date) => {
   return `${y}${m}${d}`;
 };
 
-// ALBARAKA_DEBUG=1 ortam değişkenini Vercel'de tanımlarsan ham XML ve
-// parse edilmiş JSON'u loglara basar. Gerçek response yapısını görüp
-// aşağıdaki extractHareketler/extractBankaSonucu fonksiyonlarına doğru
-// yolu eklemek için kullan; sorunu bulduktan sonra kapatabilirsin.
 const DEBUG = process.env.ALBARAKA_DEBUG === '1';
 
-// Hareket listesinin bankanın döndüğü XML'de hangi anahtarın altında
-// olduğunu kesin bilmediğimiz için birkaç olası yolu sırayla deniyoruz.
 function extractHareketler(hesapHareketleriResponse) {
   const candidates = [
     hesapHareketleriResponse?.responseData?.return,
@@ -57,7 +41,7 @@ function extractHareketler(hesapHareketleriResponse) {
     if (!c) continue;
     if (Array.isArray(c)) return c;
     if (c.hareket) return Array.isArray(c.hareket) ? c.hareket : [c.hareket];
-    if (typeof c === 'object') return [c]; // tek kayıt objesi olarak dönmüş olabilir
+    if (typeof c === 'object') return [c]; 
   }
   return [];
 }
@@ -73,9 +57,10 @@ function extractBankaSonucu(hesapHareketleriResponse) {
   );
 }
 
-// Albaraka getHesapHareketleri SOAP servisini çağırır ve ayrıştırılmış sonucu döner.
-export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, sonTarih }) {
+// Fonksiyona hesapNo parametresini dahil ediyoruz
+export async function callGetHesapHareketleri({ pId, pIdPass, mNo, hesapNo = '', basTarih, sonTarih }) {
 
+  // hesapNo XML içine eklendi
   const xmlPayload = `
   <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://services.albaraka.com/">
      <soapenv:Header/>
@@ -85,7 +70,7 @@ export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, son
            <pIdPass><![CDATA[${pIdPass}]]></pIdPass>
            <pParams>
               <musteriNo><![CDATA[${mNo}]]></musteriNo>
-              <hesapNo></hesapNo>
+              <hesapNo><![CDATA[${hesapNo}]]></hesapNo>
               <basTarih>${basTarih}</basTarih>
               <sonTarih>${sonTarih}</sonTarih>
            </pParams>
@@ -94,7 +79,7 @@ export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, son
   </soapenv:Envelope>`;
 
   if (DEBUG) {
-    console.log('[Albaraka] Giden istek -> pId:', pId, 'musteriNo:', mNo, 'pIdPass uzunluk:', pIdPass?.length);
+    console.log('[Albaraka] Giden istek -> pId:', pId, 'musteriNo:', mNo, 'hesapNo:', hesapNo, 'pIdPass uzunluk:', pIdPass?.length);
   }
 
   const response = await axios.post(
@@ -106,7 +91,7 @@ export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, son
         'SOAPAction': 'http://services.albaraka.com/getHesapHareketleri'
       },
       httpsAgent: createAlbarakaHttpsAgent(),
-      proxy: false, // axios'un HTTP(S)_PROXY env değişkenlerini otomatik algılayıp httpsAgent ile çakışmasını engeller
+      proxy: false, 
       timeout: 25000
     }
   );
@@ -123,7 +108,6 @@ export async function callGetHesapHareketleri({ pId, pIdPass, mNo, basTarih, son
   }
 
   const hesapHareketleriResponse = jsonObj?.Envelope?.Body?.getHesapHareketleriResponse;
-
   const bankaSonucu = extractBankaSonucu(hesapHareketleriResponse);
   const hareketler = extractHareketler(hesapHareketleriResponse);
 
