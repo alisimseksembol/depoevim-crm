@@ -4265,8 +4265,10 @@ const handleCancelReservation = async () => {
   // YENİ: "Beni Hatırla" — banka/API bilgileri Firestore'a kaydedilir, her açılışta otomatik dolar.
   const [bankApiRemember, setBankApiRemember] = useState(false);
   const bankApiLoadedRef = useRef(false);
-  // YENİ: Canlı Banka Hareketleri filtreleri — varsayılan olarak SON 7 GÜN gösterilir.
-  const [bankTxFrom, setBankTxFrom] = useState(() => new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]);
+  // YENİ: Canlı Banka Hareketleri filtreleri — varsayılan olarak SON 3 GÜN gösterilir.
+  const [bankTxFrom, setBankTxFrom] = useState(() => new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]);
+  // YENİ: SİLİNEN hareketler — bir daha listede görünmez ve yenilemede tekrar eklenmez.
+  const [deletedBankTxIds, setDeletedBankTxIds] = useState([]);
   const [bankTxTo, setBankTxTo] = useState(() => new Date().toISOString().split('T')[0]);
   const [bankTxStatusFilter, setBankTxStatusFilter] = useState('all'); // all | tahsilat | askida | matched | unmatched | new
 
@@ -6473,6 +6475,10 @@ const newAppt = {
       const descFold = foldTr(description);
       found = customers.find(c => c.name && foldTr(c.name).length >= 5 && descFold.includes(foldTr(c.name)));
       if (found) return found;
+      // 2b) Boşluk farkları da yok sayılır: "TUĞBANUR KOÇ" carisi, açıklamada "TUGBA NUR KOC" yazsa da eşleşir.
+      const descTight = descFold.replace(/ /g, '');
+      found = customers.find(c => { const n = foldTr(c.name || '').replace(/ /g, ''); return n.length >= 8 && descTight.includes(n); });
+      if (found) return found;
       // 3) Oda No ile eşleştir
       // DÜZELTME: Oda adı ile açıklamadaki yazım farkları (boşluk / tire / nokta / alt çizgi / bitişik)
       // artık eşleşir: "H 112" odası, açıklamada "H-112", "H112", "H.112", "h 112" olarak geçse de bulunur.
@@ -6560,19 +6566,17 @@ const newAppt = {
           });
           const result = await res.json();
           if (!res.ok || !Array.isArray(result.transactions)) return;
-          // YENİ: Bu ekranda YALNIZCA hesaba GİREN (para yatan) hareketler gösterilir.
-          // Para ÇIKIŞLARI (eksi tutarlar veya borç/debit/giden olarak işaretli kayıtlar) hiç alınmaz.
-          const isIncomingTx = (t) => {
+          // GÜNCELLENDİ: TÜM hareketler alınır (hesaba GİREN ve hesaptan GİDEN).
+          // Yön, bankadan gelen veriye göre belirlenir; giden paralar cariye tahsilat olarak eşleştirilmez.
+          const _delSet = new Set((deletedBankTxIds || []).map(String));
+          const incoming = result.transactions.map(t => {
               const amt = Number(t.amount);
-              if (isNaN(amt) || amt <= 0) return false; // eksi veya sıfır tutar = para çıkışı / geçersiz
-              const dir = String(t.direction || t.type || t.drCr || t.borcAlacak || t.islemTuru || '').toLocaleLowerCase('tr');
-              if (dir && /(out|debit|borc|borç|giden|cikis|çıkış|gider|havale gonderim|^d$)/.test(dir)) return false;
-              // YENİ: Açıklamadan para çıkışı tespiti (eksi tutar, gönderen kendi bankamız, alıcı bilgisi)
-              if (isOutgoingBankDesc(t.description)) return false;
-              return true;
-          };
-          const incoming = result.transactions.filter(isIncomingTx).map(t => {
-              const matched = matchBankTxToCustomer(t.description);
+              const dirRaw = String(t.direction || t.type || t.drCr || t.borcAlacak || t.islemTuru || '').toLocaleLowerCase('tr');
+              const isOut = (!isNaN(amt) && amt < 0)
+                  || (dirRaw && /(out|debit|borc|borç|giden|cikis|çıkış|gider|havale gonderim|^d$)/.test(dirRaw))
+                  || isOutgoingBankDesc(t.description);
+              // Giden parada müşteri eşleştirmesi YAPILMAZ (yanlış tahsilat oluşmasın).
+              const matched = isOut ? null : matchBankTxToCustomer(t.description);
               return {
                   id: t.id || Date.now() + Math.random(),
                   rawDate: t.date,
@@ -6580,7 +6584,9 @@ const newAppt = {
                   // YENİ: Saat bilgisi — sıralama gün + SAAT'e göre yapılır, tabloda da gösterilir.
                   time: (() => { const _d = new Date(t.date); return isNaN(_d.getTime()) ? '' : _d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }); })(),
                   ts: (() => { const _d = new Date(t.date); return isNaN(_d.getTime()) ? 0 : _d.getTime(); })(),
-                  amount: Number(t.amount),
+                  amount: Math.abs(Number(t.amount)),
+                  // YENİ: Yön — bankadan gelen veriye göre 'in' (hesaba giren) / 'out' (hesaptan giden)
+                  direction: isOut ? 'out' : 'in',
                   description: t.description || '',
                   matchedCustomerId: matched?.id || null,
                   matchedCustomerName: matched?.name || null,
@@ -6588,18 +6594,18 @@ const newAppt = {
                   processed: false
               };
           });
-          // Yeni gelenleri en üste ekle (id bazında tekrar önle)
+          // Yeni gelenleri en üste ekle (id bazında tekrar önle; SİLİNENLER tekrar eklenmez)
           setBankApiTransactions(prev => {
               const existingIds = new Set(prev.map(p => p.id));
               // YENİ: Yeni gelen her hareket "Son Eklenen" olarak işaretlenir (isNew).
               // Önceden işaretlenmiş olanlar da işaretli KALIR; her yenilemede yeni gelenler de eklenir.
-              const fresh = incoming.filter(i => !existingIds.has(i.id)).map(i => ({ ...i, isNew: true, addedAt: Date.now() }));
+              const fresh = incoming.filter(i => !existingIds.has(i.id) && !_delSet.has(String(i.id))).map(i => ({ ...i, isNew: true, addedAt: Date.now() }));
               // YENİ: Her yeni tahsilat için masaüstü bildirimi (izin verilmişse).
               if (fresh.length > 0) {
                   try {
                       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-                          fresh.forEach(f => {
-                              try { new Notification('Yeni Banka Hareketi', { body: `${Number(f.amount).toLocaleString('tr-TR')} TL • ${f.matchedCustomerName || 'Eşleşmedi'}\n${String(f.description).slice(0, 80)}`, tag: String(f.id) }); } catch (err) { /* yoksay */ }
+                          fresh.filter(f => f.direction !== 'out').forEach(f => {
+                              try { new Notification('Yeni Gelen Ödeme', { body: `+${Number(f.amount).toLocaleString('tr-TR')} TL • ${f.matchedCustomerName || 'Eşleşmedi'}\n${String(f.description).slice(0, 80)}`, tag: String(f.id) }); } catch (err) { /* yoksay */ }
                           });
                       }
                   } catch (err) { /* yoksay */ }
@@ -6644,8 +6650,10 @@ const newAppt = {
           try {
               const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'bankTransactions'));
               if (snap.exists()) {
-                  const arr = snap.data()?.items;
-                  if (Array.isArray(arr) && arr.length > 0) setBankApiTransactions(arr);
+                  const d = snap.data() || {};
+                  if (Array.isArray(d.items) && d.items.length > 0) setBankApiTransactions(d.items);
+                  // YENİ: Silinen hareket id'leri de geri yüklenir (bir daha görünmesinler).
+                  if (Array.isArray(d.deletedIds)) setDeletedBankTxIds(d.deletedIds.map(String));
               }
           } catch (e) { console.error('Banka hareketleri yükleme hatası:', e); }
       })();
@@ -6661,13 +6669,13 @@ const newAppt = {
               try {
                   // Doküman boyut sınırına takılmamak için en yeni 1500 kayıt saklanır.
                   const items = bankApiTransactions.slice(0, 1500);
-                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'bankTransactions'), { items, updatedAt: Date.now() }, { merge: true });
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'bankTransactions'), { items, deletedIds: (deletedBankTxIds || []).slice(-3000), updatedAt: Date.now() }, { merge: true });
               } catch (e) { console.error('Banka hareketleri kaydetme hatası:', e); }
           })();
       }, 1500);
       return () => { if (bankTxSaveTimerRef.current) clearTimeout(bankTxSaveTimerRef.current); };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bankApiTransactions, firebaseUser]);
+  }, [bankApiTransactions, deletedBankTxIds, firebaseUser]);
 
   // YENİ: OTOMATİK BAĞLANTI — kayıtlı API bilgileri varsa uygulama açılışında kendiliğinden
   // bankaya bağlanır ve canlı çekimi başlatır (elle "Bankaya Bağlan" gerekmez).
@@ -6697,7 +6705,12 @@ const newAppt = {
   const setBankTxStatus = (txId, status) => {
       setBankApiTransactions(prev => prev.map(t => t.id === txId ? { ...t, status } : t));
   };
-  const removeBankTx = (txId) => setBankApiTransactions(prev => prev.filter(t => t.id !== txId));
+  const removeBankTx = (txId) => {
+      // YENİ: Onay penceresi + KALICI gizleme (yenilemede bankadan tekrar eklenmez, eşleştirilmez).
+      if (!window.confirm('Bu banka hareketini silmek istediğinize emin misiniz?\n\nSilinen hareket bu ekranda bir daha görünmez ve "Şimdi Yenile" yapıldığında tekrar eklenmez.')) return;
+      setDeletedBankTxIds(prev => (prev.includes(String(txId)) ? prev : [...prev, String(txId)]));
+      setBankApiTransactions(prev => prev.filter(t => String(t.id) !== String(txId)));
+  };
 
   // Hareketi kesinleştir: tahsilat ise cariye işle, askıda ise pendingCollections'a ekle
   const processBankTx = async (txId) => {
@@ -9499,39 +9512,37 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                       {/* Canlı hareketler tablosu */}
                       {(() => {
-                        // YENİ: Tarih + durum filtresi. Varsayılan SON 30 GÜN. En yeni tarih en üstte.
+                        // GÜNCELLENDİ: TÜM hareketler (gelen + giden) gösterilir. Varsayılan SON 3 GÜN, en yeni tarih/saat üstte.
                         const _fromT = bankTxFrom ? new Date(bankTxFrom + 'T00:00:00').getTime() : null;
                         const _toT = bankTxTo ? new Date(bankTxTo + 'T23:59:59').getTime() : null;
+                        const _delSetView = new Set((deletedBankTxIds || []).map(String));
+                        // Yön: kayıtta direction yoksa açıklamadan/tutardan çıkarılır (eski kayıtlar için)
+                        const dirOf = (tx) => tx.direction ? tx.direction : ((Number(tx.amount) < 0 || isOutgoingBankDesc(tx.description)) ? 'out' : 'in');
                         const visibleTx = bankApiTransactions
                           .filter(tx => {
-                              // YENİ: Bu ekran SADECE hesaba GİREN paraları gösterir — para çıkışları (eksi tutar) gizlenir.
-                              const _amt = Number(tx.amount);
-                              if (isNaN(_amt) || _amt <= 0) return false;
-                              if (isOutgoingBankDesc(tx.description)) return false;
+                              if (_delSetView.has(String(tx.id))) return false; // silinenler görünmez
                               const t = new Date(tx.rawDate).getTime();
                               if (!isNaN(t)) { if (_fromT !== null && t < _fromT) return false; if (_toT !== null && t > _toT) return false; }
+                              if (bankTxStatusFilter === 'in') return dirOf(tx) === 'in';
+                              if (bankTxStatusFilter === 'out') return dirOf(tx) === 'out';
                               if (bankTxStatusFilter === 'tahsilat') return !tx.processed && tx.status === 'tahsilat';
                               if (bankTxStatusFilter === 'askida') return !tx.processed && tx.status === 'askida';
                               if (bankTxStatusFilter === 'matched') return !!tx.matchedCustomerName;
                               if (bankTxStatusFilter === 'unmatched') return !tx.matchedCustomerName;
-                              if (bankTxStatusFilter === 'new') return !!tx.isNew;
                               return true;
                           })
                           .slice()
                           .sort((a, b) => { const ta = Number(a.ts) || new Date(a.rawDate).getTime() || 0; const tb = Number(b.ts) || new Date(b.rawDate).getTime() || 0; if (tb !== ta) return tb - ta; return (b.addedAt || 0) - (a.addedAt || 0); });
-                        const newCount = bankApiTransactions.filter(t => t.isNew).length;
                         const setRange = (days) => { const to = new Date(); const from = new Date(Date.now() - days * 86400000); setBankTxTo(to.toISOString().split('T')[0]); setBankTxFrom(from.toISOString().split('T')[0]); };
                         return (
                       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                           <div className="p-5 border-b border-gray-100 flex flex-col gap-3">
                             <div className="flex items-center justify-between flex-wrap gap-2">
                               <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><History size={18} className="text-[#1bc5bd]"/> Canlı Banka Hareketleri
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Yalnızca hesaba giren para</span>
-                                {newCount > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500 text-white">{newCount} YENİ</span>}
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">Gelen + Giden tüm hareketler</span>
                               </h3>
                               <div className="flex items-center gap-2">
                                 <span className="text-xs font-semibold text-gray-500">{visibleTx.length} / {bankApiTransactions.length} hareket</span>
-                                {newCount > 0 && <button onClick={() => setBankApiTransactions(prev => prev.map(t => ({ ...t, isNew: false })))} className="text-[10px] font-bold text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-1">Yeni işaretlerini temizle</button>}
                               </div>
                             </div>
                             {/* YENİ: Filtreleme seçenekleri */}
@@ -9543,7 +9554,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <div className="flex flex-col gap-0.5"><label className="text-[9px] font-bold text-gray-400 uppercase">Durum</label>
                                 <select value={bankTxStatusFilter} onChange={(e) => setBankTxStatusFilter(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-cyan-500 cursor-pointer">
                                   <option value="all">Tümü</option>
-                                  <option value="new">Son Eklenenler</option>
+                                  <option value="in">Gelen Para</option>
+                                  <option value="out">Giden Para</option>
                                   <option value="tahsilat">Tahsilat (Cariye)</option>
                                   <option value="askida">Askıda</option>
                                   <option value="matched">Eşleşenler</option>
@@ -9561,6 +9573,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   const idle = 'text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-gray-200 text-slate-600 hover:bg-gray-50';
                                   return (
                                     <>
+                                      <button onClick={() => setRange(3)} className={_is(3) ? act : idle}>Son 3 Gün</button>
                                       <button onClick={() => setRange(7)} className={_is(7) ? act : idle}>Son 7 Gün</button>
                                       <button onClick={() => setRange(30)} className={_is(30) ? act : idle}>Son 30 Gün</button>
                                       <button onClick={() => { setBankTxFrom(_yearStart); setBankTxTo(_todayStr); }} className={_isYear ? act : idle}>Bu Sene</button>
@@ -9578,19 +9591,26 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   <tbody className="divide-y divide-gray-100">
                                       {visibleTx.length === 0 ? (
                                           <tr><td colSpan="6" className="p-10 text-center text-gray-400 font-medium">{bankApiTransactions.length > 0 ? 'Seçilen filtrede hareket yok. Tarih aralığını genişletin veya "Tümü" deyin.' : (bankApiRunning ? 'Yeni banka hareketi bekleniyor...' : 'Henüz hareket yok. Bağlanıp "Otomatik Çekimi Başlat" deyin.')}</td></tr>
-                                      ) : visibleTx.map(tx => (
-                                          <tr key={tx.id} className={`hover:bg-gray-50 ${tx.processed ? 'opacity-50' : ''} ${tx.isNew && !tx.processed ? 'bg-amber-50/60' : ''}`}>
+                                      ) : visibleTx.map((tx, _i) => {
+                                          const _dir = dirOf(tx);
+                                          const _isOut = _dir === 'out';
+                                          // YENİ: GÜN GEÇİŞİ — önceki satırdan farklı bir güne geçildiğinde kalın ayırıcı çizgi
+                                          const _prev = _i > 0 ? visibleTx[_i - 1] : null;
+                                          const _dayChanged = _prev && _prev.date !== tx.date;
+                                          return (
+                                          <tr key={tx.id} className={`hover:bg-gray-50 ${tx.processed ? 'opacity-60' : ''} ${_isOut ? 'bg-rose-50/40' : ''} ${_dayChanged ? 'border-t-4 border-slate-300' : ''}`}>
                                               <td className="p-3 font-semibold text-gray-700 whitespace-nowrap text-xs align-top">
                                                   {tx.date}
                                                   {tx.time ? <span className="block text-[10px] font-bold text-gray-400">{tx.time}</span> : null}
-                                                  {tx.isNew && <span className="block mt-1 text-[8px] font-bold px-1.5 py-0.5 rounded bg-red-500 text-white w-fit">SON EKLENEN</span>}
+                                                  {/* YENİ: Bankadan gelen veriye göre yön etiketi */}
+                                                  <span className={`block mt-1 text-[8px] font-bold px-1.5 py-0.5 rounded w-fit ${_isOut ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}>{_isOut ? 'GİDEN PARA' : 'GELEN PARA'}</span>
                                               </td>
-                                              {/* YENİ: Açıklama en fazla 3 SATIR gösterilir (kırpılmadan sarar), yazı küçültüldü */}
+                                              {/* YENİ: Açıklama en fazla 4 SATIR gösterilir */}
                                               <td className="p-3 font-medium text-gray-600 align-top" title={tx.description}>
-                                                  <span className="block text-[11px] leading-snug break-words" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', maxWidth: '320px' }}>{tx.description}</span>
+                                                  <span className="block text-[11px] leading-snug break-words" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden', maxWidth: '320px' }}>{tx.description}</span>
                                               </td>
-                                              <td className="p-3 text-right font-extrabold text-green-600 text-xs whitespace-nowrap align-top">{Number(tx.amount).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</td>
-                                              <td className="p-3 text-center align-top">{tx.matchedCustomerName ? <span className="text-[11px] font-bold text-gray-800">{tx.matchedCustomerName}</span> : <span className="text-[11px] text-gray-400 italic">Eşleşmedi</span>}</td>
+                                              <td className={`p-3 text-right font-extrabold text-xs whitespace-nowrap align-top ${_isOut ? 'text-rose-600' : 'text-green-600'}`}>{_isOut ? '-' : '+'}{Math.abs(Number(tx.amount)).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL</td>
+                                              <td className="p-3 text-center align-top">{tx.matchedCustomerName ? <span className="text-[11px] font-bold text-gray-800">{tx.matchedCustomerName}</span> : <span className="text-[11px] text-gray-400 italic">{_isOut ? '—' : 'Eşleşmedi'}</span>}</td>
                                               <td className="p-3 text-center align-top">
                                                   {tx.processed ? (
                                                       <span className="text-[10px] font-bold px-2 py-1 rounded bg-gray-100 text-gray-500">İŞLENDİ</span>
@@ -9602,15 +9622,22 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                   )}
                                               </td>
                                               <td className="p-3 text-center align-top">
-                                                  {!tx.processed && (
+                                                  {!tx.processed ? (
                                                       <div className="flex items-center justify-center gap-1.5">
                                                           <button onClick={() => processBankTx(tx.id)} className="bg-[#1bc5bd] hover:bg-teal-500 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors shadow-sm">İşle</button>
+                                                          <button onClick={() => removeBankTx(tx.id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors"><Trash2 size={14}/></button>
+                                                      </div>
+                                                  ) : (
+                                                      /* YENİ: İşlendikten SONRA düzenleme — duruma göre cariye/askıya alınabilir veya silinebilir */
+                                                      <div className="flex items-center justify-center gap-1.5">
+                                                          <button onClick={() => { if(!window.confirm('Bu hareketin işlemini geri alıp yeniden düzenlemek istiyor musunuz?\n\nNot: Daha önce cariye/askıya işlenen kayıt sistemde kalır; gerekiyorsa ilgili ekrandan da düzeltmelisiniz.')) return; setBankApiTransactions(prev => prev.map(t => String(t.id) === String(tx.id) ? { ...t, processed: false } : t)); }} className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors" title="Düzenle (işlemi geri al)"><Edit size={14}/></button>
                                                           <button onClick={() => removeBankTx(tx.id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors"><Trash2 size={14}/></button>
                                                       </div>
                                                   )}
                                               </td>
                                           </tr>
-                                      ))}
+                                          );
+                                      })}
                                   </tbody>
                               </table>
                           </div>
