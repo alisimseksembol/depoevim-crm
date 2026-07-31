@@ -6460,7 +6460,18 @@ const newAppt = {
       let found = customers.find(c => c.customerNo && descNumberTokens.includes(String(c.customerNo)));
       if (found) return found;
       // 2) İsim ile eşleştir
-      found = customers.find(c => c.name && desc.includes(c.name.toLocaleLowerCase('tr')));
+      // DÜZELTME: Türkçe harf farkları ve noktalama/boşluk farkları YOK SAYILIR.
+      // Örn. carisi "HACI ALİ OCAK" olan müşteri, açıklamada "HACİ ALİ OCAK" yazsa da eşleşir.
+      // (İ/I/ı/i, Ç/C, Ğ/G, Ö/O, Ş/S, Ü/U dönüşümleri + fazla boşluk/noktalama temizliği)
+      const foldTr = (s) => String(s)
+          .toLocaleLowerCase('tr')
+          .replace(/\u0307/g, '')           // İ'nin küçük halindeki birleşik nokta
+          .replace(/[ıİI]/g, 'i')
+          .replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u')
+          .replace(/[^a-z0-9]+/g, ' ')
+          .trim();
+      const descFold = foldTr(description);
+      found = customers.find(c => c.name && foldTr(c.name).length >= 5 && descFold.includes(foldTr(c.name)));
       if (found) return found;
       // 3) Oda No ile eşleştir
       // DÜZELTME: Oda adı ile açıklamadaki yazım farkları (boşluk / tire / nokta / alt çizgi / bitişik)
@@ -6477,6 +6488,25 @@ const newAppt = {
       const room = rooms.find(r => r.name && r.customerName && roomNameMatches(r.name));
       if (room) return customers.find(c => c.name === room.customerName) || null;
       return null;
+  };
+
+  // YENİ: Açıklama metninden PARA ÇIKIŞI tespiti (hem çekimde hem ekranda kullanılır).
+  const isOutgoingBankDesc = (description) => {
+      const d = String(description || '');
+      if (!d) return false;
+      // a) Açıklamada eksi tutar: "Açk: - 375000.00 TRY", "- 12.500,00 TL"
+      if (/(^|[\s:])-\s*\d[\d.,]*\s*(try|tl)\b/i.test(d)) return true;
+      // b) Gönderen KENDİ bankamız ise (para bizden çıkmış): "GÖN:ALBARAKA ..."
+      const ownBank = String(bankApiConfig.bankName || '').split(' ')[0];
+      if (ownBank && ownBank.length >= 4) {
+          try {
+              const _re = new RegExp(`g[oö]n(?:deren)?\\s*[:\\-]?\\s*${ownBank.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
+              if (_re.test(d)) return true;
+          } catch (e) { /* yoksay */ }
+      }
+      // c) Alıcı bilgisi içeren gönderim kayıtları (bizden çıkan havale/EFT)
+      if (/\bal[iı]c[iı]\s*(banka|hesap|iban|ad)/i.test(d)) return true;
+      return false;
   };
 
   const handleBankApiConnect = async () => {
@@ -6537,6 +6567,8 @@ const newAppt = {
               if (isNaN(amt) || amt <= 0) return false; // eksi veya sıfır tutar = para çıkışı / geçersiz
               const dir = String(t.direction || t.type || t.drCr || t.borcAlacak || t.islemTuru || '').toLocaleLowerCase('tr');
               if (dir && /(out|debit|borc|borç|giden|cikis|çıkış|gider|havale gonderim|^d$)/.test(dir)) return false;
+              // YENİ: Açıklamadan para çıkışı tespiti (eksi tutar, gönderen kendi bankamız, alıcı bilgisi)
+              if (isOutgoingBankDesc(t.description)) return false;
               return true;
           };
           const incoming = result.transactions.filter(isIncomingTx).map(t => {
@@ -6545,6 +6577,9 @@ const newAppt = {
                   id: t.id || Date.now() + Math.random(),
                   rawDate: t.date,
                   date: new Date(t.date).toLocaleDateString('tr-TR'),
+                  // YENİ: Saat bilgisi — sıralama gün + SAAT'e göre yapılır, tabloda da gösterilir.
+                  time: (() => { const _d = new Date(t.date); return isNaN(_d.getTime()) ? '' : _d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }); })(),
+                  ts: (() => { const _d = new Date(t.date); return isNaN(_d.getTime()) ? 0 : _d.getTime(); })(),
                   amount: Number(t.amount),
                   description: t.description || '',
                   matchedCustomerId: matched?.id || null,
@@ -6571,9 +6606,10 @@ const newAppt = {
               }
               // YENİ: EN YENİ TARİH EN ÜSTTE olacak şekilde sırala.
               const merged = [...fresh, ...prev];
+              // Sıralama gün VE SAAT'e göre (en yeni saat en üstte).
               merged.sort((a, b) => {
-                  const ta = new Date(a.rawDate).getTime() || 0;
-                  const tb = new Date(b.rawDate).getTime() || 0;
+                  const ta = Number(a.ts) || new Date(a.rawDate).getTime() || 0;
+                  const tb = Number(b.ts) || new Date(b.rawDate).getTime() || 0;
                   if (tb !== ta) return tb - ta;
                   return (b.addedAt || 0) - (a.addedAt || 0);
               });
@@ -6596,6 +6632,66 @@ const newAppt = {
   };
 
   useEffect(() => () => { if (bankApiIntervalRef.current) clearInterval(bankApiIntervalRef.current); }, []);
+
+  // YENİ: KALICILIK — çekilen banka hareketleri Firestore'a kaydedilir; sayfa yenilenince
+  // liste kaybolmaz, kaldığınız yerden devam eder ("Şimdi Yenile" sonuçları da kalıcıdır).
+  const bankTxLoadedRef = useRef(false);
+  const bankTxSaveTimerRef = useRef(null);
+  useEffect(() => {
+      if (!db || !firebaseUser || bankTxLoadedRef.current) return;
+      bankTxLoadedRef.current = true;
+      (async () => {
+          try {
+              const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'bankTransactions'));
+              if (snap.exists()) {
+                  const arr = snap.data()?.items;
+                  if (Array.isArray(arr) && arr.length > 0) setBankApiTransactions(arr);
+              }
+          } catch (e) { console.error('Banka hareketleri yükleme hatası:', e); }
+      })();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser]);
+
+  useEffect(() => {
+      if (!db || !firebaseUser || !bankTxLoadedRef.current) return;
+      if (bankTxSaveTimerRef.current) clearTimeout(bankTxSaveTimerRef.current);
+      // Yazma sayısını azaltmak için kısa gecikmeli (debounce) kaydetme.
+      bankTxSaveTimerRef.current = setTimeout(() => {
+          (async () => {
+              try {
+                  // Doküman boyut sınırına takılmamak için en yeni 1500 kayıt saklanır.
+                  const items = bankApiTransactions.slice(0, 1500);
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'bankTransactions'), { items, updatedAt: Date.now() }, { merge: true });
+              } catch (e) { console.error('Banka hareketleri kaydetme hatası:', e); }
+          })();
+      }, 1500);
+      return () => { if (bankTxSaveTimerRef.current) clearTimeout(bankTxSaveTimerRef.current); };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bankApiTransactions, firebaseUser]);
+
+  // YENİ: OTOMATİK BAĞLANTI — kayıtlı API bilgileri varsa uygulama açılışında kendiliğinden
+  // bankaya bağlanır ve canlı çekimi başlatır (elle "Bankaya Bağlan" gerekmez).
+  const bankAutoConnectRef = useRef(false);
+  useEffect(() => {
+      if (!db || !firebaseUser || bankAutoConnectRef.current) return;
+      if (bankApiConnected) return;
+      if (!bankApiConfig.bankName || !bankApiConfig.apiKey || !bankApiConfig.apiSecret) return;
+      bankAutoConnectRef.current = true;
+      (async () => {
+          try {
+              await handleBankApiConnect();
+              // Bağlantı kurulduysa canlı çekimi de başlat
+              setTimeout(() => {
+                  if (!bankApiIntervalRef.current) {
+                      fetchBankTransactionsOnce();
+                      bankApiIntervalRef.current = setInterval(fetchBankTransactionsOnce, 30000);
+                      setBankApiRunning(true);
+                  }
+              }, 500);
+          } catch (e) { console.error('Otomatik banka bağlantısı hatası:', e); }
+      })();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser, bankApiConfig.bankName, bankApiConfig.apiKey, bankApiConfig.apiSecret]);
 
   // Bir banka hareketini tahsilat/askıya olarak işaretle (kullanıcı düzenlemesi)
   const setBankTxStatus = (txId, status) => {
@@ -9411,6 +9507,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               // YENİ: Bu ekran SADECE hesaba GİREN paraları gösterir — para çıkışları (eksi tutar) gizlenir.
                               const _amt = Number(tx.amount);
                               if (isNaN(_amt) || _amt <= 0) return false;
+                              if (isOutgoingBankDesc(tx.description)) return false;
                               const t = new Date(tx.rawDate).getTime();
                               if (!isNaN(t)) { if (_fromT !== null && t < _fromT) return false; if (_toT !== null && t > _toT) return false; }
                               if (bankTxStatusFilter === 'tahsilat') return !tx.processed && tx.status === 'tahsilat';
@@ -9421,7 +9518,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               return true;
                           })
                           .slice()
-                          .sort((a, b) => { const ta = new Date(a.rawDate).getTime() || 0; const tb = new Date(b.rawDate).getTime() || 0; if (tb !== ta) return tb - ta; return (b.addedAt || 0) - (a.addedAt || 0); });
+                          .sort((a, b) => { const ta = Number(a.ts) || new Date(a.rawDate).getTime() || 0; const tb = Number(b.ts) || new Date(b.rawDate).getTime() || 0; if (tb !== ta) return tb - ta; return (b.addedAt || 0) - (a.addedAt || 0); });
                         const newCount = bankApiTransactions.filter(t => t.isNew).length;
                         const setRange = (days) => { const to = new Date(); const from = new Date(Date.now() - days * 86400000); setBankTxTo(to.toISOString().split('T')[0]); setBankTxFrom(from.toISOString().split('T')[0]); };
                         return (
@@ -9457,15 +9554,16 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 {(() => {
                                   const _todayStr = new Date().toISOString().split('T')[0];
                                   const _dayStr = (d) => new Date(Date.now() - d * 86400000).toISOString().split('T')[0];
+                                  const _yearStart = `${new Date().getFullYear()}-01-01`;
                                   const _is = (d) => bankTxTo === _todayStr && bankTxFrom === _dayStr(d);
-                                  const _isAll = !bankTxFrom && !bankTxTo;
+                                  const _isYear = bankTxTo === _todayStr && bankTxFrom === _yearStart;
                                   const act = 'text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100';
                                   const idle = 'text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-gray-200 text-slate-600 hover:bg-gray-50';
                                   return (
                                     <>
                                       <button onClick={() => setRange(7)} className={_is(7) ? act : idle}>Son 7 Gün</button>
                                       <button onClick={() => setRange(30)} className={_is(30) ? act : idle}>Son 30 Gün</button>
-                                      <button onClick={() => { setBankTxFrom(''); setBankTxTo(''); }} className={_isAll ? act : idle}>Tümü</button>
+                                      <button onClick={() => { setBankTxFrom(_yearStart); setBankTxTo(_todayStr); }} className={_isYear ? act : idle}>Bu Sene</button>
                                     </>
                                   );
                                 })()}
@@ -9484,6 +9582,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                           <tr key={tx.id} className={`hover:bg-gray-50 ${tx.processed ? 'opacity-50' : ''} ${tx.isNew && !tx.processed ? 'bg-amber-50/60' : ''}`}>
                                               <td className="p-3 font-semibold text-gray-700 whitespace-nowrap text-xs align-top">
                                                   {tx.date}
+                                                  {tx.time ? <span className="block text-[10px] font-bold text-gray-400">{tx.time}</span> : null}
                                                   {tx.isNew && <span className="block mt-1 text-[8px] font-bold px-1.5 py-0.5 rounded bg-red-500 text-white w-fit">SON EKLENEN</span>}
                                               </td>
                                               {/* YENİ: Açıklama en fazla 3 SATIR gösterilir (kırpılmadan sarar), yazı küçültüldü */}
