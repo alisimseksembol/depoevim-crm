@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   const pIdPass = apiSecret || process.env.ALBARAKA_PASSWORD;
   const mNo = customerNo || pId;
   
-  // Test için ilk ALBARAKA hesabınızın (01) numarasını doğrudan kullanıyoruz
+  // Bankanın beklediği 2 haneli Suffix (Ek Numara). Sembol Nakliyat (34) olarak ayarlandı[cite: 3, 4, 5].
   const hesapNo = accountSuffix || '34'; 
 
   if (!pId || !pIdPass) {
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       pId,
       pIdPass,
       mNo,
-      hesapNo, // XML'e spesifik hesap numarası gönderiliyor
+      hesapNo, 
       basTarih: formatAlbarakaDate(pastDate),
       sonTarih: formatAlbarakaDate(today)
     });
@@ -50,7 +50,8 @@ export default async function handler(req, res) {
     }
 
     const transactions = hareketler.map(t => {
-      const rawDate = String(t.Tarih || '');
+      // Bankanın küçük/büyük harf ihtimallerine karşı her iki formatı da okuyoruz[cite: 3, 5]
+      const rawDate = String(t.tarih || t.Tarih || '');
       const formattedDate = rawDate.length >= 8
         ? `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`
         : new Date().toISOString().split('T')[0];
@@ -61,7 +62,8 @@ export default async function handler(req, res) {
         id: t.fisNo || `${Date.now()}-${Math.random()}`,
         date: formattedDate,
         amount: parseFloat(tutarStr),
-        description: t.Aciklama || 'Açıklama Yok',
+        // Açıklama alanı için de aynı şekilde küçük/büyük harf garantisi[cite: 3, 5]
+        description: t.aciklama || t.Aciklama || 'Açıklama Yok',
         isCredit: t.borcAlacak === 'A' || t.borcAlacak === 'C',
         rawBorcAlacak: t.borcAlacak 
       };

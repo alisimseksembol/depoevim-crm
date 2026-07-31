@@ -29,6 +29,9 @@ const DEBUG = process.env.ALBARAKA_DEBUG === '1';
 
 function extractHareketler(hesapHareketleriResponse) {
   const candidates = [
+    // Bankanın gönderdiği ASIL yeni yol eklendi:
+    hesapHareketleriResponse?.responseData?.hesapHareketleri?.hesap?.hesapHareket,
+    hesapHareketleriResponse?.responseData?.hesapHareketleri?.hesapHareket,
     hesapHareketleriResponse?.responseData?.return,
     hesapHareketleriResponse?.return,
     hesapHareketleriResponse?.getHesapHareketleriResult?.return,
