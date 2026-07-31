@@ -334,6 +334,8 @@ const loadXLSXLibrary = () => {
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeMenu, setActiveMenu] = useState('dashboard');
+  // YENİ: İlk açılışta Firebase verileri gelene kadar "Yükleniyor" splash ekranı gösterilir.
+  const [appDataReady, setAppDataReady] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
 
   // YENİ EKLENEN: Gösterge Paneli kartlarına tıklayınca açılan detay penceresi
@@ -438,7 +440,7 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   useEffect(() => {
       if (!firebaseUser || !db) return;
       
-      const unsubCustomers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setCustomers(fetchedData); }, (error) => console.error("Hata:", error));
+      const unsubCustomers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setCustomers(fetchedData); setAppDataReady(true); }, (error) => { console.error("Hata:", error); setAppDataReady(true); });
       const unsubWarehouses = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'warehouses'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setWarehouses(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubBlocks = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setBlocks(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubRooms = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setRooms(fetchedData); }, (error) => console.error("Hata:", error));
@@ -847,6 +849,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [newPaymentData, setNewPaymentData] = useState({ amount: '', date: new Date().toISOString().split('T')[0], note: '', isCreditCard: false, netAmount: '' });
 
   const [debtMonthFilter, setDebtMonthFilter] = useState('all');
+  // YENİ: "Ödeme Sözü Aldıklarım" filtresi — sadece ödeme sözü (promiseDate'li not) olan müşterileri gösterir.
+  const [showOnlyPromises, setShowOnlyPromises] = useState(false);
   // YENİ EKLENEN: "Kaç aydır tahsilat yok / Yeni Eklenen" filtresi (varsayılan: yeni eklenen)
   const [debtPaymentFilter, setDebtPaymentFilter] = useState('new');
   const [debtSearchTerm, setDebtSearchTerm] = useState('');
@@ -3203,7 +3207,12 @@ const handleManualAddPayment = async () => {
       }
   };
 
-  // YENİ: Masaüstü bildirim izni iste (tarayıcı destekliyorsa) — hatırlatma uyarıları için.
+  // YENİ: İlk açılış splash'ı için güvenlik yedeği — veriler gelmese/db olmasa bile bir süre sonra kapanır.
+  useEffect(() => {
+      const _to = setTimeout(() => setAppDataReady(true), db ? 8000 : 1200);
+      return () => clearTimeout(_to);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
       try { if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') { Notification.requestPermission().catch(() => {}); } } catch (e) { /* yoksay */ }
   }, []);
@@ -7541,6 +7550,32 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
   };
   // ==========================================
 
+  // YENİ: İLK AÇILIŞ "YÜKLENİYOR" EKRANI — Depoevim logosu soluktan canlıya animasyonla;
+  // Firebase verileri gelene kadar gösterilir, veriler tam gelince uygulama açılır.
+  if (!appDataReady) {
+      return (
+          <div className="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center">
+              <style>{`
+                @keyframes depoLogoPulse {
+                  0%   { filter: grayscale(100%) brightness(1.15); opacity: 0.30; transform: scale(0.97); }
+                  50%  { filter: grayscale(0%) brightness(1);      opacity: 1;    transform: scale(1.03); }
+                  100% { filter: grayscale(100%) brightness(1.15); opacity: 0.30; transform: scale(0.97); }
+                }
+                @keyframes depoBarSlide { 0% { transform: translateX(-100%);} 100% { transform: translateX(250%);} }
+              `}</style>
+              <img
+                  src="https://www.depoevim.com/wp-content/uploads/2025/07/cropped-logo.webp"
+                  alt="Depoevim"
+                  style={{ height: '70px', objectFit: 'contain', animation: 'depoLogoPulse 1.6s ease-in-out infinite' }}
+              />
+              <div className="mt-8 w-52 h-1.5 rounded-full bg-gray-100 overflow-hidden relative">
+                  <div className="absolute top-0 left-0 h-full w-2/5 rounded-full bg-gradient-to-r from-cyan-400 to-indigo-500" style={{ animation: 'depoBarSlide 1.3s ease-in-out infinite' }}></div>
+              </div>
+              <p className="mt-5 text-sm font-bold text-slate-400 tracking-wide">Yükleniyor...</p>
+          </div>
+      );
+  }
+
   if (!isAuthenticated) {
       return (
           <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4" style={{ backgroundImage: 'radial-gradient(#e2e8f0 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
@@ -9310,6 +9345,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         <option value="5+">5+ Aydır Tahsilat Yok</option>
                         <option value="none">Hiç Tahsilat Olmayanlar</option>
                     </select>
+                    {/* YENİ: Ödeme Sözü Aldıklarım — sadece ödeme sözü verilen müşterileri gösterir/gizler */}
+                    <button onClick={() => setShowOnlyPromises(v => !v)} className={`w-full sm:w-auto px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm cursor-pointer transition-colors flex items-center justify-center gap-1.5 border ${showOnlyPromises ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-gray-200 text-slate-700 hover:bg-amber-50'}`} title="Sadece ödeme sözü aldıklarımı göster">
+                        <Calendar size={15}/> Ödeme Sözü Aldıklarım
+                    </button>
                 </div>
               </div>
 
@@ -9411,6 +9450,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           filteredDebtors = filteredDebtors.filter(c => c.monthsOwed >= 5);
                       }
                       // "all" (Tüm Aylık Borçlular) seçiliyken tüm borçlular gösterilir.
+                      // YENİ: "Ödeme Sözü Aldıklarım" aktifse yalnızca ödeme sözü (promiseDate'li not) olan müşteriler kalır.
+                      if (showOnlyPromises) {
+                          filteredDebtors = filteredDebtors.filter(c => Array.isArray(c.collectionNotes) && c.collectionNotes.some(n => n && n.promiseDate));
+                      }
 
                       // YENİ EKLENEN: Kaç aydır tahsilat yok / Yeni Eklenen filtresi
                       if (debtPaymentFilter === '1') {
@@ -9856,14 +9899,22 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   if (!ds) return <div key={'e' + i} />;
                                   const dayN = Number(ds.slice(-2));
                                   const dr = reminders.filter(r => r.date === ds);
-                                  const hasPending = dr.some(r => !r.completed);
                                   const isSel = ds === reminderSelectedDate;
                                   const isToday = ds === today;
                                   return (
-                                    <button key={ds} onClick={() => setReminderSelectedDate(ds)} className={`aspect-square rounded-lg text-xs font-bold flex flex-col items-center justify-center transition-colors ${isSel ? 'bg-indigo-600 text-white' : isToday ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'hover:bg-gray-100 text-slate-700'}`}>
-                                       {dayN}
-                                       {dr.length > 0 && <span className={`mt-0.5 w-1.5 h-1.5 rounded-full ${hasPending ? (isSel ? 'bg-white' : 'bg-red-500') : (isSel ? 'bg-white/70' : 'bg-green-500')}`}></span>}
-                                    </button>
+                                    <div key={ds} onClick={() => setReminderSelectedDate(ds)} className={`min-h-[64px] sm:min-h-[84px] p-1.5 sm:p-2 rounded-xl border flex flex-col justify-between cursor-pointer transition-all shadow-sm ${isSel ? 'ring-2 ring-indigo-500 ring-offset-1 border-transparent bg-indigo-600 text-white' : isToday ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white border-gray-200 hover:border-gray-300 text-slate-700'}`}>
+                                       <div className="flex justify-between items-start">
+                                          <span className="text-xs sm:text-sm font-bold">{dayN}</span>
+                                          {dr.length > 0 && <span className={`text-[8px] sm:text-[9px] font-bold ${isSel ? 'text-white/80' : 'text-gray-400'}`}>{dr.length}</span>}
+                                       </div>
+                                       {/* YENİ: Randevu takvimi mantığı — o güne ait HER hatırlatma için bir nokta (bekleyen=kırmızı, tamamlanan=yeşil), en fazla 6 gösterilir */}
+                                       <div className="flex flex-wrap gap-0.5 sm:gap-1 mt-1 content-start">
+                                          {dr.slice(0, 6).map((r, di) => (
+                                             <span key={r.id || di} title={(r.title || '') + (r.customerName ? ' • ' + r.customerName : '')} className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shadow-sm ${r.completed ? (isSel ? 'bg-white/70' : 'bg-green-500') : (isSel ? 'bg-white' : 'bg-red-500')}`}></span>
+                                          ))}
+                                          {dr.length > 6 && <span className={`text-[8px] font-bold leading-none self-center ${isSel ? 'text-white/80' : 'text-gray-400'}`}>+{dr.length - 6}</span>}
+                                       </div>
+                                    </div>
                                   );
                                })}
                             </div>
@@ -10020,6 +10071,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                                       {/* Aksiyonlar */}
                                       <div className="flex flex-wrap gap-2 justify-end" onClick={e => e.stopPropagation()}>
+                                          {/* YENİ: İcrayı Kaldır — odayı hiç icraya alınmamış gibi normale döndürür (onay penceresiyle). */}
+                                          <button onClick={() => { if(!checkActionPerm('action-oda-icra')) return; setSelectedRoomId(room.id); setLegalActionData({ reason: '', type: 'stop' }); setIsLegalActionModalOpen(true); }} className="flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2 rounded-lg text-xs font-bold transition-colors">
+                                              <RefreshCcw size={14} /> İcrayı Kaldır
+                                          </button>
                                           {cust && (
                                               <button onClick={() => { setActiveMenu('tum-musteriler'); setSelectedCustomerId(cust.id); }} className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 px-3 py-2 rounded-lg text-xs font-bold transition-colors">
                                                   <Wallet size={14} /> Carisine Git
