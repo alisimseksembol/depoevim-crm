@@ -63,9 +63,43 @@ const firebaseConfig = {
     appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// ═══════════════════════════════════════════════════════════════════════════
+// YENİ EKLENEN: GÜVENLİ FIREBASE BAŞLATMA (BEYAZ EKRAN KORUMASI)
+// SORUN: initializeApp doğrudan çağrıldığında, Vercel'de VITE_FIREBASE_*
+// ortam değişkenleri tanımlı değilse apiKey undefined kalır ve Firebase
+// modül yüklenirken HATA FIRLATIR. React hiç render edilemez → BEYAZ EKRAN.
+// ÇÖZÜM: Config doğrulanır ve başlatma try/catch içine alınır. Eksik/hatalı
+// yapılandırmada uygulama çökmez; auth/db null kalır (kod bunu zaten destekler,
+// her yerde "if (db && firebaseUser)" kontrolü var) ve konsola uyarı yazılır.
+// ═══════════════════════════════════════════════════════════════════════════
+let app = null;
+let auth = null;
+let db = null;
+
+// Zorunlu alanlar dolu mu? (Vercel > Settings > Environment Variables)
+const __fbConfigValid = Boolean(
+    firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId
+);
+
+if (__fbConfigValid) {
+    try {
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+    } catch (err) {
+        // Hatalı anahtar/yapılandırma → uygulama yine de açılır (offline/önizleme modu)
+        console.error('Firebase başlatılamadı, uygulama offline modda çalışıyor:', err);
+        app = null; auth = null; db = null;
+    }
+} else {
+    console.warn(
+        '[DepoEvim] Firebase ortam değişkenleri eksik. Uygulama VERİTABANI OLMADAN açıldı.\n' +
+        'Vercel > Project > Settings > Environment Variables bölümüne şunları ekleyin:\n' +
+        'VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID,\n' +
+        'VITE_FIREBASE_STORAGE_BUCKET, VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_APP_ID\n' +
+        'Not: Bu değişkenler BUILD sırasında koda gömülür — ekledikten sonra REDEPLOY şart.'
+    );
+}
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'depoevim-crm';
 
@@ -624,7 +658,9 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [userRoles, setUserRoles] = useState([
       { id: 'yonetici', name: 'Yönetici', code: 'yonetici', isSuper: true, permissions: { mainMenus: [], pages: [], actions: [] } },
       { id: 'personel', name: 'Personel', code: 'personel', isSuper: false, permissions: { mainMenus: ['menu-dashboard', 'menu-depo', 'menu-musteri-listesi'], pages: ['page-aylik-odeme', 'page-mevcut-musteriler'], actions: [] } },
-      { id: 'muhasebe', name: 'Muhasebe', code: 'muhasebe', isSuper: false, permissions: { mainMenus: ['menu-odeme-islemleri', 'menu-finans-yonetimi'], pages: ['page-aylik-odeme', 'page-tahsilat-hareketleri'], actions: [] } }
+      { id: 'muhasebe', name: 'Muhasebe', code: 'muhasebe', isSuper: false, permissions: { mainMenus: ['menu-odeme-islemleri', 'menu-finans-yonetimi'], pages: ['page-aylik-odeme', 'page-tahsilat-hareketleri'], actions: [] } },
+      // YENİ: AVUKAT — yalnızca İcra Odaları sayfasını ve icradaki müşterilerin carilerini GÖRÜNTÜLER; hiçbir değişiklik yapamaz.
+      { id: 'avukat', name: 'Avukat', code: 'avukat', isSuper: false, permissions: { mainMenus: ['menu-odeme-islemleri', 'menu-musteri-listesi'], pages: ['page-icra-odalari'], actions: [] } }
   ]);
 
   const [newRoleInput, setNewRoleInput] = useState({ name: '', code: '', copyFrom: '' });
@@ -698,9 +734,19 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       return (r.permissions?.[type] || []).includes(permId);
   };
 
+  // YENİ: AVUKAT rolü tespiti — rol adında/kodunda "avukat" geçen kullanıcılar SADECE GÖRÜNTÜLEME yapar.
+  const isAvukat = () => {
+      const r = getCurrentRole();
+      if (!r || r.isSuper) return false;
+      const s = String((r.name || '') + ' ' + (r.code || '')).toLocaleLowerCase('tr');
+      return s.includes('avukat');
+  };
+
   // YENİ EKLENEN: İşlem (buton) izni kontrolü — izin yoksa kullanıcıyı uyarır.
   // Butonlar herkes tarafından GÖRÜNÜR; ama izni olmayan tıklayınca işlem yapılmaz.
   const checkActionPerm = (permId) => {
+      // YENİ: Avukat rolü hiçbir kayıt/değişiklik işlemi yapamaz — yalnızca görüntüler.
+      if (isAvukat()) { alert('⚖️ Avukat rolü yalnızca GÖRÜNTÜLEME yapabilir.\n\nİcra dosyalarının carilerini inceleyebilirsiniz; değişiklik yetkiniz yoktur.'); return false; }
       if (hasPerm('actions', permId)) return true;
       alert('⚠️ Yetkiniz bulunmamaktadır.\n\nBu işlemi yapabilmek için lütfen yöneticiniz ile iletişime geçin.');
       return false;
@@ -2686,6 +2732,8 @@ const cust = {
               proxyAltPhone: newCustomer.hasProxy ? newCustomer.proxyAltPhone : '',
               proxyAddress: newCustomer.hasProxy ? newCustomer.proxyAddress : '',
               proxyDocumentPhoto: newCustomer.hasProxy ? newCustomer.proxyDocumentPhoto : null,
+              // YENİ EKLENEN: Birden fazla vekalet belgesi (ek belgeler dizisi) da kayda dahil edilir
+              proxyDocumentPhotos: newCustomer.hasProxy ? (newCustomer.proxyDocumentPhotos || []) : [],
               type: customerType,
               createdAt: new Date().toLocaleDateString('tr-TR'),
               invoices: [],
@@ -2833,6 +2881,31 @@ const renderNewCustomerForm = () => (
                                    </>
                                 )}
     <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const file = e.target.files[0]; if(file) { const url = await uploadImageToServer(file); setNewCustomer({...newCustomer, proxyDocumentPhoto: url}); } }} />                              </label>
+
+                              {/* ═══════════════════════════════════════════════════════
+                                  YENİ EKLENEN: BİRDEN FAZLA VEKALET BELGESİ (YENİ MÜŞTERİ)
+                                  İlk belge mevcut tekli alanda kalır; ek belgeler yeni
+                                  "proxyDocumentPhotos" dizisine eklenir (multiple seçim).
+                                  ═══════════════════════════════════════════════════════ */}
+                              <div className="mt-4 border-t border-indigo-100 pt-4">
+                                  <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider">Ek Vekalet Belgeleri (Birden Fazla Eklenebilir)</label>
+                                  {(newCustomer.proxyDocumentPhotos || []).length > 0 && (
+                                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+                                          {(newCustomer.proxyDocumentPhotos || []).map((docUrl, idx) => (
+                                              <div key={idx} className="relative border border-indigo-200 rounded-xl p-2 bg-white shadow-sm flex flex-col items-center gap-1.5">
+                                                  <a href={docUrl} target="_blank" rel="noreferrer"><img src={docUrl} alt={`Ek Vekalet Belgesi ${idx + 1}`} className="h-20 object-contain rounded" /></a>
+                                                  <span className="text-[10px] font-bold text-indigo-500">Ek Belge {idx + 1}</span>
+                                                  <button type="button" onClick={(e) => { e.preventDefault(); setNewCustomer({ ...newCustomer, proxyDocumentPhotos: (newCustomer.proxyDocumentPhotos || []).filter((_, i) => i !== idx) }); }} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center shadow" title="Bu belgeyi kaldır"><X size={14} /></button>
+                                              </div>
+                                          ))}
+                                      </div>
+                                  )}
+                                  <label className="mt-3 border-2 border-dashed border-indigo-200 rounded-2xl p-4 flex flex-col items-center justify-center text-center hover:bg-indigo-50 hover:border-indigo-400 transition-colors cursor-pointer bg-white group">
+                                      <div className="flex items-center gap-2 text-indigo-600 font-bold text-sm"><Plus size={16} /> Yeni Vekalet Belgesi Ekle</div>
+                                      <p className="text-xs text-gray-400 mt-1">PNG, JPG veya PDF — aynı anda birden fazla dosya seçebilirsiniz</p>
+                                      <input type="file" multiple className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const files = Array.from(e.target.files || []); if (files.length === 0) return; const urls = []; for (const f of files) { const u = await uploadImageToServer(f); if (u) urls.push(u); } setNewCustomer(prev => ({ ...prev, proxyDocumentPhotos: [...(prev.proxyDocumentPhotos || []), ...urls] })); e.target.value = ''; }} />
+                                  </label>
+                              </div>
                           </div>
                       </div>
                   )}
@@ -3879,6 +3952,75 @@ const handleAddInvoice = async () => {
   const [isLegalActionModalOpen, setIsLegalActionModalOpen] = useState(false);
   const [legalActionData, setLegalActionData] = useState({ reason: '', type: 'start' }); // 'start' veya 'stop'
 
+  // ============ YENİ: İCRA DOSYASI — YASAL SÜREÇ TAKİP + DOSYA/FOTO/VİDEO ============
+  // Her icra odası için: durum hareketleri (iletişim/ihtar/icra/ödeme...) ve ekli belgeler.
+  const [legalFileModalRoomId, setLegalFileModalRoomId] = useState(null); // açık modalın oda id'si
+  const LEGAL_PROC_STATUSES = ['Müşteriyle İletişime Geçildi', 'Müşteriye Ulaşılamadı', 'İhtar Çekildi', 'İcra Başlatıldı', 'Haciz İşlemi', 'Ödeme Sözü Alındı', 'Ödeme Alındı', 'Kısmi Ödeme Yapıldı', 'Dosya Kapandı', 'Diğer'];
+  const emptyLegalProcForm = () => ({ id: null, date: new Date().toISOString().split('T')[0], status: 'Müşteriyle İletişime Geçildi', amount: '', note: '' });
+  const [legalProcForm, setLegalProcForm] = useState(emptyLegalProcForm());
+  const [legalFilesUploading, setLegalFilesUploading] = useState(false);
+
+  // Odanın yasal alanlarını (süreç/dosyalar) kaydet — canlıda Firestore'a, önizlemede yerel state'e.
+  const saveRoomLegalData = async (roomId, patch) => {
+      setRooms(prev => prev.map(r => String(r.id) === String(roomId) ? { ...r, ...patch } : r));
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(roomId)), patch, { merge: true }); } catch (e) { console.error('İcra dosyası kaydetme hatası:', e); }
+      }
+  };
+
+  // Süreç hareketi ekle/güncelle
+  const handleSaveLegalProcEntry = async (roomId) => {
+      if (!legalProcForm.status) return;
+      const room = rooms.find(r => String(r.id) === String(roomId));
+      if (!room) return;
+      const list = Array.isArray(room.legalProcess) ? [...room.legalProcess] : [];
+      if (legalProcForm.id) {
+          const idx = list.findIndex(e => String(e.id) === String(legalProcForm.id));
+          if (idx >= 0) list[idx] = { ...list[idx], date: legalProcForm.date, status: legalProcForm.status, amount: legalProcForm.amount !== '' ? Number(legalProcForm.amount) : null, note: legalProcForm.note || '', updatedBy: currentUserProfile?.name || '', updatedAt: Date.now() };
+      } else {
+          list.push({ id: `lp_${Date.now()}_${Math.floor(Math.random() * 1000)}`, date: legalProcForm.date, status: legalProcForm.status, amount: legalProcForm.amount !== '' ? Number(legalProcForm.amount) : null, note: legalProcForm.note || '', createdBy: currentUserProfile?.name || '', createdAt: Date.now() });
+      }
+      await saveRoomLegalData(roomId, { legalProcess: list });
+      setLegalProcForm(emptyLegalProcForm());
+  };
+
+  const handleDeleteLegalProcEntry = async (roomId, entryId) => {
+      if (!window.confirm('Bu süreç hareketini silmek istediğinize emin misiniz?')) return;
+      const room = rooms.find(r => String(r.id) === String(roomId));
+      if (!room) return;
+      const list = (room.legalProcess || []).filter(e => String(e.id) !== String(entryId));
+      await saveRoomLegalData(roomId, { legalProcess: list });
+      if (legalProcForm.id && String(legalProcForm.id) === String(entryId)) setLegalProcForm(emptyLegalProcForm());
+  };
+
+  // Dosya/foto/video ekle (birden fazla) ve kaldır
+  const handleAddLegalFiles = async (roomId, fileList) => {
+      const files = Array.from(fileList || []);
+      if (files.length === 0) return;
+      const room = rooms.find(r => String(r.id) === String(roomId));
+      if (!room) return;
+      setLegalFilesUploading(true);
+      const added = [];
+      for (const f of files) {
+          try {
+              const url = await uploadImageToServer(f);
+              const kind = String(f.type || '').startsWith('video') ? 'video' : (String(f.type || '') === 'application/pdf' ? 'pdf' : 'image');
+              added.push({ id: `lf_${Date.now()}_${Math.floor(Math.random() * 10000)}`, name: f.name, url, kind, addedBy: currentUserProfile?.name || '', addedAt: Date.now() });
+          } catch (e) { console.error('İcra dosyası yükleme hatası:', e); }
+      }
+      setLegalFilesUploading(false);
+      if (added.length === 0) { alert('Dosya(lar) yüklenemedi, lütfen tekrar deneyin.'); return; }
+      await saveRoomLegalData(roomId, { legalFiles: [...(room.legalFiles || []), ...added] });
+  };
+
+  const handleRemoveLegalFile = async (roomId, fileId) => {
+      if (!window.confirm('Bu belgeyi kaldırmak istediğinize emin misiniz?')) return;
+      const room = rooms.find(r => String(r.id) === String(roomId));
+      if (!room) return;
+      await saveRoomLegalData(roomId, { legalFiles: (room.legalFiles || []).filter(f => String(f.id) !== String(fileId)) });
+  };
+  // ============ /İCRA DOSYASI ============
+
   const handleLegalActionConfirm = async () => {
       if (legalActionData.type === 'start' && !legalActionData.reason) return;
       
@@ -4272,6 +4414,10 @@ const handleCancelReservation = async () => {
   // YENİ: Manuel eşleştirmelerden ÖĞRENİLEN kurallar — aynı göndericiden gelen sonraki hareketler
   // otomatik olarak aynı cariye eşleşir (askıda kalmaz). { kural_anahtarı: müşteriId }
   const [bankMatchRules, setBankMatchRules] = useState({});
+  // YENİ: Öğrenilen "bir daha gösterme" kalıpları (ör. hesaplar arası virman hareketleri)
+  const [bankIgnorePatterns, setBankIgnorePatterns] = useState([]);
+  // YENİ: Gizlenecek GÖNDERİCİLER (IBAN veya gönderen adı anahtarı). Tutar değişse de gizlenir.
+  const [bankIgnoreSenders, setBankIgnoreSenders] = useState([]);
   // YENİ: Aynı gün + aynı tutarlı mükerrer tahsilat uyarısı için bekleyen hareket
   const [dupWarnTx, setDupWarnTx] = useState(null);
   // YENİ: "Eşleşmedi" satırında cari seçme modunda olan hareketin id'si
@@ -6014,15 +6160,21 @@ const handleChangeRoomConfirm = async () => {
       let effective = Number(room.monthlyFee || 0);
       if (Array.isArray(room.increaseHistory) && room.increaseHistory.length > 0) {
           const targetIdx = year * 12 + month;
-          let chosen = null;
+          // DÜZELTME: Kira geçmişte ASLA DÜŞMEMELİ. Önceden "en son geçerli kayıt" seçiliyordu;
+          // bu, yanlışlıkla düşük girilmiş bir zam kaydı varsa (ör. 250 TL) o kaydın seçilip
+          // önceki doğru/yüksek kirayı (ör. 4.200 TL) ezmesine yol açıyordu. Artık o aya kadar
+          // GEÇERLİ OLMUŞ TÜM kayıtların EN YÜKSEĞİ alınır — "Senesi Dolan Odalar" listesindeki
+          // (getRoomLatestFee) mevcut kira ile birebir tutarlı olur.
+          let best = effective;
           room.increaseHistory.forEach(h => {
               const parts = String(h.effectiveKey).split('-');
               const hIdx = parseInt(parts[0]) * 12 + parseInt(parts[1]);
               if (hIdx <= targetIdx) {
-                  if (!chosen || hIdx > chosen.idx) chosen = { idx: hIdx, fee: Number(h.baseFee) };
+                  const f = Number(h.baseFee);
+                  if (!isNaN(f) && f > best) best = f;
               }
           });
-          if (chosen) effective = chosen.fee;
+          effective = best;
       }
       return effective;
   };
@@ -6109,6 +6261,15 @@ const handleChangeRoomConfirm = async () => {
       const oldFee = grossOld / kdvMult;        // NET eski (baz) kira
       const percentage = Number(increasePercentage);
 
+      // DÜZELTME: Zam kirayı DÜŞÜREMEZ. Girilen yeni tutar, mevcut/en yüksek geçerli kiradan düşükse
+      // (ör. yanlışlıkla 500 TL girilmesi) işlem durdurulur; böylece geçmiş cari bozulmaz.
+      const _curLatestNet = Number(getRoomLatestFee(room) || 0);
+      if (newFee > 0 && newFee < _curLatestNet - 0.5) {
+          const _mult = kdvMult;
+          alert(`⚠️ Girilen yeni kira (${Math.round(newFee * _mult).toLocaleString('tr-TR')} TL) mevcut kiradan (${Math.round(_curLatestNet * _mult).toLocaleString('tr-TR')} TL) DÜŞÜK.\n\nZam işlemi kirayı düşüremez. Lütfen mevcut kiradan yüksek bir tutar girin.\n(Kirayı düşürmek istiyorsanız "Geçmiş Zamları Düzenle" bölümünü kullanın.)`);
+          return;
+      }
+
       const historyEntry = {
           id: Date.now(),
           date: new Date().toLocaleDateString('tr-TR'),
@@ -6124,7 +6285,16 @@ const handleChangeRoomConfirm = async () => {
       const entryD = parseDateLocal(room.entryDate || '2026-01-01');
       const anchorD = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryD;
       const effectiveMonth = anchorD.getMonth();
-      const effectiveKey = `${increaseModalData.targetYear}-${effectiveMonth}`;
+      // DÜZELTME: Zam ASLA GEÇMİŞE uygulanmaz. Seçilen yıl geçmişteyse (ör. 2022) veya hesaplanan
+      // geçerlilik ayı bugünden önceyse, zam içinde bulunulan aya çekilir. Böylece zam yaptıktan sonra
+      // GEÇMİŞ cari (önceki ayların kira/borç kayıtları) HİÇ değişmez; yalnızca bugün ve sonrası etkilenir.
+      const _now = new Date();
+      let _effIdx = Number(increaseModalData.targetYear) * 12 + effectiveMonth;
+      const _nowIdx = _now.getFullYear() * 12 + _now.getMonth();
+      if (_effIdx < _nowIdx) _effIdx = _nowIdx;
+      const _effYear = Math.floor(_effIdx / 12);
+      const _effMon = _effIdx % 12;
+      const effectiveKey = `${_effYear}-${_effMon}`;
 
       // increaseHistory boşsa, geçmiş ayların eski ücretle kalması için başlangıç kaydını da ekle
       let baseHistory = Array.isArray(room.increaseHistory) ? [...room.increaseHistory] : [];
@@ -6148,6 +6318,67 @@ const handleChangeRoomConfirm = async () => {
               ? { ...r, monthlyFee: newFee, increaseHistory: newIncreaseHistory, priceHistory: [...(r.priceHistory || []), historyEntry] }
               : r
           ));
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // YENİ EKLENEN: ZAM SONRASI CARİ GÜNCELLEME (mevcut kodlara dokunulmadı)
+      // Zam yapıldıktan sonra, müşterinin carisinde ZAM YAPILAN AYIN (etkin ay)
+      // oda borcu da yeni zamlı kiraya göre ANINDA güncellenir.
+      //  • Zam ayı ve SONRASINA ait bu odanın eski borç override kayıtları
+      //    (örn. "Geçmiş Zamlı Kira" satırları) temizlenir — eski/düşük tutar
+      //    zamlı kirayı artık ezemez. Zam ayından ÖNCEKİ tüm cari aynen korunur.
+      //  • Hediye / 0 TL kayıtlarına kesinlikle dokunulmaz.
+      //  • Zam ayına, KDV DAHİL yeni kira tutarıyla tek bir override yazılır;
+      //    böylece cari ekstrede o ayın oda borcu zamlı tutarla görünür
+      //    (KDV dönüşümlü odalardaki net/brüt karışıklığı da bu sayede çözülür).
+      //  • Ay sonu güvenliği: ödeme günü (29/30/31) o ayda yoksa ayın son
+      //    gününe çekilir — Şubat gibi kısa aylar asla atlanmaz.
+      // ═══════════════════════════════════════════════════════════════════
+      const zamCustomer = customers.find(c => c.name === room.customerName);
+      if (zamCustomer) {
+          const grossNew = Math.round(newFee * kdvMult * 100) / 100;   // KDV dahil yeni kira (modalde girilen tutar)
+          const kdvNew = Math.round((grossNew - newFee) * 100) / 100;  // KDV tutarı (KDV muaf odada 0 çıkar)
+          const ovPrefix = `debt-${room.id}-`;
+
+          // Zam ayı ve sonrasındaki bu odaya ait ESKİ borç override'larını ayıkla
+          const keptOverrides = (zamCustomer.ledgerOverrides || []).filter(o => {
+              if (!o || !String(o.txId || '').startsWith(ovPrefix)) return true;          // başka oda/kayıtlar aynen kalır
+              if (o.isSpecificGift === true || (Number(o.debt) || 0) === 0) return true;  // hediye/0 TL kayıtları korunur
+              const p = String(o.txId).slice(ovPrefix.length).split('-');
+              const oIdx = parseInt(p[0]) * 12 + parseInt(p[1]);
+              return oIdx < _effIdx; // zam ayından ÖNCEKİ kayıtlar (geçmiş cari) aynen korunur
+          });
+
+          // Zam ayının ödeme gününü hesapla — ay sonu (28/29/30/31) validasyonlu
+          const zamMonthLastDay = new Date(_effYear, _effMon + 1, 0).getDate();
+          const zamPayDay = Math.min(anchorD.getDate(), zamMonthLastDay);
+          const zamMonthsStr = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
+          // Zam ayına yeni (zamlı) tutarlı borç override'ı ekle
+          const zamOverride = {
+              txId: `${ovPrefix}${effectiveKey}`,
+              date: new Date(_effYear, _effMon, zamPayDay).getTime(),
+              desc: `${room.name} Odası - ${zamMonthsStr[_effMon]} ${_effYear} Kirası (Zamlı)`,
+              debt: grossNew,      // KDV dahil toplam borç
+              baseDebt: newFee,    // NET (KDV hariç) kira
+              kdvDebt: kdvNew,     // KDV tutarı
+              credit: 0
+          };
+          const updatedOverrides = [...keptOverrides.filter(o => o.txId !== zamOverride.txId), zamOverride];
+
+          if (db && firebaseUser) {
+              try {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(zamCustomer.id)), {
+                      ledgerOverrides: updatedOverrides
+                  }, { merge: true });
+              } catch (e) { console.error('Firebase Zam Cari Güncelleme Hatası:', e); }
+          } else {
+              // Önizleme modu: müşteri carisini yerel state üzerinden güncelle
+              setCustomers(prev => prev.map(c => c.id === zamCustomer.id
+                  ? { ...c, ledgerOverrides: updatedOverrides }
+                  : c
+              ));
+          }
       }
 
       setIsApplyIncreaseModalOpen(false);
@@ -6552,6 +6783,14 @@ const newAppt = {
   };
   const bankTxDateISO = (tx) => { try { return tx.rawDate ? new Date(tx.rawDate).toISOString().split('T')[0] : ''; } catch (e) { return ''; } };
 
+  // YENİ: Müşterinin carisinde AYNI GÜN (tutar fark etmeksizin) ödeme var mı?
+  const hasSameDayPayment = (customerId, dateISO) => {
+      if (!customerId || !dateISO) return false;
+      const cust = customers.find(c => String(c.id) === String(customerId));
+      if (!cust) return false;
+      return (cust.payments || []).some(p => String(p.date) === String(dateISO));
+  };
+
   // YENİ: "Eşleşmedi" satırına elle cari atama. Seçim ÖĞRENİLİR: aynı göndericiden gelen
   // sonraki hareketler otomatik bu cariye eşleşir (askıya alınmaz).
   const assignBankTxCustomer = (txId, customerId) => {
@@ -6563,6 +6802,41 @@ const newAppt = {
       const key = tx ? bankTxRuleKey(tx.description) : null;
       if (key) setBankMatchRules(prev => ({ ...prev, [key]: String(cust.id) }));
       setMatchEditTxId(null);
+  };
+
+  // YENİ: HESAPLAR ARASI VİRMAN / kendi hesaplarımız arası transfer + KENDİ ÖDEMELERİMİZ tespiti.
+  // Bunlar müşteri ödemesi değildir; listede hiç gösterilmez.
+  // Kapsam: virman/hesaplar arası transfer, kredi kartına hesaptan yapılan ödemeler, hesaptan ödeme kayıtları.
+  const isTransferDesc = (description) => {
+      const d = String(description || '');
+      if (!d) return false;
+      if (/(virman|hesaplar\s*aras|hesaptan\s*hesaba|kendi\s*hesab)/i.test(d)) return true;
+      // "547234******1124 Nolu Kredi Kartına yapılan HESAPTAN ödeme." gibi kendi kredi kartı ödemelerimiz
+      if (/(kredi\s*kart[ıi]na\s*yap[ıi]lan|kredi\s*kart[ıi]\s*[öo]deme|hesaptan\s*[öo]deme)/i.test(d)) return true;
+      return false;
+  };
+
+  // YENİ: Açıklamadan ÖĞRENİLEBİLİR gizleme imzası üretir (rakamlar/noktalama atılır).
+  // Örn. "- 25 - 8712889 - 1 Hesaptan Virman" → "hesaptan virman"
+  const bankTxIgnoreSignature = (description) => {
+      const folded = String(description || '')
+          .toLocaleLowerCase('tr').replace(/\u0307/g, '')
+          .replace(/[ıİI]/g, 'i').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u')
+          .replace(/[^a-z\s]+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      const tokens = folded.split(' ').filter(w => w.length >= 3).slice(0, 6);
+      return tokens.length >= 2 ? tokens.join(' ') : '';
+  };
+
+  // YENİ: Hareket, öğrenilmiş "gösterme" kalıplarından birine uyuyor mu?
+  // (a) Açıklama kalıbı, (b) GÖNDERİCİ (IBAN / gönderen adı) — gönderici eşleşmesi TUTARDAN BAĞIMSIZDIR.
+  const isLearnedIgnored = (description) => {
+      const senderKey = bankTxRuleKey(description);
+      if (senderKey && (bankIgnoreSenders || []).includes(senderKey)) return true;
+      const sig = bankTxIgnoreSignature(description);
+      if (!sig) return false;
+      return (bankIgnorePatterns || []).some(p => p && sig.includes(p));
   };
 
   const handleBankApiConnect = async () => {
@@ -6616,10 +6890,20 @@ const newAppt = {
           });
           const result = await res.json();
           if (!res.ok || !Array.isArray(result.transactions)) return;
-          // GÜNCELLENDİ: TÜM hareketler alınır (hesaba GİREN ve hesaptan GİDEN).
-          // Yön, bankadan gelen veriye göre belirlenir; giden paralar cariye tahsilat olarak eşleştirilmez.
+          // GÜNCELLENDİ: YALNIZCA hesaba GİREN hareketler alınır; hesaptan GİDEN paralar
+          // (eksi tutar, borç/debit yönlü kayıtlar, "GÖN:<kendi banka>" / "Alıcı Banka" içeren açıklamalar)
+          // listeye hiç eklenmez.
           const _delSet = new Set((deletedBankTxIds || []).map(String));
-          const incoming = result.transactions.map(t => {
+          const incoming = result.transactions.filter(t => {
+              const amt = Number(t.amount);
+              const dirRaw = String(t.direction || t.type || t.drCr || t.borcAlacak || t.islemTuru || '').toLocaleLowerCase('tr');
+              const isOut = (!isNaN(amt) && amt < 0)
+                  || (dirRaw && /(out|debit|borc|borç|giden|cikis|çıkış|gider|havale gonderim|^d$)/.test(dirRaw))
+                  || isOutgoingBankDesc(t.description);
+              // YENİ: Hesaplar arası VİRMAN ve öğrenilmiş "gösterme" kalıpları da alınmaz.
+              if (isTransferDesc(t.description) || isLearnedIgnored(t.description)) return false;
+              return !isOut;
+          }).map(t => {
               const amt = Number(t.amount);
               const dirRaw = String(t.direction || t.type || t.drCr || t.borcAlacak || t.islemTuru || '').toLocaleLowerCase('tr');
               const isOut = (!isNaN(amt) && amt < 0)
@@ -6713,6 +6997,10 @@ const newAppt = {
                   if (Array.isArray(d.deletedIds)) setDeletedBankTxIds(d.deletedIds.map(String));
                   // YENİ: Öğrenilen eşleştirme kuralları da geri yüklenir.
                   if (d.matchRules && typeof d.matchRules === 'object') setBankMatchRules(d.matchRules);
+                  // YENİ: Öğrenilen "gösterme" kalıpları da geri yüklenir.
+                  if (Array.isArray(d.ignorePatterns)) setBankIgnorePatterns(d.ignorePatterns.filter(Boolean).map(String));
+                  // YENİ: Gizlenen göndericiler de geri yüklenir.
+                  if (Array.isArray(d.ignoreSenders)) setBankIgnoreSenders(d.ignoreSenders.filter(Boolean).map(String));
               }
           } catch (e) { console.error('Banka hareketleri yükleme hatası:', e); }
       })();
@@ -6728,13 +7016,13 @@ const newAppt = {
               try {
                   // Doküman boyut sınırına takılmamak için en yeni 1500 kayıt saklanır.
                   const items = bankApiTransactions.slice(0, 1500);
-                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'bankTransactions'), { items, deletedIds: (deletedBankTxIds || []).slice(-3000), matchRules: bankMatchRules || {}, updatedAt: Date.now() }, { merge: true });
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'bankTransactions'), { items, deletedIds: (deletedBankTxIds || []).slice(-3000), matchRules: bankMatchRules || {}, ignorePatterns: bankIgnorePatterns || [], ignoreSenders: bankIgnoreSenders || [], updatedAt: Date.now() }, { merge: true });
               } catch (e) { console.error('Banka hareketleri kaydetme hatası:', e); }
           })();
       }, 1500);
       return () => { if (bankTxSaveTimerRef.current) clearTimeout(bankTxSaveTimerRef.current); };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bankApiTransactions, deletedBankTxIds, bankMatchRules, firebaseUser]);
+  }, [bankApiTransactions, deletedBankTxIds, bankMatchRules, bankIgnorePatterns, bankIgnoreSenders, firebaseUser]);
 
   // YENİ: OTOMATİK BAĞLANTI — kayıtlı API bilgileri varsa uygulama açılışında kendiliğinden
   // bankaya bağlanır ve canlı çekimi başlatır (elle "Bankaya Bağlan" gerekmez).
@@ -6746,15 +7034,9 @@ const newAppt = {
       bankAutoConnectRef.current = true;
       (async () => {
           try {
+              // NOT: Yalnızca BAĞLANTI otomatik kurulur. Canlı çekim (periyodik hareket alma)
+              // KENDİLİĞİNDEN BAŞLAMAZ; yalnızca "Otomatik Çekimi Başlat" butonuna tıklanınca başlar.
               await handleBankApiConnect();
-              // Bağlantı kurulduysa canlı çekimi de başlat
-              setTimeout(() => {
-                  if (!bankApiIntervalRef.current) {
-                      fetchBankTransactionsOnce();
-                      bankApiIntervalRef.current = setInterval(fetchBankTransactionsOnce, 30000);
-                      setBankApiRunning(true);
-                  }
-              }, 500);
           } catch (e) { console.error('Otomatik banka bağlantısı hatası:', e); }
       })();
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6767,8 +7049,27 @@ const newAppt = {
   const removeBankTx = (txId) => {
       // YENİ: Onay penceresi + KALICI gizleme (yenilemede bankadan tekrar eklenmez, eşleştirilmez).
       if (!window.confirm('Bu banka hareketini silmek istediğinize emin misiniz?\n\nSilinen hareket bu ekranda bir daha görünmez ve "Şimdi Yenile" yapıldığında tekrar eklenmez.')) return;
+      const _tx = bankApiTransactions.find(t => String(t.id) === String(txId));
       setDeletedBankTxIds(prev => (prev.includes(String(txId)) ? prev : [...prev, String(txId)]));
       setBankApiTransactions(prev => prev.filter(t => String(t.id) !== String(txId)));
+      // YENİ: ÖĞRENME — istenirse bu GÖNDERİCİDEN gelen tüm hareketler (tutar değişse bile)
+      // veya aynı açıklama kalıbındaki hareketler bundan sonra hiç gösterilmez.
+      const _senderKey = _tx ? bankTxRuleKey(_tx.description) : null;
+      if (_senderKey && !(bankIgnoreSenders || []).includes(_senderKey)) {
+          const _label = _senderKey.startsWith('iban:') ? _senderKey.slice(5) : _senderKey.slice(3).toLocaleUpperCase('tr');
+          if (window.confirm(`Bu GÖNDERİCİDEN gelen hareketler bundan sonra hiç gösterilmesin mi?\n\nGönderici: ${_label}\n\nEvet derseniz TUTAR DEĞİŞSE BİLE bu göndericiden gelen yeni hareketler otomatik gizlenir.`)) {
+              setBankIgnoreSenders(prev => [...prev, _senderKey]);
+              setBankApiTransactions(prev => prev.filter(t => bankTxRuleKey(t.description) !== _senderKey));
+              return;
+          }
+      }
+      const sig = _tx ? bankTxIgnoreSignature(_tx.description) : '';
+      if (sig && !(bankIgnorePatterns || []).includes(sig)) {
+          if (window.confirm(`Bu TÜRDEKİ hareketler bundan sonra hiç gösterilmesin mi?\n\nKalıp: "${sig}"\n\nEvet derseniz, açıklaması bu kalıba uyan yeni hareketler de otomatik gizlenir.`)) {
+              setBankIgnorePatterns(prev => [...prev, sig]);
+              setBankApiTransactions(prev => prev.filter(t => !bankTxIgnoreSignature(t.description).includes(sig)));
+          }
+      }
   };
 
   // Hareketi kesinleştir: tahsilat ise cariye işle, askıda ise pendingCollections'a ekle
@@ -7619,6 +7920,67 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
       });
       const interestStartTime = Math.max(lastSettleTime, lastPaymentTime);
 
+      // ═══════════════════════════════════════════════════════════════════════════
+      // YENİ EKLENEN: TAHSİLAT SONRASI CARİDE İŞLENMİŞ FAİZİN SİLİNMESİNİ ENGELLE
+      // SORUN: Faiz canlı hesaplandığı için, yukarıdaki "interestStartTime" kapısı
+      // müşteri ödeme yapınca SON TAHSİLAT tarihine sıçrıyordu. Bu yüzden o tarihten
+      // ÖNCE cariye işlenmiş faiz satırları (ör. 80 TL + 162 TL) geriye dönük olarak
+      // kayboluyor, müşteri faizi de ödediği için bakiye eksiye düşüyordu (-242 TL).
+      //
+      // ÇÖZÜM: Kapı artık GEÇMİŞE DÖNÜK SİLME yapmaz. Aşağıdaki tarama, mevcut
+      // (veya en son kapanmış) borç döneminde faizin İLK doğduğu anı bulur ve kapıyı
+      // en fazla o ana kadar geri çeker. Böylece:
+      //   • Zaten işlenmiş faiz satırları yerinde KALIR, ödeme onları silmez.
+      //   • Ödeme faizi de kapatıyorsa bakiye doğru şekilde 0 olur (eksiye düşmez).
+      //   • Daha ESKİ, tamamen kapanmış dönemler eskisi gibi faiz DIŞI kalır.
+      // (Tarama yalnızca TARİH bulur; faiz tutarları aşağıdaki ana döngüde hesaplanır.)
+      // ═══════════════════════════════════════════════════════════════════════════
+      let __gateFloor = 0;
+      {
+          const DAY30 = 30 * 86400000;
+          let __bal = 0;             // Ana borç bakiyesi (faiz hariç)
+          let __anchor = null;       // Faiz döngüsü çıpası (ms) — ana döngüdeki mantığın aynısı
+          let __curFirst = 0;        // İçinde bulunulan borç döneminde faizin İLK doğduğu an
+          let __prevFirst = 0;       // En son KAPANMIŞ borç döneminin ilk faiz anı
+          const __nowT = today.getTime();
+
+          modifiedLedger.forEach(t => {
+              const __td = (t.date instanceof Date ? t.date : new Date(t.date)).getTime();
+              if (isNaN(__td)) return;
+              // Bu işleme gelene kadar dolan 30 günlük periyotlarda faiz doğar mı?
+              if (__bal > 0 && __anchor !== null) {
+                  let __next = __anchor + DAY30;
+                  while (__next <= __td) {
+                      if (!__curFirst) __curFirst = __next;
+                      __anchor = __next;
+                      __next = __anchor + DAY30;
+                  }
+              }
+              __bal += (Number(t.debt) || 0) - (Number(t.credit) || 0);
+              if (__bal > 0) {
+                  if (__anchor === null) __anchor = __td;                    // borç dönemi başladı
+                  if ((Number(t.credit) || 0) > 0) __anchor = __td;          // kısmi tahsilat → yeniden çıpala
+              } else {
+                  // Borç dönemi kapandı: bu dönemde faiz doğmuşsa hatırla (silinmesin)
+                  if (__curFirst) { __prevFirst = __curFirst; __curFirst = 0; }
+                  __anchor = null;
+              }
+          });
+
+          // Açık (halen borçlu) dönemde bugüne kadar doğan faizler
+          if (__bal > 0 && __anchor !== null) {
+              let __next = __anchor + DAY30;
+              while (__next <= __nowT) {
+                  if (!__curFirst) __curFirst = __next;
+                  __anchor = __next;
+                  __next = __anchor + DAY30;
+              }
+          }
+          __gateFloor = __curFirst || __prevFirst;
+      }
+      // Nihai faiz kapısı: mevcut/son dönemde doğmuş faizleri ASLA geriye dönük silmez.
+      const interestGateTime = __gateFloor > 0 ? Math.min(interestStartTime, __gateFloor) : interestStartTime;
+
       const baseTransactions = [...modifiedLedger];
       // Bugüne kadar olan faizleri tetiklemek için dummy bir hareket ekliyoruz.
       baseTransactions.push({ id: 'dummy-today', date: today, debt: 0, credit: 0, isDummy: true });
@@ -7631,7 +7993,9 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
               while (nextInterestDate <= tx.date) {
                   // YENİ: Faiz yalnızca aktivasyon tarihinden VE ana borcun en son sıfırlandığı andan
                   // (hangisi sonraysa) sonrasına işlenir. Böylece ödenip sıfırlanmış geçmiş dönemlere faiz gelmez.
-                  if (nextInterestDate.getTime() >= interestStartTime) {
+                  // GÜNCELLENDİ: Kapı olarak interestGateTime kullanılır — tahsilat yapılınca
+                  // daha önce cariye işlenmiş faiz satırları silinmez (bkz. yukarıdaki açıklama).
+                  if (nextInterestDate.getTime() >= interestGateTime) {
                       // YENİ: O ayın faiz oranını kullan (girilmemişse genel orana düş). Anahtar 'YYYY-AyIndex'.
                       const _mKey = `${nextInterestDate.getFullYear()}-${nextInterestDate.getMonth()}`;
                       const _mRateRaw = (collectionRates.monthlyInterestRates || {})[_mKey];
@@ -8720,8 +9084,10 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                  {(() => {
                     // Oda filtresi: Tüm Müşteriler sayfası temel alınır, birleşik filtre uygulanır
                     let base = customers;
-                    if (custRoomFilter === 'withRoom' || activeMenu === 'mevcut-musteriler') base = customers.filter(c => rooms.some(r => r.customerName === c.name));
-                    else if (custRoomFilter === 'noRoom') base = customers.filter(c => !rooms.some(r => r.customerName === c.name));
+                    // YENİ: AVUKAT rolü yalnızca İCRA sürecindeki müşterileri görür.
+                    if (isAvukat()) base = customers.filter(c => rooms.some(r => r.customerName === c.name && r.isUnderLegalAction));
+                    if (custRoomFilter === 'withRoom' || activeMenu === 'mevcut-musteriler') base = base.filter(c => rooms.some(r => r.customerName === c.name));
+                    else if (custRoomFilter === 'noRoom') base = base.filter(c => !rooms.some(r => r.customerName === c.name));
 
                     // Zamanlama filtresi (kayıt tarihine göre)
                     const timeFiltered = base.filter(c => custTimeFilter === 'all' ? true : inDashboardRange(parseAnyDate(c.createdAt), custTimeFilter));
@@ -8788,6 +9154,16 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                   const customer = customers.find(c => c.id === selectedCustomerId);
                   if(!customer) return <div>Müşteri Bulunamadı.</div>;
                   const customerRooms = rooms.filter(r => r.customerName === customer.name);
+                  // YENİ: AVUKAT KISITI — avukat rolü yalnızca İCRADAKİ müşterilerin carisini görebilir.
+                  if (isAvukat() && !customerRooms.some(r => r.isUnderLegalAction)) {
+                      return (
+                          <div className="bg-white rounded-2xl border border-amber-200 p-8 text-center shadow-sm">
+                              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-3"><Shield size={22}/></div>
+                              <h3 className="text-base font-bold text-slate-800 mb-1">Görüntüleme Yetkiniz Yok</h3>
+                              <p className="text-sm text-gray-500">Avukat rolü yalnızca <strong>icra sürecindeki</strong> müşterilerin carilerini görüntüleyebilir.</p>
+                          </div>
+                      );
+                  }
 
                   // --- Cari Ledger (Ekstre) Hesaplama ---
                   const { ledger: fullLedger, balance: runningBalance } = getCustomerLedger(customer);
@@ -8888,6 +9264,22 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                     <a href={customer.proxyDocumentPhoto} target="_blank" rel="noreferrer">
                                                         <img src={customer.proxyDocumentPhoto} alt="Vekil Belge" className="h-24 object-contain rounded" />
                                                     </a>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {/* YENİ EKLENEN: Birden fazla vekalet belgesi — ek belgeler yan yana listelenir */}
+                                        {Array.isArray(customer.proxyDocumentPhotos) && customer.proxyDocumentPhotos.length > 0 && (
+                                            <div className="flex flex-col gap-1.5 md:col-span-3 mt-2">
+                                                <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Ek Vekalet Belgeleri ({customer.proxyDocumentPhotos.length} adet)</span>
+                                                <div className="flex flex-wrap gap-3">
+                                                    {customer.proxyDocumentPhotos.map((docUrl, idx) => (
+                                                        <div key={idx} className="border border-indigo-200 rounded p-2 bg-white shadow-sm flex flex-col items-center gap-1">
+                                                            <a href={docUrl} target="_blank" rel="noreferrer">
+                                                                <img src={docUrl} alt={`Ek Vekalet Belgesi ${idx + 1}`} className="h-24 object-contain rounded" />
+                                                            </a>
+                                                            <span className="text-[10px] font-bold text-indigo-500">Ek Belge {idx + 1}</span>
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             </div>
                                         )}
@@ -9265,6 +9657,15 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                <span className={`inline-block px-3 py-1.5 rounded-lg text-sm font-black text-white shadow-md ${runningBalance > 0 ? 'bg-red-500 shadow-red-500/30' : runningBalance < 0 ? 'bg-green-500 shadow-green-500/30' : 'bg-slate-600 shadow-slate-500/30'}`}>
                                                    {runningBalance.toLocaleString('tr-TR', {minimumFractionDigits: 0, maximumFractionDigits: 0})} TL
                                                </span>
+                                               {/* YENİ: Güncel bakiyeye DAHİL faiz toplamı. Faiz mantığı gereği yalnızca SON TAHSİLATTAN
+                                                   SONRA doğan faizler üretilir (tam/kısmi tahsilat yapıldıkça öncekiler sayılmaz; faiz
+                                                   pasifken hiç üretilmez). Faiz yoksa bu satır görünmez. */}
+                                               {(() => {
+                                                   if (runningBalance <= 0) return null;
+                                                   const _intTotal = (getCustomerLedger(customer).ledger || []).reduce((s, t) => s + (t.isInterest ? (Number(t.debt) || 0) : 0), 0);
+                                                   if (_intTotal <= 0) return null;
+                                                   return <span className="block mt-1.5 text-[10px] font-bold text-rose-500">{Math.round(_intTotal).toLocaleString('tr-TR')} TL faiz dahildir</span>;
+                                               })()}
                                            </td>
                                         </tr>
                                      </tfoot>
@@ -9592,6 +9993,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         const visibleTx = bankApiTransactions
                           .filter(tx => {
                               if (_delSetView.has(String(tx.id))) return false; // silinenler görünmez
+                              // YENİ: GİDEN PARA hareketleri listede HİÇ gösterilmez (yalnızca hesaba giren para).
+                              // Ek güvence: yön bilgisi hatalı gelse bile EKSİ tutarlı hiçbir satır gösterilmez.
+                              if (Number(tx.amount) < 0) return false;
+                              if (dirOf(tx) === 'out') return false;
+                              // YENİ: Hesaplar arası virman ve öğrenilmiş kalıplar gösterilmez.
+                              if (isTransferDesc(tx.description) || isLearnedIgnored(tx.description)) return false;
                               const t = new Date(tx.rawDate).getTime();
                               if (!isNaN(t)) { if (_fromT !== null && t < _fromT) return false; if (_toT !== null && t > _toT) return false; }
                               if (bankTxStatusFilter === 'in') return dirOf(tx) === 'in';
@@ -9621,7 +10028,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                           <div className="p-5 border-b border-gray-100 flex flex-col gap-3">
                             <div className="flex items-center justify-between flex-wrap gap-2">
                               <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><History size={18} className="text-[#1bc5bd]"/> Canlı Banka Hareketleri
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">Gelen + Giden tüm hareketler</span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Yalnızca hesaba giren para</span>
                               </h3>
                               <div className="flex items-center gap-2">
                                 <span className="text-xs font-semibold text-gray-500">{visibleTx.length} / {bankApiTransactions.length} hareket</span>
@@ -9636,8 +10043,6 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               <div className="flex flex-col gap-0.5"><label className="text-[9px] font-bold text-gray-400 uppercase">Durum</label>
                                 <select value={bankTxStatusFilter} onChange={(e) => setBankTxStatusFilter(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-cyan-500 cursor-pointer">
                                   <option value="all">Tümü</option>
-                                  <option value="in">Gelen Para</option>
-                                  <option value="out">Giden Para</option>
                                   <option value="tahsilat">Tahsilat (Cariye)</option>
                                   <option value="askida">Askıda</option>
                                   <option value="matched">Eşleşenler</option>
@@ -9681,6 +10086,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                           const _dayChanged = _prev && _prev.date !== tx.date;
                                           // YENİ: Müşterinin carisinde AYNI GÜN + AYNI TUTAR ödeme var mı?
                                           const _alreadyPaid = !_isOut && tx.matchedCustomerId && hasSameDayAmountPayment(tx.matchedCustomerId, bankTxDateISO(tx), tx.amount);
+                                          // YENİ: Aynı gün ödeme var ama TUTAR FARKLI mı? (ör. aynı gün 21.240 TL tahsilat, bu hareket 240 TL)
+                                          const _sameDayDifferent = !_alreadyPaid && !_isOut && tx.matchedCustomerId && hasSameDayPayment(tx.matchedCustomerId, bankTxDateISO(tx));
                                           return (
                                           <tr key={tx.id} className={`hover:bg-gray-50 ${tx.processed ? 'opacity-60' : ''} ${_isOut ? 'bg-rose-50/40' : ''} ${_dayChanged ? 'border-t-4 border-slate-300' : ''}`}>
                                               <td className="p-3 font-semibold text-gray-700 whitespace-nowrap text-xs align-top">
@@ -9726,10 +10133,13 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                           <option value="askida">Askıya Al</option>
                                                       </select>
                                                   )}
-                                                  {/* YENİ: Her tahsilat satırında, müşterinin carisinde AYNI GÜN + AYNI TUTAR ödeme var mı bildirimi */}
+                                                  {/* YENİ: Tahsilat durumu bildirimi — 3 durum:
+                                                      • Aynı gün + AYNI tutar ödeme varsa → "Tahsilat Yapılmış" (yeşil)
+                                                      • Aynı gün ödeme var ama TUTAR FARKLI ise → "Farklı Tahsilat Var" (turuncu)
+                                                      • O gün hiç ödeme yoksa → "Tahsilat Yapılmamış" (kırmızı) */}
                                                   {!_isOut && tx.status === 'tahsilat' && (
-                                                      <span className={`block mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded w-fit mx-auto ${_alreadyPaid ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'}`}>
-                                                          {_alreadyPaid ? 'Tahsilat Yapılmış' : 'Tahsilat Yapılmamış'}
+                                                      <span className={`block mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded w-fit mx-auto ${_alreadyPaid ? 'bg-green-100 text-green-700 border border-green-200' : _sameDayDifferent ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-red-100 text-red-700 border border-red-200'}`}>
+                                                          {_alreadyPaid ? 'Tahsilat Yapılmış' : _sameDayDifferent ? 'Farklı Tahsilat Var' : 'Tahsilat Yapılmamış'}
                                                       </span>
                                                   )}
                                               </td>
@@ -10285,7 +10695,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
               })()}
             </div>
           ) : activeMenu === 'hatirlatmalar' ? (
-            <div className="max-w-6xl mx-auto flex flex-col pb-10 animate-in fade-in duration-300">
+            <div className="w-full max-w-none mx-auto flex flex-col pb-10 animate-in fade-in duration-300">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
                 <div>
                   <h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Hatırlatma Takvimi</h1>
@@ -10329,8 +10739,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                            </div>
                         </div>
                       )}
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                      {/* GÜNCELLENDİ: Takvim TAM GENİŞLİK (üstte), seçili günün detayları ALTINDA — tek sütun düzen. */}
+                      <div className="grid grid-cols-1 gap-6">
+                         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 w-full">
                             <div className="flex items-center justify-between mb-3">
                                <button onClick={() => shiftMonth(-1)} className="w-9 h-9 rounded-lg hover:bg-gray-100 text-gray-500 font-bold text-lg flex items-center justify-center">‹</button>
                                <h3 className="font-bold text-slate-800">{monthNames[month]} {year}</h3>
@@ -10347,7 +10758,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   const isSel = ds === reminderSelectedDate;
                                   const isToday = ds === today;
                                   return (
-                                    <div key={ds} onClick={() => setReminderSelectedDate(ds)} className={`min-h-[104px] sm:min-h-[124px] p-1.5 sm:p-2 rounded-xl border flex flex-col justify-between cursor-pointer transition-all shadow-sm ${isSel ? 'ring-2 ring-indigo-500 ring-offset-1 border-transparent bg-indigo-600 text-white' : isToday ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white border-gray-200 hover:border-gray-300 text-slate-700'}`}>
+                                    <div key={ds} onClick={() => setReminderSelectedDate(ds)} className={`min-h-[104px] sm:min-h-[136px] p-1.5 sm:p-2.5 rounded-xl border flex flex-col justify-between cursor-pointer transition-all shadow-sm ${isSel ? 'ring-2 ring-indigo-500 ring-offset-1 border-transparent bg-indigo-600 text-white' : isToday ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white border-gray-200 hover:border-gray-300 text-slate-700'}`}>
                                        <div className="flex justify-between items-start">
                                           <span className="text-xs sm:text-sm font-bold">{dayN}</span>
                                           {dr.length > 0 && <span className={`text-[8px] sm:text-[9px] font-bold ${isSel ? 'text-white/80' : 'text-gray-400'}`}>{dr.length}</span>}
@@ -10537,6 +10948,14 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                                       {/* Aksiyonlar */}
                                       <div className="flex flex-wrap gap-2 justify-end" onClick={e => e.stopPropagation()}>
+                                          {/* YENİ: İCRA DOSYASI — yasal süreç hareketleri + dosya/foto/video. Son durum ve belge sayısı görünür. */}
+                                          <button onClick={() => { setLegalProcForm(emptyLegalProcForm()); setLegalFileModalRoomId(room.id); }} className="flex items-center gap-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 px-3 py-2 rounded-lg text-xs font-bold transition-colors">
+                                              <FileTextIcon size={14} /> Yasal Süreç / Dosya
+                                              {(() => { const lp = room.legalProcess || []; const lf = room.legalFiles || []; const last = lp.length ? [...lp].sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.createdAt || 0) - (a.createdAt || 0))[0] : null; return (<>
+                                                  {last && <span className="ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-600 text-white max-w-[130px] truncate">{last.status}</span>}
+                                                  {lf.length > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-200 text-purple-800">{lf.length} belge</span>}
+                                              </>); })()}
+                                          </button>
                                           {/* YENİ: İcrayı Kaldır — odayı hiç icraya alınmamış gibi normale döndürür (onay penceresiyle). */}
                                           <button onClick={() => { if(!checkActionPerm('action-oda-icra')) return; setSelectedRoomId(room.id); setLegalActionData({ reason: '', type: 'stop' }); setIsLegalActionModalOpen(true); }} className="flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2 rounded-lg text-xs font-bold transition-colors">
                                               <RefreshCcw size={14} /> İcrayı Kaldır
@@ -11407,6 +11826,15 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                              {/* Fotoğraf varsa okunabilirlik için hafif karartma */}
                              {oda.roomListPhoto && <div className="absolute inset-0 bg-black/25"></div>}
+
+                             {/* YENİ: İCRA DAMGASI — icra sürecindeki odaların üzerinde çapraz mühür gibi görünür */}
+                             {oda.isUnderLegalAction && (
+                                <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+                                   <span className="border-4 border-red-600 text-red-600 bg-white/85 font-black text-sm sm:text-base tracking-[0.2em] uppercase px-4 py-1.5 rounded-lg shadow-lg" style={{ transform: 'rotate(-14deg)', letterSpacing: '0.18em' }}>
+                                      İCRA SÜRECİNDE
+                                   </span>
+                                </div>
+                             )}
 
                              {/* Göz ikonu — dolu/boş fark etmeksizin oda fotoğrafı ekleme/görüntüleme (YENİ: küçültüldü) */}
                              <button onClick={(e) => { e.stopPropagation(); setRoomPhotoViewer(oda.id); }} className="absolute top-1.5 left-1.5 z-20 bg-white/90 hover:bg-white text-slate-700 p-1.5 rounded-lg shadow transition-colors" title="Oda Fotoğrafı">
@@ -14137,6 +14565,101 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
         </div>
       )}
 
+      {/* YENİ: İCRA DOSYASI MODALI — Yasal Süreç Takip + Dosya/Foto/Video */}
+      {legalFileModalRoomId && (() => {
+          const _lr = rooms.find(r => String(r.id) === String(legalFileModalRoomId));
+          if (!_lr) return null;
+          const _lp = [...(_lr.legalProcess || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.createdAt || 0) - (a.createdAt || 0));
+          const _lf = _lr.legalFiles || [];
+          const _statusColor = (s) => /ödeme al[ıi]nd[ıi]|kısmi|kismi|dosya kapand/i.test(s) ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : /ihtar|icra|haciz/i.test(s) ? 'bg-red-100 text-red-700 border-red-200' : /ulaşılamadı|ulasilamadi/i.test(s) ? 'bg-gray-100 text-gray-600 border-gray-200' : 'bg-blue-100 text-blue-700 border-blue-200';
+          const _readOnly = isAvukat();
+          return (
+            <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setLegalFileModalRoomId(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                <div className="p-5 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                   <div>
+                      <h3 className="text-base font-bold text-slate-800 flex items-center gap-2"><Shield size={18} className="text-purple-600"/> İcra Dosyası — {_lr.name}</h3>
+                      <p className="text-[11px] text-gray-400 font-medium mt-0.5">{_lr.customerName || 'Müşteri yok'} • Yasal süreç takibi ve belgeler{_readOnly ? ' (yalnızca görüntüleme)' : ''}</p>
+                   </div>
+                   <button onClick={() => setLegalFileModalRoomId(null)} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500"><X size={16}/></button>
+                </div>
+                <div className="p-5 space-y-6">
+                   {/* SÜREÇ HAREKETİ EKLE/DÜZENLE */}
+                   {!_readOnly && (
+                   <div className="bg-purple-50/60 border border-purple-100 rounded-2xl p-4">
+                      <h4 className="text-[11px] font-bold text-purple-700 uppercase tracking-wider mb-3">{legalProcForm.id ? 'Süreç Hareketini Düzenle' : 'Yeni Süreç Hareketi Ekle'}</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                         <div className="flex flex-col gap-1"><label className="text-[10px] font-bold text-gray-500 uppercase">Tarih</label><input type="date" value={legalProcForm.date} onChange={(e) => setLegalProcForm(f => ({ ...f, date: e.target.value }))} className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400"/></div>
+                         <div className="flex flex-col gap-1"><label className="text-[10px] font-bold text-gray-500 uppercase">Durum</label>
+                            <select value={legalProcForm.status} onChange={(e) => setLegalProcForm(f => ({ ...f, status: e.target.value }))} className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400 font-bold text-slate-700 cursor-pointer">
+                               {LEGAL_PROC_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                         </div>
+                         <div className="flex flex-col gap-1"><label className="text-[10px] font-bold text-gray-500 uppercase">Tutar (ops. — ödeme alındıysa)</label><input type="number" value={legalProcForm.amount} onChange={(e) => setLegalProcForm(f => ({ ...f, amount: e.target.value }))} placeholder="0" className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400"/></div>
+                      </div>
+                      <div className="flex flex-col gap-1 mt-3"><label className="text-[10px] font-bold text-gray-500 uppercase">Not / Açıklama</label><textarea rows={2} value={legalProcForm.note} onChange={(e) => setLegalProcForm(f => ({ ...f, note: e.target.value }))} placeholder="Örn: Müşteri arandı, 10 Ağustos'a kadar ödeme sözü verdi..." className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400 resize-none"/></div>
+                      <div className="flex justify-end gap-2 mt-3">
+                         {legalProcForm.id && <button onClick={() => setLegalProcForm(emptyLegalProcForm())} className="px-3 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-gray-100">Vazgeç</button>}
+                         <button onClick={() => handleSaveLegalProcEntry(_lr.id)} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5"><Check size={14}/> {legalProcForm.id ? 'Güncelle' : 'Hareketi Ekle'}</button>
+                      </div>
+                   </div>
+                   )}
+                   {/* SÜREÇ ZAMAN ÇİZELGESİ */}
+                   <div>
+                      <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><History size={13}/> Süreç Hareketleri ({_lp.length})</h4>
+                      {_lp.length === 0 ? (
+                         <p className="text-xs text-gray-400 bg-gray-50 border border-gray-100 rounded-xl p-4 text-center">Henüz süreç hareketi eklenmemiş.</p>
+                      ) : (
+                         <div className="space-y-2">
+                            {_lp.map(e => (
+                               <div key={e.id} className="flex items-start gap-3 bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                                  <div className="text-[11px] font-bold text-gray-600 whitespace-nowrap pt-0.5">{new Date(e.date + 'T00:00:00').toLocaleDateString('tr-TR')}</div>
+                                  <div className="flex-1 min-w-0">
+                                     <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${_statusColor(e.status)}`}>{e.status}</span>
+                                        {e.amount != null && e.amount !== 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{Number(e.amount).toLocaleString('tr-TR')} TL</span>}
+                                     </div>
+                                     {e.note ? <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">{e.note}</p> : null}
+                                     {e.createdBy ? <p className="text-[9px] text-gray-300 font-bold mt-1">{e.createdBy}</p> : null}
+                                  </div>
+                                  {!_readOnly && (
+                                  <div className="flex items-center gap-1 shrink-0">
+                                     <button onClick={() => setLegalProcForm({ id: e.id, date: e.date, status: e.status, amount: e.amount != null ? String(e.amount) : '', note: e.note || '' })} className="text-amber-600 hover:text-amber-700 p-1" title="Düzenle"><Edit size={13}/></button>
+                                     <button onClick={() => handleDeleteLegalProcEntry(_lr.id, e.id)} className="text-red-500 hover:text-red-600 p-1" title="Sil"><Trash2 size={13}/></button>
+                                  </div>
+                                  )}
+                               </div>
+                            ))}
+                         </div>
+                      )}
+                   </div>
+                   {/* DOSYA / FOTO / VİDEO */}
+                   <div>
+                      <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><FileTextIcon size={13}/> Belgeler — Fotoğraf / Video / PDF ({_lf.length})</h4>
+                      <div className="flex flex-wrap gap-2">
+                         {_lf.map(f => (
+                            <div key={f.id} className="flex items-center gap-1 bg-purple-50 border border-purple-100 rounded-lg pl-2 pr-1 py-1 text-[11px] font-bold text-purple-700">
+                               <a href={f.url} target="_blank" rel="noreferrer" className="hover:underline flex items-center gap-1 max-w-[170px] truncate" title={f.name}>
+                                  {f.kind === 'video' ? '🎬' : f.kind === 'pdf' ? '📄' : '🖼️'} {f.name || 'Belge'}
+                               </a>
+                               {!_readOnly && <button onClick={() => handleRemoveLegalFile(_lr.id, f.id)} className="text-red-500 hover:text-red-700 p-0.5"><X size={12}/></button>}
+                            </div>
+                         ))}
+                         {!_readOnly && (
+                         <label className={`cursor-pointer flex items-center gap-1 bg-white border-2 border-dashed border-purple-200 hover:bg-purple-50 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-purple-600 ${legalFilesUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                            <Plus size={12}/> {legalFilesUploading ? 'Yükleniyor...' : 'Dosya / Foto / Video Ekle'}
+                            <input type="file" multiple accept="image/*,video/*,application/pdf" className="hidden" onChange={async (e) => { const fl = e.target.files; e.persist && e.persist(); await handleAddLegalFiles(_lr.id, fl); e.target.value = ''; }}/>
+                         </label>
+                         )}
+                      </div>
+                      {_lf.length === 0 && _readOnly && <p className="text-xs text-gray-400 mt-2">Ekli belge yok.</p>}
+                   </div>
+                </div>
+              </div>
+            </div>
+          );
+      })()}
+
       {/* YENİ: MÜKERRER TAHSİLAT UYARISI — aynı gün aynı tutarlı ödeme carisinde varsa önce uyarır */}
       {dupWarnTx && (
         <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setDupWarnTx(null)}>
@@ -15408,6 +15931,36 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({...editCustomerData, proxyDocumentPhoto: null}); }} className="text-xs font-bold text-red-500 hover:text-red-700">Mevcut Vekil Belgesini Kaldır</button>
                                   </div>
                               )}
+
+                              {/* ═══════════════════════════════════════════════════════
+                                  YENİ EKLENEN: BİRDEN FAZLA VEKALET BELGESİ (DÜZENLEME)
+                                  Mevcut tekli alan (proxyDocumentPhoto) AYNEN korunur;
+                                  ek belgeler yeni "proxyDocumentPhotos" dizisinde tutulur.
+                                  handleUpdateCustomer ...editCustomerData ile kaydettiği
+                                  için dizi otomatik olarak Firebase'e de yazılır.
+                                  ═══════════════════════════════════════════════════════ */}
+                              <div className="mt-4 border-t border-indigo-100 pt-4">
+                                  <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider">Ek Vekalet Belgeleri (Birden Fazla Eklenebilir)</label>
+                                  {/* Eklenmiş ek belgelerin önizlemesi — her belge tek tek kaldırılabilir */}
+                                  {(editCustomerData.proxyDocumentPhotos || []).length > 0 && (
+                                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+                                          {(editCustomerData.proxyDocumentPhotos || []).map((docUrl, idx) => (
+                                              <div key={idx} className="relative border border-indigo-200 rounded-xl p-2 bg-white shadow-sm flex flex-col items-center gap-1.5">
+                                                  <a href={docUrl} target="_blank" rel="noreferrer"><img src={docUrl} alt={`Ek Vekalet Belgesi ${idx + 1}`} className="h-20 object-contain rounded" /></a>
+                                                  <span className="text-[10px] font-bold text-indigo-500">Ek Belge {idx + 1}</span>
+                                                  {/* Bu belgeyi diziden çıkar (diğer belgeler etkilenmez) */}
+                                                  <button type="button" onClick={(e) => { e.preventDefault(); setEditCustomerData({ ...editCustomerData, proxyDocumentPhotos: (editCustomerData.proxyDocumentPhotos || []).filter((_, i) => i !== idx) }); }} className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center shadow" title="Bu belgeyi kaldır"><X size={14} /></button>
+                                              </div>
+                                          ))}
+                                      </div>
+                                  )}
+                                  {/* Çoklu dosya seçimi destekli yükleme alanı (multiple) */}
+                                  <label className="mt-3 border-2 border-dashed border-indigo-200 rounded-2xl p-4 flex flex-col items-center justify-center text-center hover:bg-indigo-50 hover:border-indigo-400 transition-colors cursor-pointer bg-white group">
+                                      <div className="flex items-center gap-2 text-indigo-600 font-bold text-sm"><Plus size={16} /> Yeni Vekalet Belgesi Ekle</div>
+                                      <p className="text-xs text-gray-400 mt-1">PNG, JPG veya PDF — aynı anda birden fazla dosya seçebilirsiniz</p>
+                                      <input type="file" multiple className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={async (e) => { const files = Array.from(e.target.files || []); if (files.length === 0) return; const urls = []; for (const f of files) { const u = await uploadImageToServer(f); if (u) urls.push(u); } setEditCustomerData(prev => ({ ...prev, proxyDocumentPhotos: [...(prev.proxyDocumentPhotos || []), ...urls] })); e.target.value = ''; }} />
+                                  </label>
+                              </div>
                           </div>
                       </div>
                   )}
