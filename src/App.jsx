@@ -7921,65 +7921,40 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
       const interestStartTime = Math.max(lastSettleTime, lastPaymentTime);
 
       // ═══════════════════════════════════════════════════════════════════════════
-      // YENİ EKLENEN: TAHSİLAT SONRASI CARİDE İŞLENMİŞ FAİZİN SİLİNMESİNİ ENGELLE
-      // SORUN: Faiz canlı hesaplandığı için, yukarıdaki "interestStartTime" kapısı
-      // müşteri ödeme yapınca SON TAHSİLAT tarihine sıçrıyordu. Bu yüzden o tarihten
-      // ÖNCE cariye işlenmiş faiz satırları (ör. 80 TL + 162 TL) geriye dönük olarak
-      // kayboluyor, müşteri faizi de ödediği için bakiye eksiye düşüyordu (-242 TL).
+      // GÜNCELLENDİ: 1 AĞUSTOS 2026 SINIRLI FAİZ KAPISI (ESKİ MANTIĞA DÖNÜŞ + TARİH SINIRI)
       //
-      // ÇÖZÜM: Kapı artık GEÇMİŞE DÖNÜK SİLME yapmaz. Aşağıdaki tarama, mevcut
-      // (veya en son kapanmış) borç döneminde faizin İLK doğduğu anı bulur ve kapıyı
-      // en fazla o ana kadar geri çeker. Böylece:
-      //   • Zaten işlenmiş faiz satırları yerinde KALIR, ödeme onları silmez.
-      //   • Ödeme faizi de kapatıyorsa bakiye doğru şekilde 0 olur (eksiye düşmez).
-      //   • Daha ESKİ, tamamen kapanmış dönemler eskisi gibi faiz DIŞI kalır.
-      // (Tarama yalnızca TARİH bulur; faiz tutarları aşağıdaki ana döngüde hesaplanır.)
+      // İŞ KURALI: 1 Ağustos 2026'dan ÖNCE faiz işletilmiyordu; o dönemde tahsilat
+      // yapıp borcunu sıfırlayan (veya ödeme yapan) müşteriye "borcun yok" denmişti.
+      // Bu yüzden faiz aktif edilince GEÇMİŞE DÖNÜK doğan faizler bu müşterilerin
+      // carisine yansımamalı.
+      //
+      // ÇÖZÜM (eski kapı mantığı, tarih sınırıyla):
+      //   • Kapı = 1 Ağustos 2026'dan ÖNCEKİ son tahsilat/son sıfırlama tarihi.
+      //     (Eski koddaki Math.max(lastSettleTime, lastPaymentTime) hesabının aynısı,
+      //      sadece 1 Ağustos 2026 ÖNCESİ hareketlerle sınırlı.)
+      //   • Kapıdan ÖNCE doğan faizler İŞLENMEZ → eski müşterilere geçmiş faiz çıkmaz.
+      //   • 1 Ağustos 2026 ve SONRASINDAKİ tahsilatlar/sıfırlamalar kapıyı ARTIK
+      //     İLERİ İTMEZ → müşteri 2-4 ay sonra borcunu kısmen ya da tamamen kapatsa
+      //     bile, o güne kadar cariye işlenmiş faizler YERİNDE KALIR (silinmez).
       // ═══════════════════════════════════════════════════════════════════════════
-      let __gateFloor = 0;
+      const INTEREST_PROTECT_CUTOFF = new Date(2026, 7, 1).getTime(); // 1 Ağustos 2026 00:00
+      let __preCutoffSettle = 0;   // 1 Ağustos 2026 öncesi son SIFIRLAMA (bakiye <= 0)
+      let __preCutoffPayment = 0;  // 1 Ağustos 2026 öncesi son TAHSİLAT (credit > 0)
       {
-          const DAY30 = 30 * 86400000;
-          let __bal = 0;             // Ana borç bakiyesi (faiz hariç)
-          let __anchor = null;       // Faiz döngüsü çıpası (ms) — ana döngüdeki mantığın aynısı
-          let __curFirst = 0;        // İçinde bulunulan borç döneminde faizin İLK doğduğu an
-          let __prevFirst = 0;       // En son KAPANMIŞ borç döneminin ilk faiz anı
-          const __nowT = today.getTime();
-
+          let __pcBal = 0; // Ana borç bakiyesi (faiz hariç)
           modifiedLedger.forEach(t => {
               const __td = (t.date instanceof Date ? t.date : new Date(t.date)).getTime();
               if (isNaN(__td)) return;
-              // Bu işleme gelene kadar dolan 30 günlük periyotlarda faiz doğar mı?
-              if (__bal > 0 && __anchor !== null) {
-                  let __next = __anchor + DAY30;
-                  while (__next <= __td) {
-                      if (!__curFirst) __curFirst = __next;
-                      __anchor = __next;
-                      __next = __anchor + DAY30;
-                  }
-              }
-              __bal += (Number(t.debt) || 0) - (Number(t.credit) || 0);
-              if (__bal > 0) {
-                  if (__anchor === null) __anchor = __td;                    // borç dönemi başladı
-                  if ((Number(t.credit) || 0) > 0) __anchor = __td;          // kısmi tahsilat → yeniden çıpala
-              } else {
-                  // Borç dönemi kapandı: bu dönemde faiz doğmuşsa hatırla (silinmesin)
-                  if (__curFirst) { __prevFirst = __curFirst; __curFirst = 0; }
-                  __anchor = null;
+              __pcBal += (Number(t.debt) || 0) - (Number(t.credit) || 0);
+              if (__td < INTEREST_PROTECT_CUTOFF) {
+                  if (__pcBal <= 0.01) __preCutoffSettle = __td;
+                  if ((Number(t.credit) || 0) > 0) __preCutoffPayment = Math.max(__preCutoffPayment, __td);
               }
           });
-
-          // Açık (halen borçlu) dönemde bugüne kadar doğan faizler
-          if (__bal > 0 && __anchor !== null) {
-              let __next = __anchor + DAY30;
-              while (__next <= __nowT) {
-                  if (!__curFirst) __curFirst = __next;
-                  __anchor = __next;
-                  __next = __anchor + DAY30;
-              }
-          }
-          __gateFloor = __curFirst || __prevFirst;
       }
-      // Nihai faiz kapısı: mevcut/son dönemde doğmuş faizleri ASLA geriye dönük silmez.
-      const interestGateTime = __gateFloor > 0 ? Math.min(interestStartTime, __gateFloor) : interestStartTime;
+      // Nihai faiz kapısı: yalnızca 1 Ağustos 2026 ÖNCESİ hareketlerden hesaplanır.
+      // Sonraki tahsilatlar kapıyı oynatmadığından, işlenmiş faizler artık silinmez.
+      const interestGateTime = Math.max(__preCutoffSettle, __preCutoffPayment);
 
       const baseTransactions = [...modifiedLedger];
       // Bugüne kadar olan faizleri tetiklemek için dummy bir hareket ekliyoruz.
