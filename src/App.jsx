@@ -17216,4 +17216,4 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
     </div>
   );
-}
+} 
