@@ -10747,10 +10747,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                <h3 className="font-bold text-slate-800">{monthNames[month]} {year}</h3>
                                <button onClick={() => shiftMonth(1)} className="w-9 h-9 rounded-lg hover:bg-gray-100 text-gray-500 font-bold text-lg flex items-center justify-center">›</button>
                             </div>
-                            <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-gray-400 mb-1">
+                            <div className="grid grid-cols-7 gap-2 sm:gap-3 lg:gap-4 text-center text-[11px] font-bold text-gray-400 mb-1">
                                {['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'].map(d => <div key={d}>{d}</div>)}
                             </div>
-                            <div className="grid grid-cols-7 gap-1">
+                            <div className="grid grid-cols-7 gap-2 sm:gap-3 lg:gap-4">
                                {cells.map((ds, i) => {
                                   if (!ds) return <div key={'e' + i} />;
                                   const dayN = Number(ds.slice(-2));
@@ -10758,9 +10758,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   const isSel = ds === reminderSelectedDate;
                                   const isToday = ds === today;
                                   return (
-                                    <div key={ds} onClick={() => setReminderSelectedDate(ds)} className={`min-h-[104px] sm:min-h-[136px] p-1.5 sm:p-2.5 rounded-xl border flex flex-col justify-between cursor-pointer transition-all shadow-sm ${isSel ? 'ring-2 ring-indigo-500 ring-offset-1 border-transparent bg-indigo-600 text-white' : isToday ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white border-gray-200 hover:border-gray-300 text-slate-700'}`}>
+                                    <div key={ds} onClick={() => setReminderSelectedDate(ds)} className={`min-h-[70px] sm:min-h-[90px] p-2 sm:p-3 rounded-2xl border flex flex-col justify-between cursor-pointer transition-all shadow-sm ${isSel ? 'ring-2 ring-indigo-500 ring-offset-1 border-transparent bg-indigo-600 text-white' : isToday ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white border-gray-200 hover:border-gray-300 text-slate-700'}`}>
                                        <div className="flex justify-between items-start">
-                                          <span className="text-xs sm:text-sm font-bold">{dayN}</span>
+                                          <span className="text-sm sm:text-base font-bold">{dayN}</span>
                                           {dr.length > 0 && <span className={`text-[8px] sm:text-[9px] font-bold ${isSel ? 'text-white/80' : 'text-gray-400'}`}>{dr.length}</span>}
                                        </div>
                                        {/* YENİ: Simgeler 3'erli satırlar halinde, en fazla 9 (3x3) gösterilir.
@@ -10768,19 +10768,21 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                            (Ödeme Sözü=turuncu, Günlük Not=mavi, Görev=kırmızı).
                                            SİMGE: tamamlandı=✓ onay, tamamlanmadı=✗ çarpı.
                                            Tüm gün kutuları 9 simgeye yetecek sabit boyuttadır. */}
-                                       <div className="grid grid-cols-3 gap-0.5 sm:gap-1 mt-1 justify-items-center content-start">
+                                       {/* GÜNCELLENDİ: Kutular Randevular takvimiyle aynı boyuta indirildiği için
+                                           simgeler 3x3 sabit grid yerine Randevulardaki gibi flex-wrap ile dizilir. */}
+                                       <div className="flex flex-wrap gap-1 sm:gap-1.5 mt-2 content-start">
                                           {dr.slice(0, 9).map((r, di) => {
                                              const tc = r.completed
                                                  ? 'bg-green-500'
                                                  : (r.type === 'promise' ? 'bg-orange-500' : r.type === 'note' ? 'bg-blue-500' : 'bg-red-500');
                                              const tl = r.type === 'promise' ? 'Ödeme Sözü' : r.type === 'note' ? 'Günlük Not' : 'Görev';
                                              return (
-                                                <span key={r.id || di} title={`${tl} — ${r.completed ? 'Tamamlandı' : 'Tamamlanmadı'}${r.customerName ? ' • ' + r.customerName : ''}`} className={`inline-flex items-center justify-center w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full text-white shadow-sm ${tc}`}>
-                                                   {r.completed ? <Check size={9} strokeWidth={3.5}/> : <X size={9} strokeWidth={3.5}/>}
+                                                <span key={r.id || di} title={`${tl} — ${r.completed ? 'Tamamlandı' : 'Tamamlanmadı'}${r.customerName ? ' • ' + r.customerName : ''}`} className={`inline-flex items-center justify-center w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full text-white shadow-sm ${tc}`}>
+                                                   {r.completed ? <Check size={8} strokeWidth={3.5}/> : <X size={8} strokeWidth={3.5}/>}
                                                 </span>
                                              );
                                           })}
-                                          {dr.length > 9 && <span className={`col-span-3 text-[8px] font-bold leading-none text-center ${isSel ? 'text-white/80' : 'text-gray-400'}`}>+{dr.length - 9}</span>}
+                                          {dr.length > 9 && <span className={`text-[8px] font-bold leading-none self-center ${isSel ? 'text-white/80' : 'text-gray-400'}`}>+{dr.length - 9}</span>}
                                        </div>
                                     </div>
                                   );
