@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, limit, orderBy, deleteDoc, arrayUnion } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, where, limit, orderBy, deleteDoc, arrayUnion } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
   Users, 
@@ -85,7 +85,24 @@ if (__fbConfigValid) {
     try {
         app = initializeApp(firebaseConfig);
         auth = getAuth(app);
-        db = getFirestore(app);
+        // ═══════════════════════════════════════════════════════════════════
+        // OKUMA OPTİMİZASYONU #1 (EN BÜYÜK KAZANÇ): KALICI YEREL ÖNBELLEK
+        // Önceden her sayfa yenilemede/uygulama açılışında TÜM koleksiyonlar
+        // (müşteriler, odalar, randevular...) Firestore'dan BAŞTAN indiriliyordu
+        // → her açılış binlerce okuma. IndexedDB kalıcı önbelleği ile veriler
+        // tarayıcıda saklanır; yeniden açılışta dinleyiciler kaldığı yerden devam
+        // eder ve SADECE DEĞİŞEN dokümanlar okunur (faturalanır).
+        // persistentMultipleTabManager: birden çok sekme açıkken de çalışır.
+        // ═══════════════════════════════════════════════════════════════════
+        try {
+            db = initializeFirestore(app, {
+                localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+            });
+        } catch (cacheErr) {
+            // Tarayıcı IndexedDB desteklemiyorsa normal (önbelleksiz) modda devam et
+            console.warn('Kalıcı önbellek açılamadı, standart mod:', cacheErr);
+            db = getFirestore(app);
+        }
     } catch (err) {
         // Hatalı anahtar/yapılandırma → uygulama yine de açılır (offline/önizleme modu)
         console.error('Firebase başlatılamadı, uygulama offline modda çalışıyor:', err);
@@ -466,7 +483,12 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           }
       };
       initAuth();
-      const unsubscribe = onAuthStateChanged(auth, setFirebaseUser);
+      // OKUMA OPTİMİZASYONU #2: uid AYNI kaldığı sürece firebaseUser state'i güncellenmez.
+      // Aksi halde auth olayları ana veri useEffect'ini yeniden tetikler, TÜM onSnapshot
+      // dinleyicileri kopup yeniden bağlanır ve her koleksiyon BAŞTAN okunurdu.
+      const unsubscribe = onAuthStateChanged(auth, (u) => {
+          setFirebaseUser(prev => (prev && u && prev.uid === u.uid) ? prev : u);
+      });
       return () => unsubscribe();
   }, []);
 
@@ -480,9 +502,36 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const unsubRooms = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setRooms(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubPendingCollections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pendingCollections'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setPendingCollections(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
-      const unsubAppointments = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setAppointments(fetchedData); }, (error) => console.error("Hata:", error));
+      // OKUMA OPTİMİZASYONU #3: Randevular artık SINIRSIZ çekilmez. where('date','>=') ile
+      // yalnızca son 90 gün + tüm GELECEK randevular canlı dinlenir. Daha eski aylar,
+      // takvimde o aya gidildiğinde tek seferlik yüklenir (aşağıdaki "Daha Eski Kayıt" effect'i).
+      const APPT_CUTOFF = (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0]; })();
+      const unsubAppointments = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), where('date', '>=', APPT_CUTOFF)), (snapshot) => {
+          const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() }));
+          // Daha önce "eski kayıt yükle" ile gelen 90 gün öncesi randevular korunur; pencere içi tazelenir.
+          setAppointments(prev => {
+              const older = (prev || []).filter(a => a && String(a.date || '') < APPT_CUTOFF);
+              const m = new Map(); [...older, ...fetchedData].forEach(a => m.set(String(a.id), a));
+              return Array.from(m.values());
+          });
+      }, (error) => console.error("Hata:", error));
       // YENİ: Hatırlatmalar dinleyicisi (küçük operasyonel koleksiyon — bildirim ışığı için app genelinde gerekli)
-      const unsubReminders = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); setReminders(fetchedData); }, (error) => console.error("Hatırlatma Çekme Hatası:", error));
+      // OKUMA OPTİMİZASYONU #4: Hatırlatmalar SINIRSIZ dinlenmez. İki dar canlı sorgu:
+      //   (a) completed == false → TÜM açık hatırlatmalar (bildirim rozeti ve masaüstü uyarıları için şart)
+      //   (b) date >= son 60 gün → yakın geçmiş + gelecek (tamamlanmışlar dahil, takvim görünümü için)
+      // Her sorgu kendi kapsamındaki kayıtları TAZELER (silinen/tamamlanan güncel kalır),
+      // kapsam dışı (eski tamamlanmış) kayıtlar state'te korunur.
+      const REM_CUTOFF = (() => { const d = new Date(); d.setDate(d.getDate() - 60); return d.toISOString().split('T')[0]; })();
+      const applyReminderSnap = (snapshot, inScope) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setReminders(prev => {
+              const kept = (prev || []).filter(r => r && !inScope(r));
+              const m = new Map(); [...kept, ...data].forEach(r => m.set(String(r.id), r));
+              return Array.from(m.values());
+          });
+      };
+      const unsubRemindersOpen = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), where('completed', '==', false)), (snapshot) => applyReminderSnap(snapshot, (r) => r.completed === false), (error) => console.error("Hatırlatma Çekme Hatası:", error));
+      const unsubRemindersRecent = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), where('date', '>=', REM_CUTOFF)), (snapshot) => applyReminderSnap(snapshot, (r) => String(r.date || '') >= REM_CUTOFF), (error) => console.error("Hatırlatma Çekme Hatası:", error));
       // YENİ EKLENEN: ROL İZİNLERİ FİREBASE DİNLEYİCİSİ (kaydedilen yetkiler geri yüklenir)
       const unsubUserRoles = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'userRoles'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setUserRoles(fetchedData); }, (error) => console.error("Rol Çekme Hatası:", error));
       // PERFORMANS/LİMİT: activityLogs, deletedItems ve userSessions artık SÜREKLİ DİNLENMEZ (onSnapshot kaldırıldı).
@@ -490,21 +539,63 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       // getDocs + limit(100) ile çekilir (bkz. fetchActivityLogs / fetchDeletedItems / fetchUserSessions).
       
 // 👇 SİSTEM AYARLARINI (SÖZLEŞME VE ORANLAR) FİREBASE'DEN ÇEKME 👇
-      const unsubSettings = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'settings'), (snapshot) => {
-          snapshot.docs.forEach(doc => {
-              if (doc.id === 'contract') setContractSettings(doc.data());
-              if (doc.id === 'rates') setCollectionRates(doc.data());
-          });
-      }, (error) => console.error("Ayar Çekme Hatası:", error));
+      // OKUMA OPTİMİZASYONU #5: settings KOLEKSİYONUNUN TAMAMI dinlenmiyordu ama içinde
+      // 'bankTransactions' gibi BÜYÜK ve SIK YAZILAN dokümanlar da vardı — her banka kaydında
+      // o koca doküman tüm açık istemcilere yeniden okutuluyordu. Artık yalnızca gerçekten
+      // kullanılan 2 küçük doküman ('contract' ve 'rates') doküman-bazlı dinlenir.
+      const unsubContract = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'contract'), (snap) => { if (snap.exists()) setContractSettings(snap.data()); }, (error) => console.error("Ayar Çekme Hatası:", error));
+      const unsubRates = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'rates'), (snap) => { if (snap.exists()) setCollectionRates(snap.data()); }, (error) => console.error("Ayar Çekme Hatası:", error));
 
       // PERFORMANS/LİMİT: bulkUploadHistory da sürekli dinlenmez; Ödeme Girişi sayfasına girince
       // tek seferlik getDocs + limit ile çekilir (bkz. fetchBulkUploadHistory).
 
+      // CLEANUP: Menü/oturum değişiminde TÜM canlı dinleyiciler kapatılır — açık kalan
+      // dinleyici hem bellek sızdırır hem her değişiklikte gereksiz okuma üretir.
       return () => { 
-          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments(); unsubReminders();
-          unsubSettings(); unsubUserRoles();
+          unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments();
+          unsubRemindersOpen(); unsubRemindersRecent();
+          unsubContract(); unsubRates(); unsubUserRoles();
       };
   }, [firebaseUser]);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // OKUMA OPTİMİZASYONU #6: "DAHA ESKİ KAYITLARI YÜKLE" (Sayfalama / Lazy-Load)
+  // Canlı dinleyiciler yalnızca güncel pencereyi izler. Kullanıcı takvimde eski
+  // bir aya giderse, o eski kayıtlar TEK SEFERLİK getDocs + limit ile çekilir ve
+  // state'e eklenir. Böylece geçmiş yıllar sürekli dinlenmez ama erişilebilir kalır.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const olderApptLoadedRef = useRef(false);
+  useEffect(() => {
+      if (!db || !firebaseUser || olderApptLoadedRef.current) return;
+      const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0]; })();
+      const viewedMonthStart = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-01`;
+      if (viewedMonthStart >= cutoff.slice(0, 7) + '-01') return; // görüntülenen ay zaten canlı penceredeyse çekme
+      olderApptLoadedRef.current = true; // yalnızca 1 kez çekilir
+      (async () => {
+          try {
+              const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), where('date', '<', cutoff), orderBy('date', 'desc'), limit(300)));
+              const older = snap.docs.map(d => ({ id: Number(d.id) || d.id, ...d.data() }));
+              setAppointments(prev => { const m = new Map(); [...older, ...(prev || [])].forEach(a => m.set(String(a.id), a)); return Array.from(m.values()); });
+          } catch (e) { console.error('Eski randevu yükleme hatası:', e); }
+      })();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser, calendarYear, calendarMonth]);
+
+  const olderRemLoadedRef = useRef(false);
+  useEffect(() => {
+      if (!db || !firebaseUser || olderRemLoadedRef.current) return;
+      const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - 60); return d.toISOString().split('T')[0]; })();
+      if (String(reminderSelectedDate || '') >= cutoff.slice(0, 7) + '-01') return; // seçili ay pencerede
+      olderRemLoadedRef.current = true;
+      (async () => {
+          try {
+              const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), where('date', '<', cutoff), orderBy('date', 'desc'), limit(300)));
+              const older = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+              setReminders(prev => { const m = new Map(); [...older, ...(prev || [])].forEach(r => m.set(String(r.id), r)); return Array.from(m.values()); });
+          } catch (e) { console.error('Eski hatırlatma yükleme hatası:', e); }
+      })();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser, reminderSelectedDate]);
   // ============================================================================
 
   // PERFORMANS: Büyük log/geçmiş koleksiyonlarını SÜREKLİ dinlemek yerine TEK SEFERLİK çeken fonksiyonlar.
