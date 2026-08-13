@@ -6342,6 +6342,37 @@ const handleChangeRoomConfirm = async () => {
       return best;
   };
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // YENİ EKLENEN: SONRADAN "KDV'Lİ YAP" İLE ÇEVRİLEN ODALARDA MEVCUT KİRA DÜZELTMESİ
+  //
+  // SORUN: handleConvertCustomerToKdv, odayı çevirirken monthlyFee'yi BİLEREK
+  // değiştirmez; cari hesap (getCustomerLedger) geçiş ayından itibaren bu tutarı
+  // "KDV DAHİL" kabul edip KDV'yi İÇİNDEN ayrıştırır (isConvertedKdvMonth bloğu).
+  // Yani bu odalarda saklanan tutar ZATEN BRÜT'tür. Ekranlarda ise tutar
+  // "hasKdv ? tutar * 1.20" ile gösterildiği için %20 FAZLA görünüyordu
+  // (ör. gerçek 5.500 TL yerine 6.600 TL). Bu yüzden hata SADECE sonradan
+  // KDV'li yapılan odalarda oluşuyordu.
+  //
+  // ÇÖZÜM: Aşağıdaki iki yardımcı, tutarın hangi ölçekte (net mi brüt mü)
+  // saklandığını tespit eder ve KDV DAHİL doğru tutarı döndürür.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Odanın saklanan kira tutarı BRÜT (KDV dahil) ölçekte mi tutuluyor?
+  // kdvStartKey SADECE "Carisini KDV'li Yap" ile çevrilen odalarda oluşur ve bu işlem
+  // monthlyFee'yi DEĞİŞTİRMEZ — yani tutar, KDV'siz dönemden kalan BRÜT tutardır.
+  // (Geçiş ayından önceki aylarda KDV'siz, sonrasında KDV içeriden ayrıştırılarak
+  //  işlendiği için tutar HER İKİ dönemde de aynı brüt rakamdır.)
+  const isRoomKdvStoredGross = (room) => !!(room && room.kdvStartKey);
+
+  // Odanın EN SON / GÜNCEL "KDV DAHİL" kirası — ekranlarda gösterilecek doğru tutar.
+  const getRoomLatestGrossFee = (room) => {
+      const stored = Number(getRoomLatestFee(room) || 0);
+      // Sonradan çevrilen odada saklanan tutar ZATEN KDV dahil → tekrar ×1.20 YAPILMAZ.
+      if (isRoomKdvStoredGross(room)) return Math.round(stored);
+      const mult = (room.hasKdv !== undefined ? room.hasKdv : true) ? 1.20 : 1;
+      return Math.round(stored * mult);
+  };
+
   const handleOpenApplyIncreaseModal = (room, year) => {
       // GÜNCELLENDİ: Zam baz kirası, listede gösterilen "MEVCUT KIRA" ile birebir aynı olsun diye
       // getRoomLatestFee(room) kullanılır (en güncel/geçerli kira). Böylece zam, ekranda görülen
@@ -6349,14 +6380,18 @@ const handleChangeRoomConfirm = async () => {
       const netBase = Math.max(Number(getRoomLatestFee(room) || 0), Number(room.monthlyFee || 0));
       // GÜNCELLENDİ: Zam artık KDV DAHİL kira üzerinden yapılır. Baz kira ve girilen yeni tutar KDV dahildir.
       // (KDV muaf odalarda çarpan 1'dir; muafiyet korunur.) Kaydederken net'e çevrilecek.
-      const kdvMult = (room.hasKdv !== undefined ? room.hasKdv : true) ? 1.20 : 1;
-      const base = Math.round(netBase * kdvMult); // KDV dahil baz kira (listedeki "Mevcut Kira" ile birebir aynı)
+      // YENİ: Sonradan KDV'li yapılan odalarda saklanan tutar ZATEN brüt olduğu için çarpan 1'dir;
+      // aksi halde zam bazı %20 şişer. Baz kira listedeki "Mevcut Kira" ile birebir aynı olur.
+      const _isConvKdv = isRoomKdvStoredGross(room);
+      const kdvMult = _isConvKdv ? 1 : ((room.hasKdv !== undefined ? room.hasKdv : true) ? 1.20 : 1);
+      const base = getRoomLatestGrossFee(room); // KDV dahil baz kira (listedeki "Mevcut Kira" ile birebir aynı)
 
       const rate = Number(collectionRates.roomIncreaseRate || 50);
       const defaultNew = Math.round(base + (base * rate / 100));
 
       // increaseModalData'ya KDV dahil baz kirayı ve çarpanı ekliyoruz (kaydederken net'e çevirmek için)
-      setIncreaseModalData({ ...room, targetYear: parseInt(year), increaseBaseFee: base, kdvMult });
+      // isConvertedKdv: kaydetme aşamasında KDV ayrıştırmasının doğru yapılması için taşınır
+      setIncreaseModalData({ ...room, targetYear: parseInt(year), increaseBaseFee: base, kdvMult, isConvertedKdv: _isConvKdv });
       setIncreaseMode('percentage');
       setIncreasePercentage(rate.toString());
       setNewRentAmount(defaultNew.toString());
@@ -6383,7 +6418,9 @@ const handleChangeRoomConfirm = async () => {
       const room = increaseModalData;
       // GÜNCELLENDİ: Modal KDV DAHİL çalışır. Girilen tutar KDV dahildir; sistemde saklanan
       // monthlyFee/baz NET (KDV hariç) olduğundan, çarpana bölerek net'e çeviriyoruz.
-      const kdvMult = Number(increaseModalData.kdvMult) || ((increaseModalData.hasKdv !== undefined ? increaseModalData.hasKdv : true) ? 1.20 : 1);
+      // YENİ: Sonradan KDV'li yapılan odalarda monthlyFee BRÜT saklanır (cari içeriden KDV ayrıştırır),
+      // bu yüzden çarpan 1'dir. Diğer odalarda eski davranış (net saklama) aynen korunur.
+      const kdvMult = increaseModalData.isConvertedKdv ? 1 : (Number(increaseModalData.kdvMult) || ((increaseModalData.hasKdv !== undefined ? increaseModalData.hasKdv : true) ? 1.20 : 1));
       const enteredGross = Number(newRentAmount);                                              // kullanıcının girdiği KDV dahil tutar
       const grossOld = Number(increaseModalData.increaseBaseFee ?? increaseModalData.monthlyFee); // KDV dahil baz kira
       const newFee = enteredGross / kdvMult;   // NET yeni kira (monthlyFee olarak saklanır; ×KDV = girilen tutar)
@@ -6466,7 +6503,9 @@ const handleChangeRoomConfirm = async () => {
       const zamCustomer = customers.find(c => c.name === room.customerName);
       if (zamCustomer) {
           const grossNew = Math.round(newFee * kdvMult * 100) / 100;   // KDV dahil yeni kira (modalde girilen tutar)
-          const kdvNew = Math.round((grossNew - newFee) * 100) / 100;  // KDV tutarı (KDV muaf odada 0 çıkar)
+          // YENİ: Sonradan KDV'li yapılan odada tutar brüt saklandığı için net/KDV, tutarın İÇİNDEN ayrıştırılır.
+          const _netForSplit = increaseModalData.isConvertedKdv ? (Math.round((grossNew / 1.20) * 100) / 100) : newFee;
+          const kdvNew = Math.round((grossNew - _netForSplit) * 100) / 100;  // KDV tutarı (KDV muaf odada 0 çıkar)
           const ovPrefix = `debt-${room.id}-`;
 
           // Zam ayı ve sonrasındaki bu odaya ait ESKİ borç override'larını ayıkla
@@ -6488,8 +6527,8 @@ const handleChangeRoomConfirm = async () => {
               txId: `${ovPrefix}${effectiveKey}`,
               date: new Date(_effYear, _effMon, zamPayDay).getTime(),
               desc: `${room.name} Odası - ${zamMonthsStr[_effMon]} ${_effYear} Kirası (Zamlı)`,
-              debt: grossNew,      // KDV dahil toplam borç
-              baseDebt: newFee,    // NET (KDV hariç) kira
+              debt: grossNew,        // KDV dahil toplam borç
+              baseDebt: _netForSplit, // NET (KDV hariç) kira
               kdvDebt: kdvNew,     // KDV tutarı
               credit: 0
           };
@@ -11468,7 +11507,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                     // YENİ: Mevcut Kira = müşterinin carisine yansımış EN SON / EN YÜKSEK kira (zamlı kira dahil)
                                     const baseAmount = getRoomLatestFee(room);
                                     const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
-                                    const monthlyTotal = hasKdv ? baseAmount * 1.20 : baseAmount;
+                                    // DÜZELTİLDİ: Sonradan "KDV'li Yap" ile çevrilen odalarda saklanan tutar ZATEN
+                                    // KDV DAHİL olduğu için burada tekrar ×1.20 yapılmaz (%20 şişme hatası giderildi).
+                                    // getRoomLatestGrossFee her iki durumu da doğru hesaplar → cari ile birebir aynı.
+                                    const monthlyTotal = getRoomLatestGrossFee(room);
                                     
                                     const hasBeenIncreased = room.priceHistory?.some(ph => ph.anniversaryYear === parseInt(anniversaryYear));
 
@@ -11481,9 +11523,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                                         const increaseRate = Number(collectionRates.roomIncreaseRate || 50);
                                         
-                                        // Yeni kira hesaplamaları
-                                        const newBaseAmount = Math.round(baseAmount + (baseAmount * increaseRate / 100));
-                                        const newTotalAmount = hasKdv ? Math.round(newBaseAmount * 1.20) : newBaseAmount;
+                                        // Yeni kira hesaplamaları — DÜZELTİLDİ: zam artık ekranda görünen
+                                        // KDV DAHİL "Mevcut Kira" (monthlyTotal) üzerinden hesaplanır; sonradan
+                                        // KDV'li yapılan odalarda çift KDV uygulanması önlenir.
+                                        const newTotalAmount = Math.round(monthlyTotal + (monthlyTotal * increaseRate / 100));
+                                        const newBaseAmount = hasKdv ? Math.round(newTotalAmount / 1.20) : newTotalAmount;
 
                                         // Mesaj Şablonu
                                         let message = `Merhabalar Sayın ${customer?.name || room.customerName},\n\n`;
