@@ -10549,9 +10549,15 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                           const _target = _future.length > 0 ? _future[0] : _pDates.sort().slice(-1)[0];
                                                           const _diffDays = Math.round((new Date(_target + 'T00:00:00').getTime() - new Date(_todayStr + 'T00:00:00').getTime()) / 86400000);
                                                           const _lbl = _diffDays > 0 ? `Ödeme sözüne ${_diffDays} gün kaldı` : (_diffDays === 0 ? 'Bugün ödeme sözü var' : `Ödeme sözü ${Math.abs(_diffDays)} gün geçti`);
-                                                          const _cls = _diffDays > 0 ? 'bg-amber-100 text-amber-700 border-amber-200' : (_diffDays === 0 ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-red-100 text-red-700 border-red-200');
+                                                          // GÜNCELLENDİ: Duruma göre renk + YANIP SÖNEN (animate-pulse) rozet —
+                                                          // Söze VAR (kaldı) → PEMBE, söz BUGÜN → SARI, söz GEÇTİ → KIRMIZI.
+                                                          const _cls = _diffDays > 0
+                                                              ? 'bg-pink-500 text-white border-pink-600 animate-pulse'
+                                                              : _diffDays === 0
+                                                                  ? 'bg-yellow-400 text-yellow-900 border-yellow-500 animate-pulse'
+                                                                  : 'bg-red-600 text-white border-red-700 animate-pulse';
                                                           return (
-                                                              <span className={`px-2 py-1 rounded text-[10px] font-bold border shadow-sm flex items-center gap-1 ${_cls}`} title={`Söz tarihi: ${new Date(_target + 'T00:00:00').toLocaleDateString('tr-TR')}`}>
+                                                              <span className={`px-2 py-1 rounded text-[10px] font-bold border shadow-md flex items-center gap-1 ${_cls}`} title={`Söz tarihi: ${new Date(_target + 'T00:00:00').toLocaleDateString('tr-TR')}`}>
                                                                   <Clock size={10} /> {_lbl}
                                                               </span>
                                                           );
