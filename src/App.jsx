@@ -10455,7 +10455,27 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                               </div>
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                                  {filteredDebtors.sort((a, b) => debtPaymentFilter === 'new' ? (b.lastDebtTime - a.lastDebtTime) : (b.totalDebt - a.totalDebt)).map((customer) => {
+                                  {/* YENİ EKLENEN: "Ödeme Sözü Aldıklarım" aktifken özel sıralama —
+                                      1) Bugün sözü olanlar, 2) Süresi geçenler (az günden çok güne), 3) Yaklaşanlar (en yakından en uzağa).
+                                      Diğer filtrelerde mevcut sıralama (en yeni borç / en yüksek borç) AYNEN korunur. */}
+                                  {(showOnlyPromises ? filteredDebtors.slice().sort((a, b) => {
+                                      const _getRank = (cust) => {
+                                          const _pDates = [];
+                                          (cust.collectionNotes || []).forEach(n => { if (n && n.promiseDate) _pDates.push(String(n.promiseDate)); });
+                                          (reminders || []).forEach(r => { if (r && r.type === 'promise' && !r.completed && r.customerName === cust.name && r.date) _pDates.push(String(r.date)); });
+                                          if (_pDates.length === 0) return [3, 0]; // söz yok → en sona
+                                          const _todayStr = new Date().toISOString().split('T')[0];
+                                          const _future = _pDates.filter(d => d >= _todayStr).sort();
+                                          const _target = _future.length > 0 ? _future[0] : _pDates.sort().slice(-1)[0];
+                                          const _diffDays = Math.round((new Date(_target + 'T00:00:00').getTime() - new Date(_todayStr + 'T00:00:00').getTime()) / 86400000);
+                                          if (_diffDays === 0) return [0, 0];                 // Bugün sözü olanlar
+                                          if (_diffDays < 0) return [1, -_diffDays];           // Süresi geçenler: az günden çok güne
+                                          return [2, _diffDays];                               // Yaklaşanlar: en yakından en uzağa
+                                      };
+                                      const [ra, va] = _getRank(a);
+                                      const [rb, vb] = _getRank(b);
+                                      return ra !== rb ? ra - rb : va - vb;
+                                  }) : filteredDebtors.sort((a, b) => debtPaymentFilter === 'new' ? (b.lastDebtTime - a.lastDebtTime) : (b.totalDebt - a.totalDebt))).map((customer) => {
                                       // YENİ: Faiz durumu rengi
                                       const interestBadge = customer.interestApplied
                                           ? 'bg-red-500 text-white border-red-600'
