@@ -3356,6 +3356,39 @@ const handleManualAddPayment = async () => {
       } else {
           setReminders(prev => { const ex = prev.some(r => String(r.id) === String(record.id)); return ex ? prev.map(r => String(r.id) === String(record.id) ? record : r) : [...prev, record]; });
       }
+      // ═══════════════════════════════════════════════════════════════════
+      // YENİ EKLENEN: HATIRLATMA → AYLIK BORÇ TAKİP SENKRONU
+      // Müşteri seçili bir hatırlatma kaydedildiğinde, aynı bilgi müşterinin
+      // "Tahsilat Notları"na da yazılır → Aylık Borç Takip kartında görünür.
+      // Ödeme Sözü türündeyse notun "Söz" tarihi hatırlatmanın tarihi olur.
+      // linkedReminderId ile eşleştirilir: düzenlemede çift kayıt oluşmaz,
+      // mevcut senkron not güncellenir. (Not→Hatırlatma yönü zaten vardı;
+      // bu blok ile senkron artık ÇİFT YÖNLÜ.)
+      // ═══════════════════════════════════════════════════════════════════
+      try {
+          const _linkedCust = record.customerName ? customers.find(c => c.name === record.customerName) : null;
+          if (_linkedCust) {
+              const _existing = _linkedCust.collectionNotes || [];
+              // Bu hatırlatmaya bağlı not var mı? (rem_promise_* id'li kayıtlarda kaynak notu da yakala)
+              const _srcNoteId = String(record.id).startsWith('rem_promise_') ? String(record.id).slice('rem_promise_'.length) : null;
+              const _idx = _existing.findIndex(n => n && (String(n.linkedReminderId || '') === String(record.id) || (_srcNoteId && String(n.id) === _srcNoteId)));
+              const _noteText = (record.note || '').trim() || record.title;
+              const _syncNote = {
+                  id: _idx >= 0 ? _existing[_idx].id : Date.now(),
+                  date: _idx >= 0 ? _existing[_idx].date : new Date().toLocaleDateString('tr-TR'),
+                  text: _noteText,
+                  promiseDate: record.type === 'promise' ? record.date : (_idx >= 0 ? (_existing[_idx].promiseDate || '') : ''),
+                  linkedReminderId: record.id
+              };
+              const _updated = _idx >= 0 ? _existing.map((n, i) => (i === _idx ? _syncNote : n)) : [_syncNote, ..._existing];
+              if (db && firebaseUser) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(_linkedCust.id)), { collectionNotes: _updated }, { merge: true });
+              } else {
+                  setCustomers(prev => prev.map(c => c.id === _linkedCust.id ? { ...c, collectionNotes: _updated } : c));
+              }
+          }
+      } catch (e) { console.error('Hatırlatma → Tahsilat Notu senkron hatası:', e); }
+
       logActivity(reminderModal.mode === 'edit' ? 'Hatırlatma Düzenleme' : 'Hatırlatma Ekleme', `${record.title} (${record.date})`);
       setReminderModal(null);
   };
@@ -10483,6 +10516,26 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                               <AlertCircle size={10} /> {customer.monthsOwed} Aylık Borcu Var
                                                           </span>
                                                       )}
+                                                      {/* YENİ EKLENEN: ÖDEME SÖZÜ SAYACI — notlardaki (Söz) tarihleri ve Hatırlatma
+                                                          takvimindeki açık "Ödeme Sözü" kayıtları birlikte taranır. En yakın gelecek
+                                                          söz varsa geri sayım; yoksa en son verilen sözün kaç gün geçtiği gösterilir. */}
+                                                      {(() => {
+                                                          const _pDates = [];
+                                                          (customer.collectionNotes || []).forEach(n => { if (n && n.promiseDate) _pDates.push(String(n.promiseDate)); });
+                                                          (reminders || []).forEach(r => { if (r && r.type === 'promise' && !r.completed && r.customerName === customer.name && r.date) _pDates.push(String(r.date)); });
+                                                          if (_pDates.length === 0) return null;
+                                                          const _todayStr = new Date().toISOString().split('T')[0];
+                                                          const _future = _pDates.filter(d => d >= _todayStr).sort();
+                                                          const _target = _future.length > 0 ? _future[0] : _pDates.sort().slice(-1)[0];
+                                                          const _diffDays = Math.round((new Date(_target + 'T00:00:00').getTime() - new Date(_todayStr + 'T00:00:00').getTime()) / 86400000);
+                                                          const _lbl = _diffDays > 0 ? `Ödeme sözüne ${_diffDays} gün kaldı` : (_diffDays === 0 ? 'Bugün ödeme sözü var' : `Ödeme sözü ${Math.abs(_diffDays)} gün geçti`);
+                                                          const _cls = _diffDays > 0 ? 'bg-amber-100 text-amber-700 border-amber-200' : (_diffDays === 0 ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-red-100 text-red-700 border-red-200');
+                                                          return (
+                                                              <span className={`px-2 py-1 rounded text-[10px] font-bold border shadow-sm flex items-center gap-1 ${_cls}`} title={`Söz tarihi: ${new Date(_target + 'T00:00:00').toLocaleDateString('tr-TR')}`}>
+                                                                  <Clock size={10} /> {_lbl}
+                                                              </span>
+                                                          );
+                                                      })()}
                                                   </div>
 
                                                   <div className="bg-red-50 rounded-xl p-3 border border-red-100 mb-4">
@@ -10494,7 +10547,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                       <div className="mb-4">
                                                           <div className="flex justify-between items-center mb-2">
                                                               <h4 className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1"><History size={12}/> Tahsilat Notları</h4>
-                                                              <button onClick={() => { setCollectionNoteData({ customerId: customer.id, text: '', promiseDate: '' }); setIsCollectionNoteModalOpen(true); }} className="text-yellow-600 hover:text-yellow-700 p-1 flex items-center gap-1 bg-yellow-50 rounded px-2 py-0.5 text-[9px] font-bold border border-yellow-200 shadow-sm"><Plus size={10}/> Not Ekle</button>
+                                                              <div className="flex items-center gap-1.5">{/* YENİ EKLENEN: Müşteri sözünü tutmayıp YENİ söz verdiğinde tek tıkla yeni tarih + not girilir; kayıt hem kartta hem Hatırlatma takviminde görünür. */}
+                                                              <button onClick={() => { setCollectionNoteData({ customerId: customer.id, text: 'Müşteri yeni ödeme sözü verdi.', promiseDate: '' }); setIsCollectionNoteModalOpen(true); }} className="text-amber-700 hover:text-amber-800 p-1 flex items-center gap-1 bg-amber-100 rounded px-2 py-0.5 text-[9px] font-bold border border-amber-300 shadow-sm" title="Yeni Ödeme Sözü Gir (yeni tarih + not)"><Calendar size={10}/> Yeni Söz</button>
+                                                              <button onClick={() => { setCollectionNoteData({ customerId: customer.id, text: '', promiseDate: '' }); setIsCollectionNoteModalOpen(true); }} className="text-yellow-600 hover:text-yellow-700 p-1 flex items-center gap-1 bg-yellow-50 rounded px-2 py-0.5 text-[9px] font-bold border border-yellow-200 shadow-sm"><Plus size={10}/> Not Ekle</button></div>
                                                           </div>
                                                           <div className="flex flex-col gap-2 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
                                                               {customer.collectionNotes.map((note, idx) => (
@@ -10521,7 +10576,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                       <div className="mb-4">
                                                           <div className="flex justify-between items-center mb-2">
                                                               <h4 className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1"><History size={12}/> Tahsilat Notları</h4>
-                                                              <button onClick={() => { setCollectionNoteData({ customerId: customer.id, text: '', promiseDate: '' }); setIsCollectionNoteModalOpen(true); }} className="text-yellow-600 hover:text-yellow-700 p-1 flex items-center gap-1 bg-yellow-50 rounded px-2 py-0.5 text-[9px] font-bold border border-yellow-200 shadow-sm"><Plus size={10}/> Not Ekle</button>
+                                                              <div className="flex items-center gap-1.5">{/* YENİ EKLENEN: Müşteri sözünü tutmayıp YENİ söz verdiğinde tek tıkla yeni tarih + not girilir; kayıt hem kartta hem Hatırlatma takviminde görünür. */}
+                                                              <button onClick={() => { setCollectionNoteData({ customerId: customer.id, text: 'Müşteri yeni ödeme sözü verdi.', promiseDate: '' }); setIsCollectionNoteModalOpen(true); }} className="text-amber-700 hover:text-amber-800 p-1 flex items-center gap-1 bg-amber-100 rounded px-2 py-0.5 text-[9px] font-bold border border-amber-300 shadow-sm" title="Yeni Ödeme Sözü Gir (yeni tarih + not)"><Calendar size={10}/> Yeni Söz</button>
+                                                              <button onClick={() => { setCollectionNoteData({ customerId: customer.id, text: '', promiseDate: '' }); setIsCollectionNoteModalOpen(true); }} className="text-yellow-600 hover:text-yellow-700 p-1 flex items-center gap-1 bg-yellow-50 rounded px-2 py-0.5 text-[9px] font-bold border border-yellow-200 shadow-sm"><Plus size={10}/> Not Ekle</button></div>
                                                           </div>
                                                           <div className="bg-gray-50 border border-gray-100 rounded-lg p-3 text-center opacity-70">
                                                               <p className="text-[10px] text-gray-400 font-medium">Kayıtlı not bulunmuyor.</p>
@@ -10801,7 +10858,8 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                  <div key={r.id} className="flex items-center justify-between gap-2 bg-white rounded-lg px-3 py-2 border border-red-100">
                                     <div className="min-w-0">
                                        <span className="text-xs font-bold text-slate-700">{r.title}</span>
-                                       {r.customerName ? <span className="text-[11px] text-gray-500"> • {r.customerName}</span> : null}
+                                       {/* YENİ EKLENEN: Bekleyen listede de müşteri adı tıklanınca carisine gider. */}
+                                       {r.customerName ? <span onClick={() => { const _rc = customers.find(c => c.name === r.customerName); if (_rc) setSelectedCustomerId(_rc.id); }} className="text-[11px] font-bold text-indigo-600 hover:underline cursor-pointer"> • {r.customerName}</span> : null}
                                        <span className="text-[11px] text-red-500 font-bold"> • {new Date(r.date).toLocaleDateString('tr-TR')}{r.time ? ' ' + r.time : ''}</span>
                                     </div>
                                     <button onClick={() => handleToggleReminder(r)} className="shrink-0 bg-green-500 hover:bg-green-600 text-white text-[10px] font-bold px-2 py-1 rounded-md flex items-center gap-1"><Check size={11}/> Tamamlandı</button>
@@ -10894,7 +10952,21 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                    {r.time ? <span className="text-[10px] font-bold text-gray-500 flex items-center gap-0.5"><Clock size={10}/> {r.time}</span> : null}
                                                 </div>
                                                 <div className={`text-sm font-bold text-slate-800 mt-1 ${r.completed ? 'line-through' : ''}`}>{r.title}</div>
-                                                {r.customerName ? <div className="text-[11px] text-gray-500">Müşteri: {r.customerName}</div> : null}
+                                                {/* YENİ EKLENEN: Müşteri adı tıklanınca cari ekranına gider; yanında Ara ve WhatsApp kısayolları. */}
+                                                {r.customerName ? (() => {
+                                                    const _rc = customers.find(c => c.name === r.customerName);
+                                                    const _ph = String(_rc?.phone || '').replace(/\D/g, '');
+                                                    const _wa = _ph ? (_ph.startsWith('90') ? _ph : (_ph.startsWith('0') ? '9' + _ph : '90' + _ph)) : '';
+                                                    return (
+                                                        <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                                            <button onClick={() => { if (_rc) setSelectedCustomerId(_rc.id); }} className={`text-[11px] font-bold ${_rc ? 'text-indigo-600 hover:underline cursor-pointer' : 'text-gray-500 cursor-default'}`} title={_rc ? 'Müşterinin carisine git' : ''}>Müşteri: {r.customerName}</button>
+                                                            {_rc?.phone ? (<>
+                                                                <a href={`tel:${_rc.phone}`} className="bg-green-500 hover:bg-green-600 text-white rounded-md p-1 shadow-sm" title={`Ara: ${_rc.phone}`}><Phone size={11}/></a>
+                                                                <a href={`https://wa.me/${_wa}`} target="_blank" rel="noreferrer" className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-md p-1 shadow-sm" title="WhatsApp ile yaz"><MessageCircle size={11}/></a>
+                                                            </>) : null}
+                                                        </div>
+                                                    );
+                                                })() : null}
                                                 {r.note ? <div className="text-xs text-gray-600 mt-1 whitespace-pre-wrap">{r.note}</div> : null}
                                                 {Array.isArray(r.files) && r.files.length > 0 && (
                                                    <div className="flex flex-wrap gap-1 mt-1.5">
@@ -11184,6 +11256,9 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
 
                                 const dueRoomsList = rooms.filter(room => {
                                     if (!room.customerName) return false;
+                                    // YENİ EKLENEN: İcra (yasal takip) sürecindeki odalar bu listede GÖSTERİLMEZ —
+                                    // takipleri "İcra Odaları" sayfasından yapılır.
+                                    if (room.isUnderLegalAction) return false;
                                     const entryD = parseDateLocal(room.entryDate || '2026-01-01');
                                     const paymentAnchorD = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryD;
                                     
