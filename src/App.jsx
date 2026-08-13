@@ -558,46 +558,6 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       };
   }, [firebaseUser]);
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // OKUMA OPTİMİZASYONU #6: "DAHA ESKİ KAYITLARI YÜKLE" (Sayfalama / Lazy-Load)
-  // Canlı dinleyiciler yalnızca güncel pencereyi izler. Kullanıcı takvimde eski
-  // bir aya giderse, o eski kayıtlar TEK SEFERLİK getDocs + limit ile çekilir ve
-  // state'e eklenir. Böylece geçmiş yıllar sürekli dinlenmez ama erişilebilir kalır.
-  // ═══════════════════════════════════════════════════════════════════════════
-  const olderApptLoadedRef = useRef(false);
-  useEffect(() => {
-      if (!db || !firebaseUser || olderApptLoadedRef.current) return;
-      const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0]; })();
-      const viewedMonthStart = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-01`;
-      if (viewedMonthStart >= cutoff.slice(0, 7) + '-01') return; // görüntülenen ay zaten canlı penceredeyse çekme
-      olderApptLoadedRef.current = true; // yalnızca 1 kez çekilir
-      (async () => {
-          try {
-              const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), where('date', '<', cutoff), orderBy('date', 'desc'), limit(300)));
-              const older = snap.docs.map(d => ({ id: Number(d.id) || d.id, ...d.data() }));
-              setAppointments(prev => { const m = new Map(); [...older, ...(prev || [])].forEach(a => m.set(String(a.id), a)); return Array.from(m.values()); });
-          } catch (e) { console.error('Eski randevu yükleme hatası:', e); }
-      })();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firebaseUser, calendarYear, calendarMonth]);
-
-  const olderRemLoadedRef = useRef(false);
-  useEffect(() => {
-      if (!db || !firebaseUser || olderRemLoadedRef.current) return;
-      const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - 60); return d.toISOString().split('T')[0]; })();
-      if (String(reminderSelectedDate || '') >= cutoff.slice(0, 7) + '-01') return; // seçili ay pencerede
-      olderRemLoadedRef.current = true;
-      (async () => {
-          try {
-              const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), where('date', '<', cutoff), orderBy('date', 'desc'), limit(300)));
-              const older = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-              setReminders(prev => { const m = new Map(); [...older, ...(prev || [])].forEach(r => m.set(String(r.id), r)); return Array.from(m.values()); });
-          } catch (e) { console.error('Eski hatırlatma yükleme hatası:', e); }
-      })();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firebaseUser, reminderSelectedDate]);
-  // ============================================================================
-
   // PERFORMANS: Büyük log/geçmiş koleksiyonlarını SÜREKLİ dinlemek yerine TEK SEFERLİK çeken fonksiyonlar.
   // Her biri en fazla ~100 (toplu yükleme için 50) kayıt getirir; ilgili sayfaya girince veya "Yenile" ile çağrılır.
   const fetchActivityLogs = async () => {
@@ -1029,6 +989,10 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   // { id, date:'YYYY-MM-DD', time:'HH:MM'|'', title, note, type:'promise'|'note'|'task', customerName, completed, createdAt }
   const [reminders, setReminders] = useState([]);
   const [reminderModal, setReminderModal] = useState(null); // null | {mode:'add'|'edit', data:{...}}
+  // YENİ EKLENEN: Hatırlatma modalındaki "Müşteri" alanı artık aranabilir — kullanıcının
+  // yazdığı metin burada tutulur; dropdown açık/kapalı durumu da burada yönetilir.
+  const [reminderCustomerSearch, setReminderCustomerSearch] = useState('');
+  const [reminderCustomerDropdownOpen, setReminderCustomerDropdownOpen] = useState(false);
   const [reminderSelectedDate, setReminderSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [appointmentData, setAppointmentData] = useState({
     customerType: 'registered',
@@ -1043,6 +1007,47 @@ const [firebaseUser, setFirebaseUser] = useState(null);
 const [apptCustomerSearch, setApptCustomerSearch] = useState('');
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // OKUMA OPTİMİZASYONU #6: "DAHA ESKİ KAYITLARI YÜKLE" (Sayfalama / Lazy-Load)
+  // Canlı dinleyiciler yalnızca güncel pencereyi izler. Kullanıcı takvimde eski
+  // bir aya giderse, o eski kayıtlar TEK SEFERLİK getDocs + limit ile çekilir ve
+  // state'e eklenir. Böylece geçmiş yıllar sürekli dinlenmez ama erişilebilir kalır.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const olderApptLoadedRef = useRef(false);
+  useEffect(() => {
+      if (!db || !firebaseUser || olderApptLoadedRef.current) return;
+      const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0]; })();
+      const viewedMonthStart = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-01`;
+      if (viewedMonthStart >= cutoff.slice(0, 7) + '-01') return; // görüntülenen ay zaten canlı penceredeyse çekme
+      olderApptLoadedRef.current = true; // yalnızca 1 kez çekilir
+      (async () => {
+          try {
+              const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), where('date', '<', cutoff), orderBy('date', 'desc'), limit(300)));
+              const older = snap.docs.map(d => ({ id: Number(d.id) || d.id, ...d.data() }));
+              setAppointments(prev => { const m = new Map(); [...older, ...(prev || [])].forEach(a => m.set(String(a.id), a)); return Array.from(m.values()); });
+          } catch (e) { console.error('Eski randevu yükleme hatası:', e); }
+      })();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser, calendarYear, calendarMonth]);
+
+  const olderRemLoadedRef = useRef(false);
+  useEffect(() => {
+      if (!db || !firebaseUser || olderRemLoadedRef.current) return;
+      const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - 60); return d.toISOString().split('T')[0]; })();
+      if (String(reminderSelectedDate || '') >= cutoff.slice(0, 7) + '-01') return; // seçili ay pencerede
+      olderRemLoadedRef.current = true;
+      (async () => {
+          try {
+              const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), where('date', '<', cutoff), orderBy('date', 'desc'), limit(300)));
+              const older = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+              setReminders(prev => { const m = new Map(); [...older, ...(prev || [])].forEach(r => m.set(String(r.id), r)); return Array.from(m.values()); });
+          } catch (e) { console.error('Eski hatırlatma yükleme hatası:', e); }
+      })();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser, reminderSelectedDate]);
+  // ============================================================================
+
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(new Date().toISOString().split('T')[0]);
   
   // --- RANDEVU DÜZENLEME/SİLME STATE'LERİ ---
@@ -14785,11 +14790,61 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                   <option value="Personel">Personel</option>
                 </select>
               </div>
-              <div className="flex flex-col gap-1"><label className="text-[11px] font-bold text-gray-500 uppercase">Müşteri (ops.)</label>
-                <select value={reminderModal.data.customerName || ''} onChange={(e) => setReminderModal(m => ({ ...m, data: { ...m.data, customerName: e.target.value } }))} className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400 text-slate-700 cursor-pointer">
-                  <option value="">— Müşteri Seç (opsiyonel) —</option>
-                  {[...customers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr')).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
+              <div className="flex flex-col gap-1 relative"><label className="text-[11px] font-bold text-gray-500 uppercase">Müşteri (ops.)</label>
+                {/* YENİ EKLENEN: MÜŞTERİYİ ARA — ad, müşteri no veya oda numarasıyla arama yapılabilir.
+                    Mevcut "customerName" veri modeline hiç dokunulmadı; seçim yapıldığında aynı alana yazılır. */}
+                <input
+                    type="text"
+                    value={reminderModal.data.customerName ? reminderModal.data.customerName : reminderCustomerSearch}
+                    onChange={(e) => {
+                        const val = e.target.value;
+                        setReminderCustomerSearch(val);
+                        setReminderCustomerDropdownOpen(true);
+                        // Kullanıcı yeniden yazmaya başlarsa önceki seçim temizlenir (yeni arama için)
+                        if (reminderModal.data.customerName) setReminderModal(m => ({ ...m, data: { ...m.data, customerName: '' } }));
+                    }}
+                    onFocus={() => setReminderCustomerDropdownOpen(true)}
+                    onBlur={() => setTimeout(() => setReminderCustomerDropdownOpen(false), 150)}
+                    placeholder="Ad, müşteri no veya oda no ile ara (opsiyonel)..."
+                    className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400 text-slate-700"
+                />
+                {reminderModal.data.customerName && (
+                    <button type="button" onMouseDown={(e) => { e.preventDefault(); setReminderModal(m => ({ ...m, data: { ...m.data, customerName: '' } })); setReminderCustomerSearch(''); }} className="absolute right-2 top-8 text-gray-400 hover:text-red-500" title="Seçimi temizle"><X size={16}/></button>
+                )}
+                {reminderCustomerDropdownOpen && !reminderModal.data.customerName && (() => {
+                    const q = reminderCustomerSearch.trim().toLocaleLowerCase('tr');
+                    // Arama: müşteri adı, müşteri no VEYA sahip olduğu oda numaralarından herhangi biriyle eşleşir
+                    const results = [...customers]
+                        .filter(c => {
+                            if (!q) return true;
+                            const nameHit = (c.name || '').toLocaleLowerCase('tr').includes(q);
+                            const noHit = String(c.customerNo || '').toLocaleLowerCase('tr').includes(q);
+                            const roomHit = rooms.some(r => r.customerName === c.name && String(r.name || '').toLocaleLowerCase('tr').includes(q));
+                            return nameHit || noHit || roomHit;
+                        })
+                        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr'))
+                        .slice(0, 30); // performans: en fazla 30 sonuç listelenir
+                    return (
+                        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border-2 border-indigo-100 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+                            {results.length === 0 ? (
+                                <div className="px-3 py-2.5 text-xs text-gray-400">Sonuç bulunamadı.</div>
+                            ) : results.map(c => {
+                                const custRoomNames = rooms.filter(r => r.customerName === c.name).map(r => r.name).filter(Boolean);
+                                return (
+                                    <button
+                                        type="button"
+                                        key={c.id}
+                                        onMouseDown={(e) => { e.preventDefault(); setReminderModal(m => ({ ...m, data: { ...m.data, customerName: c.name } })); setReminderCustomerSearch(''); setReminderCustomerDropdownOpen(false); }}
+                                        className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 border-b border-gray-50 last:border-0 flex flex-col"
+                                    >
+                                        <span className="font-bold text-slate-700">{c.name}</span>
+                                        <span className="text-[10px] text-gray-400">Müşteri No: {c.customerNo || '-'}{custRoomNames.length > 0 ? ` • Oda: ${custRoomNames.join(', ')}` : ''}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    );
+                })()}
               </div>
               <div className="flex flex-col gap-1"><label className="text-[11px] font-bold text-gray-500 uppercase">Not / Açıklama</label><textarea rows={3} value={reminderModal.data.note} onChange={(e) => setReminderModal(m => ({ ...m, data: { ...m.data, note: e.target.value } }))} placeholder="Detay..." className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400 resize-none"/></div>
               {/* YENİ: Çoklu belge / fotoğraf / PDF ekleme — eklenip kaldırılabilir */}
