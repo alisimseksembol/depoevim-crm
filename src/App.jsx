@@ -497,16 +497,22 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       if (!firebaseUser || !db) return;
       
       const unsubCustomers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setCustomers(fetchedData); setAppDataReady(true); }, (error) => { console.error("Hata:", error); setAppDataReady(true); });
-      const unsubWarehouses = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'warehouses'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setWarehouses(fetchedData); }, (error) => console.error("Hata:", error));
-      const unsubBlocks = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setBlocks(fetchedData); }, (error) => console.error("Hata:", error));
+      // OKUMA LİMİTİ: Depo sayısı doğası gereği azdır; canlı dinleme 200 kayıtla sınırlandırıldı.
+      const unsubWarehouses = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'warehouses'), limit(200)), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setWarehouses(fetchedData); }, (error) => console.error("Hata:", error));
+      // OKUMA LİMİTİ: Blok sayısı azdır (depo × blok); canlı dinleme 200 kayıtla sınırlandırıldı.
+      const unsubBlocks = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'), limit(200)), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setBlocks(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubRooms = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })).sort((a,b) => (a.orderIndex ?? a.id) - (b.orderIndex ?? b.id)); setRooms(fetchedData); }, (error) => console.error("Hata:", error));
       const unsubPendingCollections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pendingCollections'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() })); setPendingCollections(fetchedData); }, (error) => console.error("Hata:", error));
-      const unsubSystemUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
+      // OKUMA LİMİTİ: Panel kullanıcı sayısı azdır; canlı dinleme 200 kayıtla sınırlandırıldı.
+      const unsubSystemUsers = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'systemUsers'), limit(200)), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) { setSystemUsers(fetchedData); } else { setSystemUsers([{ id: '1', username: 'admin', password: 'admin', name: 'Sistem Yöneticisi', role: 'Yönetici' }]); } }, (error) => console.error("Hata:", error));
       // OKUMA OPTİMİZASYONU #3: Randevular artık SINIRSIZ çekilmez. where('date','>=') ile
       // yalnızca son 90 gün + tüm GELECEK randevular canlı dinlenir. Daha eski aylar,
       // takvimde o aya gidildiğinde tek seferlik yüklenir (aşağıdaki "Daha Eski Kayıt" effect'i).
       const APPT_CUTOFF = (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0]; })();
-      const unsubAppointments = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), where('date', '>=', APPT_CUTOFF)), (snapshot) => {
+      // OKUMA LİMİTİ: Tarih penceresine EK OLARAK 200 kayıt sınırı. orderBy('date') ile pencerenin
+      // EN YENİ değil EN ESKİ ucundan başlanır; 200'ü aşan çok eski kayıtlar zaten aşağıdaki
+      // tek seferlik "daha eski yükle" akışıyla getDocs ile çekilir.
+      const unsubAppointments = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'appointments'), where('date', '>=', APPT_CUTOFF), orderBy('date'), limit(200)), (snapshot) => {
           const fetchedData = snapshot.docs.map(doc => ({ id: Number(doc.id) || doc.id, ...doc.data() }));
           // Daha önce "eski kayıt yükle" ile gelen 90 gün öncesi randevular korunur; pencere içi tazelenir.
           setAppointments(prev => {
@@ -530,10 +536,15 @@ const [firebaseUser, setFirebaseUser] = useState(null);
               return Array.from(m.values());
           });
       };
-      const unsubRemindersOpen = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), where('completed', '==', false)), (snapshot) => applyReminderSnap(snapshot, (r) => r.completed === false), (error) => console.error("Hatırlatma Çekme Hatası:", error));
-      const unsubRemindersRecent = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), where('date', '>=', REM_CUTOFF)), (snapshot) => applyReminderSnap(snapshot, (r) => String(r.date || '') >= REM_CUTOFF), (error) => console.error("Hatırlatma Çekme Hatası:", error));
+      // OKUMA LİMİTİ: Açık (tamamlanmamış) hatırlatmalar 200 kayıtla sınırlandırıldı.
+      // NOT: Burada orderBy KULLANILMAZ — where('completed') + orderBy('date') bileşik indeks
+      // gerektirir ve indeks yoksa sorgu hata verip bildirim rozeti çalışmaz.
+      const unsubRemindersOpen = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), where('completed', '==', false), limit(200)), (snapshot) => applyReminderSnap(snapshot, (r) => r.completed === false), (error) => console.error("Hatırlatma Çekme Hatası:", error));
+      // OKUMA LİMİTİ: Yakın tarihli hatırlatmalar 200 kayıtla sınırlandırıldı (tek alan → indeks gerekmez).
+      const unsubRemindersRecent = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'reminders'), where('date', '>=', REM_CUTOFF), orderBy('date'), limit(200)), (snapshot) => applyReminderSnap(snapshot, (r) => String(r.date || '') >= REM_CUTOFF), (error) => console.error("Hatırlatma Çekme Hatası:", error));
       // YENİ EKLENEN: ROL İZİNLERİ FİREBASE DİNLEYİCİSİ (kaydedilen yetkiler geri yüklenir)
-      const unsubUserRoles = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'userRoles'), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setUserRoles(fetchedData); }, (error) => console.error("Rol Çekme Hatası:", error));
+      // OKUMA LİMİTİ: Rol sayısı çok azdır; canlı dinleme 100 kayıtla sınırlandırıldı.
+      const unsubUserRoles = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'userRoles'), limit(100)), (snapshot) => { const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); if (fetchedData.length > 0) setUserRoles(fetchedData); }, (error) => console.error("Rol Çekme Hatası:", error));
       // PERFORMANS/LİMİT: activityLogs, deletedItems ve userSessions artık SÜREKLİ DİNLENMEZ (onSnapshot kaldırıldı).
       // Bu büyük log/geçmiş koleksiyonları, ilgili sayfaya girildiğinde veya "Yenile" ile TEK SEFERLİK
       // getDocs + limit(100) ile çekilir (bkz. fetchActivityLogs / fetchDeletedItems / fetchUserSessions).
