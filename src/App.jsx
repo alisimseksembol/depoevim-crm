@@ -804,6 +804,21 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       return s.includes('avukat');
   };
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // YENİ EKLENEN: AVUKAT ROLÜ — İCRA MÜŞTERİSİNİN CARİSİNİ GÖREBİLME İSTİSNASI
+  // Avukat rolünde "Müşteri Listesi" sayfa yetkisi YOKTUR; bu yüzden İcra Odaları
+  // ekranındaki "Carisine Git" butonuna bastığında "Erişim İzniniz Yok" alıyordu.
+  // Bu yardımcı, bir müşterinin İCRA (yasal takip) sürecinde odası olup olmadığını
+  // döndürür; aşağıdaki sayfa izni kontrolü bu sayede SADECE icra müşterileri için
+  // avukata cari görüntüleme izni verir. Diğer müşteriler kapalı kalır.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const isLegalActionCustomer = (customerId) => {
+      if (!customerId) return false;
+      const c = customers.find(x => String(x.id) === String(customerId));
+      if (!c) return false;
+      return rooms.some(r => r.customerName === c.name && r.isUnderLegalAction);
+  };
+
   // YENİ EKLENEN: İşlem (buton) izni kontrolü — izin yoksa kullanıcıyı uyarır.
   // Butonlar herkes tarafından GÖRÜNÜR; ama izni olmayan tıklayınca işlem yapılmaz.
   const checkActionPerm = (permId) => {
@@ -8768,6 +8783,16 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
           {(() => {
              // YENİ EKLENEN: Aktif sayfaya erişim izni kontrolü (süper yönetici hariç)
              if (currentRoleIsSuper()) return null;
+             // YENİ EKLENEN: AVUKAT İSTİSNASI — İcra Odaları ekranından "Carisine Git" ile
+             // AÇILAN bir müşterinin cari ekranı avukata gösterilir. Şartlar:
+             //   • Rol avukat olacak,
+             //   • Müşteri cari DETAYI açık olacak (selectedCustomerId dolu) — liste ekranı KAPALI kalır,
+             //   • Müşterinin İCRA sürecinde en az bir odası olacak.
+             // Böylece avukat yalnızca kendi takip ettiği icra dosyalarının carisini görür.
+             if (isAvukat() && selectedCustomerId && isLegalActionCustomer(selectedCustomerId)
+                 && (activeMenu === 'tum-musteriler' || activeMenu === 'mevcut-musteriler')) {
+                 return null;
+             }
              // activeMenu → ana menü mü yoksa alt sayfa mı, permId bul
              const topItem = menuItems.find(m => m.id === activeMenu);
              const subItem = menuItems.flatMap(m => m.subItems || []).find(s => s.id === activeMenu);
