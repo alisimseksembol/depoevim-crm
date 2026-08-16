@@ -9887,24 +9887,49 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
 const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              const paymentAnchorDate = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : entryDate;
                              const today = new Date(); today.setHours(23, 59, 59, 999);
-                             // YENİ: En son geçerli (zamlı) kirayı baz al — cari, priceHistory ve zam geçmişinin EN YÜKSEĞİ
                              const baseAmount = getRoomLatestFee(room);
                              const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
-                             // DÜZELTİLDİ: Sonradan "KDV'li Yap" ile çevrilen odalarda (kdvStartKey dolu) saklanan
-                             // tutar ZATEN KDV DAHİL olduğu için burada tekrar ×1.20 yapılmamalı — aksi halde
-                             // çift KDV oluşup kart, cari ekstredeki gerçek kiradan %20 fazla gösteriyordu
-                             // (ör. 8.250 TL yerine 9.900 TL). getRoomLatestGrossFee her iki durumu da doğru
-                             // hesaplar; böylece bu kart "Senesi Dolan Odalar" ve cari ile birebir aynı olur.
-                             let monthlyTotal = getRoomLatestGrossFee(room);
-
-                             // Madde 16: Varsa mevcut ayın güncel override (zam) tutarını al
-                             // YENİ: Override daha düşükse (örn. hediye ayı) zamlı kirayı ezmesin — her zaman en yüksek gösterilir
-                             const currentKey = `${today.getFullYear()}-${today.getMonth()}`;
-                             const txId = `debt-${room.id}-${currentKey}`;
-                             const currentOverride = overrides.find(o => o.txId === txId && !o.isDeleted);
-                             if (currentOverride && currentOverride.debt !== undefined) {
-                                 monthlyTotal = Math.max(monthlyTotal, Number(currentOverride.debt) || 0);
-                             }
+                             // ═══════════════════════════════════════════════════════════════
+                             // GÜNCELLENDİ: "Aylık Kira Bedeli" artık HESAPLANMAZ, doğrudan
+                             // MÜŞTERİNİN CARİSİNDEN OKUNUR — böylece cari ekstre ile birebir
+                             // aynı olması yapısal olarak garantidir (net/brüt tahminine son).
+                             // Kaynak adayları (KDV DAHİL tutarlar):
+                             //   1) Carideki bu odaya ait EN SON gerçek kira borç satırı
+                             //      (Hediye/Faiz satırları atlanır)
+                             //   2) Bu odaya ait zam override kayıtları (zam yapılır yapılmaz
+                             //      cariye yazıldığı için, "Senesi Dolan Odalar"da zam yapıldığı
+                             //      ANDA kart da güncellenir — ay vadesi beklenmez)
+                             // En GÜNCEL AYA ait olan kazanır; aynı aydaysa yüksek tutar alınır.
+                             // ═══════════════════════════════════════════════════════════════
+                             let monthlyTotal = getRoomLatestGrossFee(room); // hiç kayıt yoksa güvenli varsayılan
+                             try {
+                                 let bestIdx = -1; let bestGross = 0;
+                                 const roomTag = `${room.name} Odası`;
+                                 // 1) Cari satırları
+                                 const { ledger: fullLedger } = getCustomerLedger(customer) || {};
+                                 (Array.isArray(fullLedger) ? fullLedger : []).forEach(tx => {
+                                     const g = Number(tx?.debt) || 0;
+                                     const ds = String(tx?.desc || '');
+                                     if (g <= 0 || !ds.startsWith(roomTag)) return;
+                                     if (ds.includes('Hediye') || ds.includes('Faiz')) return;
+                                     const d = tx.date instanceof Date ? tx.date : new Date(tx.date);
+                                     if (isNaN(d.getTime())) return;
+                                     const idx = d.getFullYear() * 12 + d.getMonth();
+                                     if (idx > bestIdx || (idx === bestIdx && g > bestGross)) { bestIdx = idx; bestGross = g; }
+                                 });
+                                 // 2) Zam override kayıtları (txId: debt-{odaId}-{yıl}-{ay})
+                                 (overrides || []).forEach(o => {
+                                     if (!o || o.isDeleted || o.isSpecificGift) return;
+                                     const g = Number(o.debt) || 0;
+                                     if (g <= 0 || String(o.desc || '').includes('Hediye')) return;
+                                     if (!String(o.txId || '').startsWith(`debt-${room.id}-`)) return;
+                                     const p = String(o.txId).slice(`debt-${room.id}-`.length).split('-');
+                                     const idx = parseInt(p[0]) * 12 + parseInt(p[1]);
+                                     if (isNaN(idx)) return;
+                                     if (idx > bestIdx || (idx === bestIdx && g > bestGross)) { bestIdx = idx; bestGross = g; }
+                                 });
+                                 if (bestGross > 0) monthlyTotal = Math.round(bestGross);
+                             } catch (e) { console.error('Aylık kira bedeli cariden okunamadı:', e); }
 
                              return (
                                <div key={room.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow relative overflow-hidden flex flex-col">
