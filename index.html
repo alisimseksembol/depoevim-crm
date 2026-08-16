@@ -11,3 +11,39 @@
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Depoevim CRM</title>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         iOS ANA EKRAN İKONU (LOGO SORUNUNUN ÇÖZÜMÜ)
+         iOS, "Ana Ekrana Ekle" yapıldığında SADECE apple-touch-icon etiketine
+         bakar. Bu etiket yoksa uygulama adının ilk harfini (D) gri kutuda gösterir.
+         Favicon iOS ana ekran ikonu için KULLANILMAZ — ayrı dosya gerekir.
+         ══════════════════════════════════════════════════════════════════ -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/apple-touch-icon-167.png" />
+
+    <!-- Tarayıcı sekmesi ikonları (favicon) -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+
+    <!-- Ana ekrana eklendiğinde tam ekran uygulama gibi açılsın (Safari çubukları gizlenir) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- Ana ekranda simgenin altında yazacak isim -->
+    <meta name="apple-mobile-web-app-title" content="Depoevim" />
+
+    <!-- Android / Chrome için manifest -->
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#1bc5bd" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
