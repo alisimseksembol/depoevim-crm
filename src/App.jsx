@@ -9876,7 +9876,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                          </div>
                       </div>
 
-                      <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider mt-4">Aktif Kiralama ve Depolar</h4>
+                      <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider mt-4">Aktif Kiralama Yaptığı Odalar</h4>
                       
                       {customerRooms.length > 0 ? (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -9890,7 +9890,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              // YENİ: En son geçerli (zamlı) kirayı baz al — cari, priceHistory ve zam geçmişinin EN YÜKSEĞİ
                              const baseAmount = getRoomLatestFee(room);
                              const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
-                             let monthlyTotal = hasKdv ? baseAmount * 1.20 : baseAmount;
+                             // DÜZELTİLDİ: Sonradan "KDV'li Yap" ile çevrilen odalarda (kdvStartKey dolu) saklanan
+                             // tutar ZATEN KDV DAHİL olduğu için burada tekrar ×1.20 yapılmamalı — aksi halde
+                             // çift KDV oluşup kart, cari ekstredeki gerçek kiradan %20 fazla gösteriyordu
+                             // (ör. 8.250 TL yerine 9.900 TL). getRoomLatestGrossFee her iki durumu da doğru
+                             // hesaplar; böylece bu kart "Senesi Dolan Odalar" ve cari ile birebir aynı olur.
+                             let monthlyTotal = getRoomLatestGrossFee(room);
 
                              // Madde 16: Varsa mevcut ayın güncel override (zam) tutarını al
                              // YENİ: Override daha düşükse (örn. hediye ayı) zamlı kirayı ezmesin — her zaman en yüksek gösterilir
