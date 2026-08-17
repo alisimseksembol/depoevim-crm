@@ -2785,6 +2785,8 @@ const handleAddExtraDocument = async (e, customerId) => {
       const photos = [];
       rooms.filter(r => r.customerName === customerName).forEach(r => {
           if (r.entryPhoto) photos.push({ key: `entry-${r.id}`, roomId: r.id, url: r.entryPhoto, label: `${r.name} - Oda İlk Giriş`, kind: 'entryPhoto', mediaType: r.entryMediaType || 'image' });
+          // YENİ: Birden fazla giriş görseli desteği — ek görseller de galeride listelenir
+          (r.entryPhotos || []).forEach((ep, i) => { if (ep && ep.url) photos.push({ key: `entryx-${r.id}-${i}`, roomId: r.id, url: ep.url, label: `${r.name} - Oda İlk Giriş (Ek ${i + 1})`, kind: 'entryPhotoExtra', extraIndex: i, mediaType: ep.mediaType || 'image' }); });
           (r.entryExitHistory || []).forEach((h, i) => {
               if (h.protocolPhoto) photos.push({ key: `hp-${r.id}-${i}`, roomId: r.id, url: h.protocolPhoto, label: `${r.name} - Tutanak (${h.date || ''})`, kind: 'history', histId: h.id, field: 'protocolPhoto' });
               if (h.finalPhoto) photos.push({ key: `hf-${r.id}-${i}`, roomId: r.id, url: h.finalPhoto, label: `${r.name} - Son Hal (${h.date || ''})`, kind: 'history', histId: h.id, field: 'finalPhoto' });
@@ -2802,6 +2804,9 @@ const handleAddExtraDocument = async (e, customerId) => {
       let update = {};
       if (photo.kind === 'entryPhoto') {
           update = { entryPhoto: null };
+      } else if (photo.kind === 'entryPhotoExtra') {
+          // YENİ: Ek giriş görsellerinden (entryPhotos) sadece seçilen silinir
+          update = { entryPhotos: (room.entryPhotos || []).filter((_, i) => i !== photo.extraIndex) };
       } else if (photo.kind === 'history') {
           const newHist = (room.entryExitHistory || []).map(h => h.id === photo.histId ? { ...h, [photo.field]: null } : h);
           update = { entryExitHistory: newHist };
@@ -4453,6 +4458,75 @@ const handleEntryExitSave = async () => {
       }
   };
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // YENİ EKLENEN: BİRDEN FAZLA GİRİŞ GÖRSELİ/VİDEOSU DESTEĞİ
+  // Mevcut tekli alan (entryPhoto) AYNEN korunur; seçilen İLK dosya oraya,
+  // kalan dosyalar yeni "entryPhotos" dizisine ([{url, mediaType}]) yazılır.
+  // Böylece eski kayıtlar ve tekli alanı kullanan tüm ekranlar bozulmaz.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Kiralama modalında çoklu dosya seçimini işler (Şimdi Çek / Galeriden / Dosyadan)
+  const handleRentMediaFiles = async (fileList) => {
+      const files = Array.from(fileList || []);
+      if (files.length === 0) return;
+      const uploaded = [];
+      for (const f of files) {
+          const url = await uploadImageToServer(f);
+          if (url) uploaded.push({ url, mediaType: f.type.startsWith('video') ? 'video' : 'image' });
+      }
+      if (uploaded.length === 0) return;
+      setRentData(prev => {
+          const first = !prev.entryPhoto ? uploaded[0] : null;   // ana alan boşsa ilk dosya oraya
+          const rest = first ? uploaded.slice(1) : uploaded;      // kalanlar ek galeriye
+          return {
+              ...prev,
+              entryPhoto: first ? first.url : prev.entryPhoto,
+              entryMediaType: first ? first.mediaType : prev.entryMediaType,
+              entryPhotos: [...(prev.entryPhotos || []), ...rest]
+          };
+      });
+  };
+
+  // Oda profilinde çoklu dosya seçimini işler; ana alan boşsa ilkini oraya koyar,
+  // kalanları odanın entryPhotos dizisine ekler (Firebase + yerel state)
+  const handleAppendEntryMediaFiles = async (fileList) => {
+      if (!selectedRoomId) return;
+      const files = Array.from(fileList || []);
+      if (files.length === 0) return;
+      const uploaded = [];
+      for (const f of files) {
+          const url = await uploadImageToServer(f);
+          if (url) uploaded.push({ url, mediaType: f.type.startsWith('video') ? 'video' : 'image' });
+      }
+      if (uploaded.length === 0) return;
+      const room = rooms.find(r => String(r.id) === String(selectedRoomId));
+      const payload = {};
+      const rest = [...uploaded];
+      if (!room?.entryPhoto) {
+          const first = rest.shift();
+          payload.entryPhoto = first.url;
+          payload.entryMediaType = first.mediaType;
+          payload.entryPhotoDate = new Date().toISOString();
+          payload.entryPhotoBy = currentUserProfile?.name || 'Bilinmeyen';
+      }
+      if (rest.length > 0) payload.entryPhotos = [...(room?.entryPhotos || []), ...rest];
+      setRooms(prev => prev.map(r => String(r.id) === String(selectedRoomId) ? { ...r, ...payload } : r));
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), payload, { merge: true }); } catch(e) { console.error("Ek Giriş Görseli Hatası:", e); }
+      }
+  };
+
+  // Ek giriş görselini (entryPhotos dizisinden) tek tek kaldırır
+  const handleRemoveEntryExtra = async (idx) => {
+      if (!selectedRoomId) return;
+      const room = rooms.find(r => String(r.id) === String(selectedRoomId));
+      const arr = (room?.entryPhotos || []).filter((_, i) => i !== idx);
+      setRooms(prev => prev.map(r => String(r.id) === String(selectedRoomId) ? { ...r, entryPhotos: arr } : r));
+      if (db && firebaseUser) {
+          try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { entryPhotos: arr }, { merge: true }); } catch(e) { console.error(e); }
+      }
+  };
+
  const handleSetGiftMonths = async (months) => {
       // YENİ: Hediye, verildiği anda BULUNULAN SÖZLEŞME YILININ ilk aylarına uygulanır.
       // Girişten bugüne geçen TAM yıl sayısı bulunur; hediye o yılın başından (tamYıl*12) başlar.
@@ -5431,6 +5505,7 @@ const handleRentRoom = async () => {
           transportHasKdv: rentData.transportHasKdv,
           entryPhoto: rentData.entryPhoto,
           entryMediaType: rentData.entryMediaType || 'image',
+          entryPhotos: rentData.entryPhotos || [],   // YENİ: ek giriş görselleri/videoları
           // YENİ: Giriş görseli meta bilgisi — altında tarih ve ekleyen ismi gösterilir
           entryPhotoDate: rentData.entryPhoto ? new Date().toISOString() : null,
           entryPhotoBy: rentData.entryPhoto ? currentUserProfile.name : null,
@@ -5974,7 +6049,7 @@ const handleEndRentConfirm = async () => {
       const customerRoomHistory = customerToUpdate ? [historyRecord, ...(customerToUpdate.roomHistory || [])] : null;
 
       const roomUpdates = {
-          customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null, broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null, paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
+          customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null, broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryPhotos: null, entryExitHistory: null, movedFrom: null, paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0, 
           history: [historyRecord, ...(room.history || [])]
       };
 
@@ -6092,6 +6167,7 @@ const handleChangeRoomConfirm = async () => {
             status: `${newRoom.name} Odasına Taşındı (Aynı Kira)`,
             photo: null, exitPhoto: null,
             entryPhoto: oldRoom.entryPhoto || null,
+            entryPhotos: oldRoom.entryPhotos || [],
             roomListPhoto: oldRoom.roomListPhoto || null,
             entryExitHistory: oldRoom.entryExitHistory || null
         };
@@ -6105,7 +6181,7 @@ const handleChangeRoomConfirm = async () => {
                 // 1. Eski odayı boşalt ve geçmişe ekle
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(oldRoom.id)), {
                     customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null,
-                    broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null,
+                    broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryPhotos: null, entryExitHistory: null, movedFrom: null,
                     paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0,
                     history: [historyRecord, ...(oldRoom.history || [])]
                 }, { merge: true });
@@ -6125,6 +6201,7 @@ const handleChangeRoomConfirm = async () => {
                     transportPrice: oldRoom.transportPrice || null,
                     transportHasKdv: oldRoom.transportHasKdv || false,
                     entryPhoto: oldRoom.entryPhoto || null,
+            entryPhotos: oldRoom.entryPhotos || [],
                     entryExitHistory: oldRoom.entryExitHistory || null,
                     paidMonths: oldRoom.paidMonths || [],
                     rentedBy: oldRoom.rentedBy || currentUserProfile.name,
@@ -6205,6 +6282,7 @@ const handleChangeRoomConfirm = async () => {
             status: `Çıkış Yaptı (${newRoom.name} Odasına Yeni Kira İle Geçti)`,
             photo: null, exitPhoto: null,
             entryPhoto: oldRoom.entryPhoto || null,
+            entryPhotos: oldRoom.entryPhotos || [],
             roomListPhoto: oldRoom.roomListPhoto || null,
             entryExitHistory: oldRoom.entryExitHistory || null
         };
@@ -6241,7 +6319,7 @@ const handleChangeRoomConfirm = async () => {
                 // 2. Eski odayı tamamen boşalt (normal çıkış gibi)
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(oldRoom.id)), {
                     customerName: null, entryDate: null, paymentDate: null, monthlyFee: null, sealNo: null,
-                    broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryExitHistory: null, movedFrom: null,
+                    broughtBy: 'kendisi', teamList: null, hasDamage: false, damageDescription: null, transportPrice: null, transportHasKdv: false, entryPhoto: null, entryPhotos: null, entryExitHistory: null, movedFrom: null,
                     paidMonths: [], isFreeRoom: false, freeRoomReason: null, giftMonths: 0,
                     history: [historyRecord, ...(oldRoom.history || [])]
                 }, { merge: true });
@@ -6258,7 +6336,7 @@ const handleChangeRoomConfirm = async () => {
                     teamList: null,
                     hasDamage: false, damageDescription: null,
                     transportPrice: null, transportHasKdv: false,
-                    entryPhoto: null, entryExitHistory: null,
+                    entryPhoto: null, entryPhotos: null, entryExitHistory: null,
                     paidMonths: [],
                     rentedBy: currentUserProfile.name,
                     movedFrom: oldRoom.name || null,
@@ -12450,9 +12528,44 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                        <label className="cursor-pointer border-2 border-dashed border-gray-300 hover:border-indigo-400 rounded-lg p-6 bg-gray-50 hover:bg-indigo-50/30 flex flex-col items-center justify-center gap-2 text-center transition-colors w-max max-w-full">
                                           <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-500 flex items-center justify-center"><Upload size={18} /></div>
                                           <span className="text-xs font-bold text-gray-600">Oda İlk Giriş Görseli / Videosu Ekle</span>
-                                          <span className="text-[10px] text-gray-400">Fotoğraf veya video yükleyin</span>
-                                          <input type="file" accept="image/*,video/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const isVid = file.type.startsWith('video'); const url = await uploadImageToServer(file); await handleUpdateEntryMedia(url, isVid ? 'video' : 'image'); } e.target.value=''; }} />
+                                          <span className="text-[10px] text-gray-400">Fotoğraf veya video yükleyin — birden fazla seçebilirsiniz</span>
+                                          <input type="file" multiple accept="image/*,video/*" className="hidden" onChange={async (e) => { await handleAppendEntryMediaFiles(e.target.files); e.target.value=''; }} />
                                        </label>
+                                   )}
+
+                                   {/* YENİ EKLENEN: EK GİRİŞ GÖRSELLERİ — çoklu seçimle eklenen dosyalar burada
+                                       listelenir; her biri yeni sekmede açılır ve düzenleme modunda tek tek silinebilir. */}
+                                   {Array.isArray(selectedRoomDetail?.entryPhotos) && selectedRoomDetail.entryPhotos.length > 0 && (
+                                     <div className="mt-2">
+                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ek Görseller ({selectedRoomDetail.entryPhotos.length} adet)</span>
+                                        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mt-1.5">
+                                           {selectedRoomDetail.entryPhotos.map((m, idx) => (
+                                             <div key={idx} className="relative border border-gray-200 rounded-lg overflow-hidden bg-white">
+                                                <a href={m.url} target="_blank" rel="noreferrer" className="block">
+                                                   {m.mediaType === 'video'
+                                                      ? <video src={m.url} className="h-20 w-full object-cover bg-black" />
+                                                      : <img src={m.url} alt={`Ek Görsel ${idx + 1}`} className="h-20 w-full object-cover hover:scale-105 transition-transform" />}
+                                                </a>
+                                                {m.mediaType === 'video' && <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">VİDEO</span>}
+                                                {isEditingEntryMedia && (
+                                                  <button onClick={() => { if(window.confirm('Bu ek görseli silmek istediğinize emin misiniz?')) handleRemoveEntryExtra(idx); }} className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center shadow" title="Sil"><X size={11}/></button>
+                                                )}
+                                             </div>
+                                           ))}
+                                        </div>
+                                        {/* Görsel varken de yeni ek dosya eklenebilsin */}
+                                        <label className="mt-2 cursor-pointer inline-flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors">
+                                           <Plus size={12}/> Ek Görsel/Video Ekle (Çoklu)
+                                           <input type="file" multiple accept="image/*,video/*" className="hidden" onChange={async (e) => { await handleAppendEntryMediaFiles(e.target.files); e.target.value=''; }} />
+                                        </label>
+                                     </div>
+                                   )}
+                                   {/* Ana görsel VAR ama ek görsel YOK ise de çoklu ekleme yolu açık kalsın */}
+                                   {selectedRoomDetail?.entryPhoto && (!selectedRoomDetail?.entryPhotos || selectedRoomDetail.entryPhotos.length === 0) && (
+                                     <label className="mt-1 cursor-pointer inline-flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors w-max">
+                                        <Plus size={12}/> Ek Görsel/Video Ekle (Çoklu)
+                                        <input type="file" multiple accept="image/*,video/*" className="hidden" onChange={async (e) => { await handleAppendEntryMediaFiles(e.target.files); e.target.value=''; }} />
+                                     </label>
                                    )}
                                 </div>
 
@@ -14599,19 +14712,35 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                          <span className="text-[10px] text-gray-400 mt-1">Fotoğraf (PNG, JPG) veya Video (MP4)</span>
                       </div>
                     )}
-                    {/* 3 seçenekli yükleme: Şimdi Çek / Galeriden Seç / Dosyadan Seç */}
+                    {/* YENİ EKLENEN: EK GÖRSELLER — birden fazla dosya seçildiğinde ilki yukarıdaki ana
+                        alana, kalanlar buraya gelir; her biri tek tek kaldırılabilir. */}
+                    {(rentData.entryPhotos || []).length > 0 && (
+                      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-3">
+                         {(rentData.entryPhotos || []).map((m, idx) => (
+                           <div key={idx} className="relative border border-gray-200 rounded-lg overflow-hidden bg-white">
+                              {m.mediaType === 'video'
+                                 ? <video src={m.url} className="h-20 w-full object-cover bg-black" />
+                                 : <img src={m.url} alt={`Ek ${idx + 1}`} className="h-20 w-full object-cover" />}
+                              <button type="button" onClick={() => setRentData({ ...rentData, entryPhotos: (rentData.entryPhotos || []).filter((_, i) => i !== idx) })} className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center shadow" title="Kaldır"><X size={11}/></button>
+                              {m.mediaType === 'video' && <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">VİDEO</span>}
+                           </div>
+                         ))}
+                      </div>
+                    )}
+                    {/* 3 seçenekli yükleme: Şimdi Çek / Galeriden Seç / Dosyadan Seç
+                        GÜNCELLENDİ: Üçü de "multiple" — TOPLU dosya seçilebilir; ortak handleRentMediaFiles işler. */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                        <label className="cursor-pointer flex items-center justify-center gap-1.5 bg-[#1bc5bd] hover:bg-teal-600 text-white rounded-lg py-2.5 text-xs font-bold transition-colors shadow-sm">
                           <Camera size={15}/> Şimdi Çek
-                          <input type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const isVid = file.type.startsWith('video'); const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url, entryMediaType: isVid ? 'video' : 'image'}); } e.target.value=''; }}/>
+                          <input type="file" multiple accept="image/*,video/*" capture="environment" className="hidden" onChange={async (e) => { await handleRentMediaFiles(e.target.files); e.target.value=''; }}/>
                        </label>
                        <label className="cursor-pointer flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-[#1bc5bd] text-gray-700 rounded-lg py-2.5 text-xs font-bold transition-colors shadow-sm">
-                          <ImageIcon size={15}/> Galeriden Seç
-                          <input type="file" accept="image/*,video/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const isVid = file.type.startsWith('video'); const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url, entryMediaType: isVid ? 'video' : 'image'}); } e.target.value=''; }}/>
+                          <ImageIcon size={15}/> Galeriden Seç (Çoklu)
+                          <input type="file" multiple accept="image/*,video/*" className="hidden" onChange={async (e) => { await handleRentMediaFiles(e.target.files); e.target.value=''; }}/>
                        </label>
                        <label className="cursor-pointer flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-[#1bc5bd] text-gray-700 rounded-lg py-2.5 text-xs font-bold transition-colors shadow-sm">
-                          <FileTextIcon size={15}/> Dosyadan Seç
-                          <input type="file" accept="image/*,video/*,application/octet-stream" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if(file){ const isVid = file.type.startsWith('video'); const url = await uploadImageToServer(file); setRentData({...rentData, entryPhoto: url, entryMediaType: isVid ? 'video' : 'image'}); } e.target.value=''; }}/>
+                          <FileTextIcon size={15}/> Dosyadan Seç (Çoklu)
+                          <input type="file" multiple accept="image/*,video/*,application/octet-stream" className="hidden" onChange={async (e) => { await handleRentMediaFiles(e.target.files); e.target.value=''; }}/>
                        </label>
                     </div>
                  </div>
