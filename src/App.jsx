@@ -5176,7 +5176,7 @@ const reader = new FileReader();
           mAd: customer?.name || custName || '',
           mTc: customer?.tc || '',
           mTel: customer?.phone || rentData.phone || '',
-          mTel2: customer?.phone2 || '',
+          mTel2: customer?.altPhone || customer?.phone2 || '',  // DÜZELTİLDİ: yedek numara müşteri kaydında "altPhone" alanında tutuluyor; "phone2" diye bir alan yoktu, satır bu yüzden boş basılıyordu
           mAdres: customer?.address || '',
           odaNo: room?.name || '',
           dateStr,
@@ -5345,7 +5345,7 @@ const reader = new FileReader();
           mAd: customer?.name || room.customerName || '',
           mTc: customer?.tc || '',
           mTel: customer?.phone || '',
-          mTel2: customer?.phone2 || '',
+          mTel2: customer?.altPhone || customer?.phone2 || '',  // DÜZELTİLDİ: yedek numara müşteri kaydında "altPhone" alanında tutuluyor; "phone2" diye bir alan yoktu, satır bu yüzden boş basılıyordu
           mAdres: customer?.address || '',
           odaNo: room.name || '',
           dateStr,
@@ -5375,7 +5375,7 @@ const reader = new FileReader();
           mAd: customer?.name || room.customerName || '',
           mTc: customer?.tc || '',
           mTel: customer?.phone || '',
-          mTel2: customer?.phone2 || '',
+          mTel2: customer?.altPhone || customer?.phone2 || '',  // DÜZELTİLDİ: yedek numara müşteri kaydında "altPhone" alanında tutuluyor; "phone2" diye bir alan yoktu, satır bu yüzden boş basılıyordu
           mAdres: customer?.address || '',
           odaNo: room.name || '',
           dateStr,
@@ -6353,7 +6353,7 @@ const handleChangeRoomConfirm = async () => {
                         mAd: customerToUpdate?.name || oldRoom.customerName || '',
                         mTc: customerToUpdate?.tc || '',
                         mTel: customerToUpdate?.phone || '',
-                        mTel2: customerToUpdate?.phone2 || '',
+                        mTel2: customerToUpdate?.altPhone || customerToUpdate?.phone2 || '',  // DÜZELTİLDİ: yedek numara "altPhone" alanından okunur
                         mAdres: customerToUpdate?.address || '',
                         odaNo: newRoom.name || '',
                         dateStr,
