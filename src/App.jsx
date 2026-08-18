@@ -471,23 +471,49 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   useEffect(() => {
 
       if (!auth) return;
+      // ═══════════════════════════════════════════════════════════════════
+      // GÜNCELLENDİ: SESSİZ KAYIT KAYBI DÜZELTMESİ (ENGEL KALDIRILDI)
+      // SORUN: Tüm kayıt işlemleri "if (db && firebaseUser)" kapısından geçer.
+      // Bir cihazda anonim oturum açma BAŞARISIZ olur ya da sonradan DÜŞERSE
+      // (zayıf mobil bağlantı, açılış anındaki ağ hatası vb.) firebaseUser null
+      // kalır ve o kullanıcının yaptığı TÜM girişler (oda kiralama, randevu,
+      // müşteri, tahsilat...) Firebase'e HİÇ yazılmadan sessizce düşer —
+      // kullanıcı kendi ekranında kaydı görür ama başka kimse göremez.
+      // ÇÖZÜM (tek noktadan, tüm kayıt kapılarını birden açar):
+      //   1) Oturum açma 3 kez, artan beklemeyle denenir (açılış anı ağ hatası).
+      //   2) Oturum sonradan DÜŞERSE mevcut kullanıcı KORUNUR (null'a çekilmez;
+      //      dinleyiciler kopmaz, yazmalar engellenmez — Firestore SDK yazmaları
+      //      kuyruklayıp bağlantı gelince kendisi eşitler) ve arka planda
+      //      otomatik yeniden oturum açma denenir.
+      // ═══════════════════════════════════════════════════════════════════
       const initAuth = async () => {
-          try {
-              if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                  await signInWithCustomToken(auth, __initial_auth_token);
-              } else {
-                  await signInAnonymously(auth);
+          for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                  if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                      await signInWithCustomToken(auth, __initial_auth_token);
+                  } else {
+                      await signInAnonymously(auth);
+                  }
+                  return; // başarılı
+              } catch (error) {
+                  console.error(`Firebase Auth Hatası (deneme ${attempt}/3):`, error);
+                  if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 2000));
               }
-          } catch (error) {
-              console.error("Firebase Auth Hatası:", error);
           }
+          console.error('Firebase oturum açılamadı — kayıtlar sunucuya YAZILAMAZ. İnternet bağlantısını kontrol edip sayfayı yenileyin.');
       };
       initAuth();
       // OKUMA OPTİMİZASYONU #2: uid AYNI kaldığı sürece firebaseUser state'i güncellenmez.
       // Aksi halde auth olayları ana veri useEffect'ini yeniden tetikler, TÜM onSnapshot
       // dinleyicileri kopup yeniden bağlanır ve her koleksiyon BAŞTAN okunurdu.
       const unsubscribe = onAuthStateChanged(auth, (u) => {
-          setFirebaseUser(prev => (prev && u && prev.uid === u.uid) ? prev : u);
+          if (!u) {
+              // Oturum düştü: arka planda sessizce yeniden bağlan (kullanıcı korunur)
+              signInAnonymously(auth).catch((e) => console.error('Yeniden oturum açma hatası:', e));
+          }
+          // u null ise MEVCUT kullanıcı korunur → yazma kapıları KAPANMAZ,
+          // dinleyiciler kopmaz; tüm kullanıcıların girişleri herkeste görünmeye devam eder.
+          setFirebaseUser(prev => u ? ((prev && prev.uid === u.uid) ? prev : u) : prev);
       });
       return () => unsubscribe();
   }, []);
