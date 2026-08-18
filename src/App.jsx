@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, where, limit, orderBy, deleteDoc, arrayUnion } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, where, limit, orderBy, deleteDoc, arrayUnion, waitForPendingWrites } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
   Users, 
@@ -466,6 +466,42 @@ export default function App() {
   // dinlendiği ana merkez olacaktır. Data eklemeye / eşleştirmeye buradan başlayabilirsiniz.
   
 const [firebaseUser, setFirebaseUser] = useState(null);
+  // ═══════════════════════════════════════════════════════════════════
+  // YENİ EKLENEN: SENKRONİZASYON BEKÇİSİ (GÖRÜNMEZ KAYIT ENGELİ TESPİTİ)
+  // SORUN: Firestore SDK'sı her kaydı ÖNCE cihazın yerel önbelleğine yazar;
+  // kullanıcı kaydı kendi ekranında ANINDA görür. Ama kayıt sunucuya hiç
+  // ulaşamazsa (oturum token'ı düşmesi, ağın Firestore kanalını engellemesi,
+  // güvenlik kuralı reddi vb.) yerel kuyrukta sonsuza dek bekler → kaydı
+  // giren kişi görür, DİĞER KULLANICILAR GÖREMEZ ve kimse fark etmez.
+  // ÇÖZÜM: Bekleyen yazmalar periyodik kontrol edilir. 15 sn içinde sunucuya
+  // ulaşmayan kayıt varsa ekranın üstünde KIRMIZI UYARI ŞERİDİ çıkar ve
+  // arka planda oturum tazelenerek kuyruğun akması sağlanır. Kuyruk
+  // boşalınca uyarı otomatik kaybolur. Mevcut kayıt fonksiyonlarına
+  // DOKUNULMAMIŞTIR — bekçi tamamen bağımsız çalışır.
+  // ═══════════════════════════════════════════════════════════════════
+  const [syncBlocked, setSyncBlocked] = useState(false);
+  useEffect(() => {
+      if (!db || !auth) return;
+      let cancelled = false;
+      const checkSync = async () => {
+          try {
+              // waitForPendingWrites: çağrı anındaki TÜM bekleyen yazmalar sunucu
+              // tarafından ONAYLANINCA çözülür. 15 sn'de çözülmezse engel var demektir.
+              const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('SYNC_TIMEOUT')), 15000));
+              await Promise.race([waitForPendingWrites(db), timeout]);
+              if (!cancelled) setSyncBlocked(false); // kuyruk boş → her şey sunucuda
+          } catch (e) {
+              if (cancelled) return;
+              setSyncBlocked(true); // kayıtlar sunucuya ULAŞMIYOR → kullanıcıyı uyar
+              console.error('SENKRON ENGELİ: Yerel kayıtlar sunucuya yazılamıyor.', e);
+              // Onarım denemesi: oturum düştüyse arka planda yeniden aç (kuyruk otomatik akar)
+              try { if (!auth.currentUser) await signInAnonymously(auth); } catch (err) { console.error('Oturum tazeleme hatası:', err); }
+          }
+      };
+      checkSync(); // açılışta hemen kontrol (önceki oturumdan kalan takılı kayıtlar için)
+      const interval = setInterval(checkSync, 30000); // sonra her 30 sn'de bir
+      return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   // 1. Firebase Kimlik Doğrulama
   useEffect(() => {
@@ -8585,6 +8621,14 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
 
   return (
     <div className="fixed inset-0 flex bg-slate-50 font-sans overflow-hidden">
+      {/* YENİ EKLENEN: SENKRON ENGELİ UYARI ŞERİDİ — kayıtlar sunucuya ulaşmıyorsa
+          kullanıcı ARTIK GÖRÜR (eskiden sessizce kayboluyordu). Kuyruk akınca otomatik kaybolur. */}
+      {syncBlocked && (
+        <div className="fixed top-0 left-0 right-0 z-[100] bg-red-600 text-white text-center px-4 py-2.5 text-sm font-bold shadow-lg flex items-center justify-center gap-2">
+          <AlertCircle size={18} className="shrink-0" />
+          <span>DİKKAT: Girdiğiniz kayıtlar sunucuya ULAŞMIYOR — diğer kullanıcılar göremez! İnternet bağlantınızı kontrol edin, uyarı kaybolana kadar uygulamayı KAPATMAYIN.</span>
+        </div>
+      )}
       {isSidebarOpen && <div className="fixed inset-0 bg-gray-800/50 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}/>}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out flex flex-col ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} lg:relative h-full`}>
         <div className="h-16 flex items-center px-6 border-b border-gray-200 shrink-0">
