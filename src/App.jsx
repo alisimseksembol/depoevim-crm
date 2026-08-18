@@ -581,6 +581,30 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [syncRetrying, setSyncRetrying] = useState(false);   // "Tekrar Yükle" butonu çalışıyor mu?
   const [syncRetryMsg, setSyncRetryMsg] = useState('');      // Kullanıcıya gösterilen deneme sonucu
   const [syncPendingCount, setSyncPendingCount] = useState(0); // Sunucuya ulaşmayı bekleyen kayıt sayısı
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // YENİ MODÜL: ŞUBE KONTROL KAYITLARI (Temizlik / İlaçlama / Genel Kontrol)
+  // Her şube için periyodik bakım kayıtları burada tutulur. Kayıtlar şube
+  // bazlıdır (warehouseId), geçmişe dönük listelenir ve nota açıktır.
+  // ═══════════════════════════════════════════════════════════════════════
+  const [inspections, setInspections] = useState([]);              // tüm kontrol kayıtları
+  const [inspectionWarehouseId, setInspectionWarehouseId] = useState(null); // hangi şubenin sayfası açık
+  const [inspectionTypeFilter, setInspectionTypeFilter] = useState('all');  // liste filtresi
+  const [isInspectionModalOpen, setIsInspectionModalOpen] = useState(false);
+  const [inspectionForm, setInspectionForm] = useState({
+      type: 'temizlik',                                   // temizlik | ilaclama | genel
+      date: new Date().toISOString().split('T')[0],
+      company: '',                                        // yapan firma/kişi
+      cost: '',                                           // varsa ücret
+      nextDate: '',                                       // sonraki planlanan tarih
+      note: ''
+  });
+  // Kontrol türleri — renk/etiket tanımları tek yerden yönetilir
+  const inspectionTypes = {
+      temizlik: { label: 'Temizlik',      color: 'bg-blue-500',   text: 'text-blue-600',   bgLight: 'bg-blue-50',   border: 'border-blue-200',   icon: Box },
+      ilaclama: { label: 'İlaçlama',      color: 'bg-emerald-500',text: 'text-emerald-600',bgLight: 'bg-emerald-50',border: 'border-emerald-200', icon: Shield },
+      genel:    { label: 'Genel Kontrol', color: 'bg-orange-500', text: 'text-orange-600', bgLight: 'bg-orange-50', border: 'border-orange-200', icon: Check }
+  };
   useEffect(() => {
       if (!db || !auth) return;
       let cancelled = false;
@@ -1063,12 +1087,19 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       // PERFORMANS/LİMİT: bulkUploadHistory da sürekli dinlenmez; Ödeme Girişi sayfasına girince
       // tek seferlik getDocs + limit ile çekilir (bkz. fetchBulkUploadHistory).
 
+      // YENİ: ŞUBE KONTROL KAYITLARI DİNLEYİCİSİ (Temizlik / İlaçlama / Genel Kontrol)
+      // OKUMA LİMİTİ: Son 300 kayıt canlı dinlenir (şube başına yılda ~50 kayıt beklenir).
+      const unsubInspections = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'inspections'), limit(300)), (snapshot) => {
+          const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setInspections(fetchedData);
+      }, (error) => console.error("Kontrol Kaydı Çekme Hatası:", error));
+
       // CLEANUP: Menü/oturum değişiminde TÜM canlı dinleyiciler kapatılır — açık kalan
       // dinleyici hem bellek sızdırır hem her değişiklikte gereksiz okuma üretir.
       return () => { 
           unsubCustomers(); unsubWarehouses(); unsubBlocks(); unsubRooms(); unsubPendingCollections(); unsubSystemUsers(); unsubAppointments();
           unsubRemindersOpen(); unsubRemindersRecent();
-          unsubContract(); unsubRates(); unsubUserRoles();
+          unsubContract(); unsubRates(); unsubUserRoles(); unsubInspections();
       };
   }, [firebaseUser]);
 
@@ -1349,6 +1380,80 @@ const [firebaseUser, setFirebaseUser] = useState(null);
               setActivityLogs(prev => [entry, ...prev]);
           }
       } catch (e) { console.error('Log kaydı hatası:', e); }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // YENİ MODÜL FONKSİYONLARI: ŞUBE KONTROL KAYITLARI
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Yeni kontrol kaydı (Temizlik / İlaçlama / Genel Kontrol) oluşturur.
+  const handleSaveInspection = async () => {
+      if (!inspectionWarehouseId || !inspectionForm.date) return;
+      const wh = warehouses.find(w => String(w.id) === String(inspectionWarehouseId));
+      const record = {
+          id: `insp_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          warehouseId: inspectionWarehouseId,
+          warehouseName: wh?.name || '',
+          type: inspectionForm.type,
+          date: inspectionForm.date,
+          company: inspectionForm.company || '',
+          cost: inspectionForm.cost !== '' ? Number(inspectionForm.cost) : null,
+          nextDate: inspectionForm.nextDate || '',
+          note: inspectionForm.note || '',
+          notes: [],                                        // sonradan eklenen ek notlar
+          createdBy: currentUserProfile?.name || 'Sistem',
+          createdByRole: getCurrentRole()?.name || currentUserProfile?.role || '',
+          createdAt: Date.now()
+      };
+
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inspections', record.id), record);
+          } catch (e) { console.error('Kontrol Kaydı Hatası:', e); }
+      }
+      // Yerel listeye de ekle (önizleme ve anında görünürlük için)
+      setInspections(prev => [record, ...prev]);
+      logActivity('Şube Kontrol', `${wh?.name || ''} şubesine ${inspectionTypes[record.type]?.label} kaydı eklendi.`);
+
+      // Formu sıfırla ve pencereyi kapat
+      setInspectionForm({ type: 'temizlik', date: new Date().toISOString().split('T')[0], company: '', cost: '', nextDate: '', note: '' });
+      setIsInspectionModalOpen(false);
+  };
+
+  // Var olan bir kontrol kaydına SONRADAN not ekler (kayıt geçmişi bozulmaz).
+  const handleAddInspectionNote = async (inspId, text) => {
+      if (!text || !text.trim()) return;
+      const entry = {
+          id: `n_${Date.now()}`,
+          text: text.trim(),
+          by: currentUserProfile?.name || 'Sistem',
+          at: Date.now()
+      };
+      if (db && firebaseUser) {
+          try {
+              // arrayUnion ile ATOMİK ekleme — başka kullanıcının aynı anda eklediği not EZİLMEZ.
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inspections', String(inspId)), { notes: arrayUnion(entry) }, { merge: true });
+          } catch (e) { console.error('Not Ekleme Hatası:', e); }
+      }
+      setInspections(prev => prev.map(i => String(i.id) === String(inspId) ? { ...i, notes: [...(i.notes || []), entry] } : i));
+  };
+
+  // Kontrol kaydını siler (onaylı).
+  const handleDeleteInspection = async (inspId) => {
+      if (!window.confirm('Bu kontrol kaydını silmek istediğinize emin misiniz?')) return;
+      if (db && firebaseUser) {
+          try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inspections', String(inspId))); } catch (e) { console.error('Kontrol Silme Hatası:', e); }
+      }
+      setInspections(prev => prev.filter(i => String(i.id) !== String(inspId)));
+      logActivity('Şube Kontrol', 'Bir kontrol kaydı silindi.');
+  };
+
+  // Bir şubenin son kontrol tarihini türe göre döndürür (kart üzerinde uyarı için).
+  const getLastInspection = (whId, type) => {
+      const list = (inspections || [])
+          .filter(i => String(i.warehouseId) === String(whId) && i.type === type)
+          .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      return list[0] || null;
   };
 
   // YENİ: SİLİNEN KAYIT ÇÖP KUTUSU — silme anında kaydın TAM kopyasını saklar (geri yükleme için).
@@ -12600,6 +12705,39 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                              <Edit size={14} /> Düzenle
                           </button>
                         </div>
+
+                        {/* YENİ: KONTROL BUTONU — Temizlik / İlaçlama / Genel Kontrol kayıt sayfasını açar.
+                            Butonun altında o şubenin son temizlik ve son ilaçlama tarihi özet olarak görünür. */}
+                        <div className="mt-2" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setInspectionWarehouseId(depo.id); setInspectionTypeFilter('all'); setActiveMenu('sube-kontrol'); }}
+                            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-slate-800 to-slate-700 hover:from-indigo-600 hover:to-indigo-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold shadow-md transition-all hover:scale-[1.02]"
+                            title="Temizlik / İlaçlama / Genel Kontrol Kayıtları"
+                          >
+                            <Shield size={14} /> Kontrol
+                            {/* Bu şubenin toplam kontrol kaydı sayısı */}
+                            {(() => {
+                                const cnt = (inspections || []).filter(i => String(i.warehouseId) === String(depo.id)).length;
+                                return cnt > 0 ? <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px]">{cnt}</span> : null;
+                            })()}
+                          </button>
+                          {/* Son kontrol tarihleri özeti — 90 günü geçmişse kırmızı uyarı verir */}
+                          {(() => {
+                              const lastT = getLastInspection(depo.id, 'temizlik');
+                              const lastI = getLastInspection(depo.id, 'ilaclama');
+                              const isStale = (rec) => { if (!rec) return true; const d = (Date.now() - new Date(rec.date).getTime()) / 86400000; return d > 90; };
+                              return (
+                                  <div className="flex items-center justify-between gap-2 mt-1.5 px-1">
+                                      <span className={`text-[9px] font-bold ${isStale(lastT) ? 'text-red-500' : 'text-slate-400'}`}>
+                                          Temizlik: {lastT ? new Date(lastT.date).toLocaleDateString('tr-TR') : 'Kayıt yok'}
+                                      </span>
+                                      <span className={`text-[9px] font-bold ${isStale(lastI) ? 'text-red-500' : 'text-slate-400'}`}>
+                                          İlaçlama: {lastI ? new Date(lastI.date).toLocaleDateString('tr-TR') : 'Kayıt yok'}
+                                      </span>
+                                  </div>
+                              );
+                          })()}
+                        </div>
                       </div>
                     </div>
                   )})}
@@ -13355,6 +13493,193 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                 </div>
               )}
             </div>
+          ) : activeMenu === 'sube-kontrol' ? (
+            // ═══════════════════════════════════════════════════════════════
+            // YENİ SAYFA: ŞUBE KONTROL KAYITLARI
+            // Temizlik / İlaçlama / Genel Kontrol kayıtları şube bazlı tutulur.
+            // Üstte özet kartlar, ortada filtre, altta geçmiş kayıt listesi ve
+            // her kaydın altında not ekleme alanı bulunur.
+            // ═══════════════════════════════════════════════════════════════
+            (() => {
+                const wh = warehouses.find(w => String(w.id) === String(inspectionWarehouseId));
+                // Bu şubeye ait kayıtlar — en yeni tarih en üstte
+                const all = (inspections || [])
+                    .filter(i => String(i.warehouseId) === String(inspectionWarehouseId))
+                    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.createdAt || 0) - (a.createdAt || 0));
+                const list = inspectionTypeFilter === 'all' ? all : all.filter(i => i.type === inspectionTypeFilter);
+
+                return (
+                <div className="max-w-6xl mx-auto animate-in fade-in duration-300 pb-10">
+                    {/* ÜST BAŞLIK — geri dön + şube adı + yeni kayıt butonu */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-5">
+                        <button onClick={() => { setInspectionWarehouseId(null); setActiveMenu('depo'); }} className="text-xs font-bold text-gray-500 hover:text-indigo-600 tracking-wider uppercase mb-3 flex items-center gap-1 transition-colors">
+                            <ArrowLeft size={14} /> Depo Listesine Dön
+                        </button>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-slate-800 text-white flex items-center justify-center shadow-md shrink-0">
+                                    <Shield size={22} />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">{wh?.name || 'Şube'}</h2>
+                                    <p className="text-xs text-gray-500 font-semibold">Temizlik · İlaçlama · Genel Kontrol Kayıtları</p>
+                                </div>
+                            </div>
+                            <button onClick={() => { setInspectionForm({ type: 'temizlik', date: new Date().toISOString().split('T')[0], company: '', cost: '', nextDate: '', note: '' }); setIsInspectionModalOpen(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/30 transition-colors">
+                                <Plus size={18} /> Yeni Kontrol Kaydı
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* ÖZET KARTLAR — her tür için son yapılan tarih ve sonraki plan */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+                        {Object.keys(inspectionTypes).map(tKey => {
+                            const t = inspectionTypes[tKey];
+                            const last = getLastInspection(inspectionWarehouseId, tKey);
+                            const daysPassed = last ? Math.floor((Date.now() - new Date(last.date).getTime()) / 86400000) : null;
+                            const stale = daysPassed === null || daysPassed > 90; // 90 gün kuralı
+                            const TIcon = t.icon;
+                            return (
+                                <div key={tKey} className={`bg-white rounded-2xl border-2 ${stale ? 'border-red-200' : t.border} p-4 shadow-sm`}>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className={`w-9 h-9 rounded-lg ${t.color} text-white flex items-center justify-center shadow-sm`}><TIcon size={16} /></div>
+                                        <span className={`font-bold text-sm ${t.text}`}>{t.label}</span>
+                                    </div>
+                                    <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wide">Son Yapılan</p>
+                                    <p className={`text-lg font-black ${stale ? 'text-red-500' : 'text-slate-800'}`}>
+                                        {last ? new Date(last.date).toLocaleDateString('tr-TR') : 'Kayıt Yok'}
+                                    </p>
+                                    {daysPassed !== null && (
+                                        <p className={`text-[11px] font-bold mt-0.5 ${stale ? 'text-red-500' : 'text-gray-400'}`}>
+                                            {daysPassed} gün önce {stale && '— kontrol zamanı geçti!'}
+                                        </p>
+                                    )}
+                                    {last?.nextDate && (
+                                        <p className="text-[11px] font-bold text-indigo-500 mt-1.5 flex items-center gap-1">
+                                            <Calendar size={11} /> Sonraki: {new Date(last.nextDate).toLocaleDateString('tr-TR')}
+                                        </p>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* FİLTRE SATIRI */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-3 mb-5 flex flex-wrap items-center gap-2">
+                        <button onClick={() => setInspectionTypeFilter('all')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${inspectionTypeFilter === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>
+                            Tümü ({all.length})
+                        </button>
+                        {Object.keys(inspectionTypes).map(tKey => {
+                            const t = inspectionTypes[tKey];
+                            const cnt = all.filter(i => i.type === tKey).length;
+                            return (
+                                <button key={tKey} onClick={() => setInspectionTypeFilter(tKey)} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${inspectionTypeFilter === tKey ? `${t.color} text-white shadow-sm` : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>
+                                    {t.label} ({cnt})
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* GEÇMİŞ KAYIT LİSTESİ */}
+                    <div className="flex flex-col gap-4">
+                        {list.length === 0 ? (
+                            <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-12 text-center">
+                                <div className="w-16 h-16 rounded-2xl bg-gray-50 flex items-center justify-center mx-auto mb-4"><Shield size={28} className="text-gray-300" /></div>
+                                <h3 className="text-lg font-bold text-gray-700 mb-1">Henüz kontrol kaydı yok</h3>
+                                <p className="text-sm text-gray-500">Bu şube için ilk temizlik, ilaçlama veya genel kontrol kaydını oluşturun.</p>
+                            </div>
+                        ) : list.map(insp => {
+                            const t = inspectionTypes[insp.type] || inspectionTypes.genel;
+                            const TIcon = t.icon;
+                            return (
+                                <div key={insp.id} className={`bg-white rounded-2xl border ${t.border} shadow-sm overflow-hidden`}>
+                                    {/* Kayıt üst bilgi */}
+                                    <div className={`${t.bgLight} px-5 py-3 flex flex-wrap items-center justify-between gap-3 border-b ${t.border}`}>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-10 h-10 rounded-xl ${t.color} text-white flex items-center justify-center shadow-sm shrink-0`}><TIcon size={18} /></div>
+                                            <div>
+                                                <span className={`font-black text-sm ${t.text} uppercase tracking-tight`}>{t.label}</span>
+                                                <p className="text-[11px] font-bold text-gray-500 flex items-center gap-1">
+                                                    <Calendar size={11} /> {new Date(insp.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            {insp.cost != null && <span className="bg-white border border-gray-200 px-2.5 py-1 rounded-lg text-xs font-black text-slate-700 shadow-sm">{Number(insp.cost).toLocaleString('tr-TR')} TL</span>}
+                                            <button onClick={() => handleDeleteInspection(insp.id)} className="bg-white hover:bg-red-50 text-red-500 p-2 rounded-lg border border-red-100 shadow-sm transition-colors" title="Kaydı Sil"><Trash2 size={14} /></button>
+                                        </div>
+                                    </div>
+
+                                    {/* Kayıt detayları */}
+                                    <div className="p-5">
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                                            <div>
+                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">Yapan Firma / Kişi</p>
+                                                <p className="text-sm font-bold text-slate-700">{insp.company || '—'}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">Sonraki Planlanan</p>
+                                                <p className="text-sm font-bold text-slate-700">{insp.nextDate ? new Date(insp.nextDate).toLocaleDateString('tr-TR') : '—'}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">Kaydı Açan</p>
+                                                <p className="text-sm font-bold text-slate-700 flex items-center gap-1"><UserCog size={13} className="text-indigo-500" /> {insp.createdBy || 'Bilinmiyor'}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Ana açıklama */}
+                                        {insp.note && (
+                                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4">
+                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Açıklama</p>
+                                                <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap">{insp.note}</p>
+                                            </div>
+                                        )}
+
+                                        {/* SONRADAN EKLENEN NOTLAR */}
+                                        {(insp.notes || []).length > 0 && (
+                                            <div className="flex flex-col gap-2 mb-4">
+                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Notlar ({(insp.notes || []).length})</p>
+                                                {(insp.notes || []).slice().sort((a, b) => (a.at || 0) - (b.at || 0)).map(n => (
+                                                    <div key={n.id} className="bg-indigo-50/60 border-l-4 border-indigo-400 rounded-r-lg px-3 py-2">
+                                                        <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap">{n.text}</p>
+                                                        <p className="text-[10px] text-gray-400 font-bold mt-1">{n.by} · {n.at ? new Date(n.at).toLocaleString('tr-TR') : ''}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {/* NOT EKLEME ALANI — her kayda ayrı ayrı not eklenir */}
+                                        <div className="flex flex-col sm:flex-row gap-2 pt-3 border-t border-gray-100">
+                                            <input
+                                                type="text"
+                                                placeholder="Bu kontrole not ekle (örn: 3. kat tekrar ilaçlanacak)"
+                                                className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition-all font-medium"
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                                                        handleAddInspectionNote(insp.id, e.currentTarget.value);
+                                                        e.currentTarget.value = '';
+                                                    }
+                                                }}
+                                                id={`note-input-${insp.id}`}
+                                            />
+                                            <button
+                                                onClick={() => {
+                                                    const el = document.getElementById(`note-input-${insp.id}`);
+                                                    if (el && el.value.trim()) { handleAddInspectionNote(insp.id, el.value); el.value = ''; }
+                                                }}
+                                                className="bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-600 border border-indigo-200 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                                            >
+                                                <Plus size={15} /> Not Ekle
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+                );
+            })()
           ) : activeMenu === 'pdf-sozlesme' ? (
             <div className="max-w-5xl mx-auto pb-10">
               <div className="mb-6">
@@ -15352,6 +15677,87 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                </div>
                <div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-6"><button onClick={() => setIsEditRentModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-xl font-bold transition-colors text-sm">İptal Et</button><button onClick={handleSaveEditRent} disabled={!editRentData.customerName || !editRentData.monthlyFee} className="bg-[#1bc5bd] hover:bg-teal-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold transition-colors flex items-center gap-2 shadow-lg shadow-teal-500/30"><Check strokeWidth={3} size={20} /> Değişiklikleri Kaydet</button></div>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          YENİ: KONTROL KAYDI OLUŞTURMA PENCERESİ
+          Tür seçimi (Temizlik / İlaçlama / Genel Kontrol), tarih, yapan firma,
+          ücret, sonraki plan tarihi ve açıklama alanlarını içerir.
+          ═══════════════════════════════════════════════════════════════════ */}
+      {isInspectionModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setIsInspectionModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            {/* Pencere başlığı */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-lg bg-indigo-600 text-white flex items-center justify-center"><Shield size={17} /></div>
+                <div>
+                  <h3 className="font-black text-slate-800 text-base">Yeni Kontrol Kaydı</h3>
+                  <p className="text-[11px] text-gray-500 font-semibold">{warehouses.find(w => String(w.id) === String(inspectionWarehouseId))?.name || ''}</p>
+                </div>
+              </div>
+              <button onClick={() => setIsInspectionModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-1"><X size={22} /></button>
+            </div>
+
+            <div className="p-6 flex flex-col gap-5">
+              {/* TÜR SEÇİMİ — üç büyük seçim butonu */}
+              <div>
+                <label className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2 block">Kontrol Türü</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.keys(inspectionTypes).map(tKey => {
+                    const t = inspectionTypes[tKey];
+                    const TIcon = t.icon;
+                    const active = inspectionForm.type === tKey;
+                    return (
+                      <button key={tKey} onClick={() => setInspectionForm({ ...inspectionForm, type: tKey })} className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 transition-all ${active ? `${t.color} text-white border-transparent shadow-md` : `bg-gray-50 ${t.text} border-gray-200 hover:border-gray-300`}`}>
+                        <TIcon size={20} />
+                        <span className="text-[11px] font-bold">{t.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* TARİH ve SONRAKİ PLAN */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Yapıldığı Tarih</label>
+                  <input type="date" value={inspectionForm.date} onChange={(e) => setInspectionForm({ ...inspectionForm, date: e.target.value })} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition-all font-semibold text-slate-700" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Sonraki Plan (opsiyonel)</label>
+                  <input type="date" value={inspectionForm.nextDate} onChange={(e) => setInspectionForm({ ...inspectionForm, nextDate: e.target.value })} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition-all font-semibold text-slate-700" />
+                </div>
+              </div>
+
+              {/* FİRMA ve ÜCRET */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Yapan Firma / Kişi</label>
+                  <input type="text" value={inspectionForm.company} onChange={(e) => setInspectionForm({ ...inspectionForm, company: e.target.value })} placeholder="Örn: ABC İlaçlama Ltd." className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition-all font-semibold text-slate-700" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Ücret (TL, opsiyonel)</label>
+                  <input type="number" value={inspectionForm.cost} onChange={(e) => setInspectionForm({ ...inspectionForm, cost: e.target.value })} placeholder="0" className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition-all font-semibold text-slate-700" />
+                </div>
+              </div>
+
+              {/* AÇIKLAMA */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Açıklama / Yapılan İşlemler</label>
+                <textarea value={inspectionForm.note} onChange={(e) => setInspectionForm({ ...inspectionForm, note: e.target.value })} rows={4} placeholder="Örn: Tüm koridorlar ve ortak alanlar temizlendi. B blok zemininde nem tespit edildi." className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition-all font-medium text-slate-700 resize-none" />
+              </div>
+            </div>
+
+            {/* Pencere alt butonları */}
+            <div className="flex gap-3 px-6 py-4 border-t border-gray-100 sticky bottom-0 bg-white rounded-b-2xl">
+              <button onClick={() => setIsInspectionModalOpen(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl font-bold text-sm transition-colors">İptal</button>
+              <button onClick={handleSaveInspection} disabled={!inspectionForm.date} className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/30">
+                <Check size={17} /> Kaydet
+              </button>
+            </div>
           </div>
         </div>
       )}
