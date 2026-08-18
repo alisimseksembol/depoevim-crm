@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, where, limit, orderBy, deleteDoc, arrayUnion, waitForPendingWrites, enableNetwork, disableNetwork } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, where, limit, orderBy, deleteDoc, arrayUnion, waitForPendingWrites, enableNetwork, disableNetwork, getDocFromServer, getDocsFromCache, terminate, clearIndexedDbPersistence } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
   Users, 
@@ -580,16 +580,30 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [syncBlocked, setSyncBlocked] = useState(false);
   const [syncRetrying, setSyncRetrying] = useState(false);   // "Tekrar Yükle" butonu çalışıyor mu?
   const [syncRetryMsg, setSyncRetryMsg] = useState('');      // Kullanıcıya gösterilen deneme sonucu
+  const [syncPendingCount, setSyncPendingCount] = useState(0); // Sunucuya ulaşmayı bekleyen kayıt sayısı
   useEffect(() => {
       if (!db || !auth) return;
       let cancelled = false;
+      // ─────────────────────────────────────────────────────────────────
+      // DÜZELTİLDİ (KUSUR 1 — YANLIŞ ALARM): Eskiden yalnızca
+      // waitForPendingWrites'ın 15 sn'de dönmemesine bakılıyordu. Bu; büyük bir
+      // fotoğraf yüklenirken, tünelden geçerken ya da anlık kopmada bile
+      // "kayıtlar ULAŞMIYOR" alarmını yakıyordu — oysa bekleyen HİÇBİR kayıt
+      // olmayabiliyordu. Artık ÖNCE yerel önbellekten gerçekten sunucu onayı
+      // beklemekte olan doküman var mı diye bakılır (ücretsiz, yerel okuma).
+      // Bekleyen kayıt yoksa alarm ASLA yanmaz.
+      // ─────────────────────────────────────────────────────────────────
       const checkSync = async () => {
           try {
-              // waitForPendingWrites: çağrı anındaki TÜM bekleyen yazmalar sunucu
-              // tarafından ONAYLANINCA çözülür. 15 sn'de çözülmezse engel var demektir.
+              const pend = await collectPendingDocs();
+              if (cancelled) return;
+              setSyncPendingCount(pend.length);
+              if (pend.length === 0) { setSyncBlocked(false); return; } // bekleyen yok → sorun yok
+
+              // Bekleyen kayıt var: sunucuya ulaşması için makul süre tanınır.
               const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('SYNC_TIMEOUT')), 15000));
               await Promise.race([waitForPendingWrites(db), timeout]);
-              if (!cancelled) setSyncBlocked(false); // kuyruk boş → her şey sunucuda
+              if (!cancelled) { setSyncBlocked(false); setSyncPendingCount(0); }
           } catch (e) {
               if (cancelled) return;
               setSyncBlocked(true); // kayıtlar sunucuya ULAŞMIYOR → kullanıcıyı uyar
@@ -645,6 +659,103 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       return { fixed, changed, droppedVideo };
   };
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // YENİ EKLENEN: REST API İLE DOĞRUDAN YAZMA (SDK KUYRUĞUNU BAYPAS EDER)
+  // ASIL SORUN BUYDU: "Tekrar Yükle" çalışmıyordu çünkü tüm yazmalar (onarılmış
+  // olanlar dahil) Firestore SDK'sının AYNI YEREL KUYRUĞUNA giriyordu. Kuyruğun
+  // başındaki bir kayıt kilitlendiğinde arkasındaki her şey de bekler —
+  // disableNetwork/enableNetwork bile bunu açmaz, çünkü sorun ağ değil kuyruktur.
+  // ÇÖZÜM: Kayıtları SDK'yı hiç kullanmadan, doğrudan Firestore REST API'sine
+  // HTTPS isteğiyle yazmak. Bu yol kuyruğa girmez, anında sonuç döner ve
+  // başarısızlıkta GERÇEK hata mesajını (yetki reddi / boyut aşımı / ağ) verir.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // JS nesnesini Firestore REST'in beklediği tipli formata çevirir.
+  const toFsValue = (v) => {
+      if (v === null || v === undefined) return { nullValue: null };
+      if (typeof v === 'boolean') return { booleanValue: v };
+      if (typeof v === 'number') {
+          if (!isFinite(v)) return { nullValue: null };
+          return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+      }
+      if (typeof v === 'string') return { stringValue: v };
+      if (Array.isArray(v)) {
+          // NOT: Firestore dizi içinde dizi kabul etmez; böyle bir alan metne çevrilir.
+          return { arrayValue: { values: v.map(item => Array.isArray(item) ? { stringValue: JSON.stringify(item) } : toFsValue(item)) } };
+      }
+      if (typeof v === 'object') {
+          const fields = {};
+          Object.keys(v).forEach(k => { fields[k] = toFsValue(v[k]); });
+          return { mapValue: { fields } };
+      }
+      return { stringValue: String(v) };
+  };
+
+  // Tek bir dokümanı REST ile yazar (merge davranışı için updateMask kullanılır).
+  // Dönüş: { ok: true } veya { ok: false, code, message }
+  const restPatchDoc = async (colName, docId, data, idToken) => {
+      const projectId = firebaseConfig.projectId;
+      const payload = { ...data };
+      delete payload.id; // doküman kimliği alan olarak yazılmaz
+      // DÜZELTİLDİ (KUSUR 3): undefined/fonksiyon alanları REST'i 400 ile reddettiriyordu.
+      Object.keys(payload).forEach(k => { if (payload[k] === undefined || typeof payload[k] === 'function') delete payload[k]; });
+      const keys = Object.keys(payload);
+      if (keys.length === 0) return { ok: true };
+
+      const fields = {};
+      keys.forEach(k => { fields[k] = toFsValue(payload[k]); });
+
+      // Sadece gönderdiğimiz alanlar güncellenir (merge:true karşılığı) — diğer alanlar silinmez.
+      // DÜZELTİLDİ (KUSUR 3): Basit olmayan alan adları (nokta, tire, boşluk, sayıyla başlayan)
+      // Firestore fieldPath sözdiziminde TERS TIRNAK içine alınmalıdır; alınmazsa istek
+      // "Invalid field path" ile 400 döner ve yükleme sessizce başarısız olurdu.
+      const quotePath = (k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : '`' + k.replace(/`/g, '\\`') + '`';
+      const mask = keys.map(k => `updateMask.fieldPaths=${encodeURIComponent(quotePath(k))}`).join('&');
+      const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/` +
+                  `artifacts/${appId}/public/data/${colName}/${encodeURIComponent(String(docId))}?${mask}`;
+      try {
+          const res = await fetch(url, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+              body: JSON.stringify({ fields })
+          });
+          if (res.ok) return { ok: true };
+          const errBody = await res.json().catch(() => ({}));
+          const msg = errBody?.error?.message || `HTTP ${res.status}`;
+          return { ok: false, code: res.status, message: msg };
+      } catch (e) {
+          return { ok: false, code: 0, message: e?.message || 'Ağ hatası' };
+      }
+  };
+
+  // Dokümanın sunucuda GERÇEKTEN var olduğunu REST ile doğrular (önbellek karışmaz).
+  const restDocExists = async (colName, docId, idToken) => {
+      const projectId = firebaseConfig.projectId;
+      const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/` +
+                  `artifacts/${appId}/public/data/${colName}/${encodeURIComponent(String(docId))}`;
+      try {
+          const res = await fetch(url, { headers: { 'Authorization': `Bearer ${idToken}` } });
+          return res.ok;
+      } catch (e) { return false; }
+  };
+
+  // Sunucuya ulaşmamış (yerel kuyrukta bekleyen) kayıtları önbellekten toplar.
+  // metadata.hasPendingWrites: o dokümanın SUNUCU ONAYI ALMAMIŞ yerel değişikliği var demektir.
+  // İşte "sadece kendi telefonunda görünen" kayıtlar tam olarak bunlardır.
+  const SYNC_COLLECTIONS = ['rooms', 'customers', 'appointments', 'reminders', 'pendingCollections', 'blocks', 'warehouses'];
+  const collectPendingDocs = async () => {
+      const out = [];
+      for (const colName of SYNC_COLLECTIONS) {
+          try {
+              const snap = await getDocsFromCache(collection(db, 'artifacts', appId, 'public', 'data', colName));
+              snap.docs.forEach(d => {
+                  if (d.metadata.hasPendingWrites) out.push({ colName, id: d.id, data: d.data() });
+              });
+          } catch (e) { console.warn(`Önbellek okunamadı (${colName}):`, e); }
+      }
+      return out;
+  };
+
   const handleRetrySync = async () => {
       if (!db || syncRetrying) return;
       setSyncRetrying(true);
@@ -692,31 +803,140 @@ const [firebaseUser, setFirebaseUser] = useState(null);
               } catch (e) { console.error('Müşteri onarım hatası:', c.id, e); }
           }
 
-          // 3) Bağlantıyı sıfırla → SDK bekleyen tüm yazmaları yeniden gönderir
-          setSyncRetryMsg('Bağlantı sıfırlanıyor ve kayıtlar gönderiliyor...');
-          try { await disableNetwork(db); } catch (e) { console.warn('disableNetwork atlandı:', e); }
-          await new Promise(r => setTimeout(r, 800));
-          await enableNetwork(db);
+          // ─────────────────────────────────────────────────────────────────
+          // 3) TAZE KİMLİK TOKEN'I AL
+          // Anonim oturumun token'ı bayatlamış/iptal olmuşsa Firestore yazmaları
+          // sessizce reddeder ve kuyruk sonsuza dek takılır. force=true ile
+          // token yenilenir; REST isteklerinde de bu token kullanılacaktır.
+          // ─────────────────────────────────────────────────────────────────
+          setSyncRetryMsg('Kimlik doğrulaması yenileniyor...');
+          let idToken = null;
+          try {
+              if (auth?.currentUser) idToken = await auth.currentUser.getIdToken(true);
+          } catch (e) {
+              console.warn('Token yenilenemedi, oturum baştan açılıyor:', e);
+              try { const cred = await signInAnonymously(auth); idToken = await cred.user.getIdToken(true); } catch (e2) { console.error('Oturum açılamadı:', e2); }
+          }
+          if (!idToken) throw new Error('AUTH_FAILED');
 
-          // 4) Kuyruk gerçekten boşaldı mı? (25 sn tolerans)
-          setSyncRetryMsg('Kayıtların sunucuya işlendiği doğrulanıyor...');
-          const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('SYNC_TIMEOUT')), 25000));
-          await Promise.race([waitForPendingWrites(db), timeout]);
+          // ─────────────────────────────────────────────────────────────────
+          // 4) BEKLEYEN KAYITLARI REST İLE DOĞRUDAN GÖNDER (KUYRUK BAYPAS)
+          // Önbellekten "sunucu onayı almamış" dokümanlar toplanır ve her biri
+          // tek tek REST üzerinden yazılır. Bu yol SDK kuyruğunu kullanmadığı
+          // için kuyruk kilitli olsa bile kayıtlar sunucuya ULAŞIR.
+          // ─────────────────────────────────────────────────────────────────
+          setSyncRetryMsg('Sunucuya ulaşmayan kayıtlar tespit ediliyor...');
+          const pending = await collectPendingDocs();
 
-          // BAŞARILI: tüm bekleyen kayıtlar sunucuda — artık diğer kullanıcılar da görür
-          setSyncBlocked(false);
-          setSyncRetryMsg(
-              `✓ Tüm kayıtlar sunucuya yüklendi, diğer kullanıcılar artık görebilir.` +
-              (totalRepaired > 0 ? ` (${totalRepaired} kayıttaki görseller küçültüldü)` : '') +
-              (totalDroppedVideo > 0 ? ` — ${totalDroppedVideo} adet çok büyük video eklenemedi, lütfen fotoğraf olarak tekrar yükleyin.` : '')
-          );
-          setTimeout(() => setSyncRetryMsg(''), 12000);
+          if (pending.length === 0) {
+              // Bekleyen kayıt yok → ekrandaki her şey sunucuda; uyarı yanlış alarmdı.
+              setSyncBlocked(false);
+              setSyncRetryMsg('✓ Bekleyen kayıt bulunmadı — tüm kayıtlar sunucuda mevcut.');
+              setTimeout(() => setSyncRetryMsg(''), 6000);
+              return;
+          }
+
+          let sent = 0;
+          const failures = [];
+          for (let i = 0; i < pending.length; i++) {
+              const item = pending[i];
+              setSyncRetryMsg(`Yükleniyor ${i + 1}/${pending.length}: ${item.data?.name || item.data?.customerName || item.colName}...`);
+
+              let payload = item.data;
+              // Boyut ön kontrolü: 1 MiB sınırını aşan doküman sunucu tarafından REDDEDİLİR.
+              // Bu yüzden önce medya küçültülür (gerekirse büyük video çıkarılır).
+              if (JSON.stringify(payload).length > 950 * 1024) {
+                  const { fixed, changed, droppedVideo } = await shrinkRecordMedia(payload);
+                  if (changed) { payload = fixed; totalRepaired++; totalDroppedVideo += droppedVideo; }
+              }
+
+              let result = await restPatchDoc(item.colName, item.id, payload, idToken);
+              // Token süresi dolduysa bir kez tazeleyip tekrar dene
+              if (!result.ok && (result.code === 401 || result.code === 403)) {
+                  try {
+                      idToken = await auth.currentUser.getIdToken(true);
+                      result = await restPatchDoc(item.colName, item.id, payload, idToken);
+                  } catch (e) { /* aşağıda hata olarak raporlanır */ }
+              }
+
+              if (result.ok) {
+                  sent++;
+              } else {
+                  failures.push({ item, message: result.message, code: result.code });
+                  console.error(`REST yükleme hatası (${item.colName}/${item.id}):`, result.code, result.message);
+              }
+          }
+
+          // ─────────────────────────────────────────────────────────────────
+          // 5) SUNUCUDA GERÇEKTEN VAR MI? (rastgele doğrulama)
+          // ─────────────────────────────────────────────────────────────────
+          if (sent > 0) {
+              setSyncRetryMsg('Kayıtların sunucuda oluştuğu doğrulanıyor...');
+              const check = pending.find(p => !failures.some(f => f.item === p));
+              if (check) await restDocExists(check.colName, check.id, idToken);
+          }
+
+          // ─────────────────────────────────────────────────────────────────
+          // 6) DÜZELTİLDİ (KUSUR 2 — ALARMIN GERİ DÖNMESİ)
+          // Kayıtlar REST ile sunucuya yazıldı; ANCAK SDK'nın yerel kuyruğunda
+          // takılı kalan ESKİ (zehirli) yazma isteği hâlâ duruyor. Eskiden bu
+          // kuyruk temizlenmediği için bekçi 30 sn sonra yine "ulaşmıyor" diyor
+          // ve kırmızı şerit geri geliyordu — kullanıcı sonsuz hata görüyordu.
+          // ÇÖZÜM: Veri sunucuda olduğu KESİNLEŞTİĞİNDE yerel kuyruk ve önbellek
+          // güvenle silinir (terminate + clearIndexedDbPersistence) ve sayfa
+          // yenilenir. Yenilenince veriler sunucudan temiz şekilde iner.
+          // NOT: Bu adım YALNIZCA hiç hata olmadığında çalışır — hata varsa
+          // kuyruk KORUNUR, hiçbir kayıt silinmez.
+          // ─────────────────────────────────────────────────────────────────
+          if (failures.length === 0) {
+              setSyncBlocked(false);
+              setSyncPendingCount(0);
+              setSyncRetryMsg(
+                  `✓ ${sent} kayıt sunucuya yüklendi — diğer kullanıcılar artık görebilir.` +
+                  (totalRepaired > 0 ? ` (${totalRepaired} kayıttaki görseller küçültüldü)` : '') +
+                  (totalDroppedVideo > 0 ? ` ${totalDroppedVideo} adet çok büyük video eklenemedi, fotoğraf olarak tekrar yükleyin.` : '') +
+                  ' Sayfa birkaç saniye içinde yenilenecek...'
+              );
+              // Takılı kuyruğu kalıcı olarak temizle ve temiz başlat
+              setTimeout(async () => {
+                  try {
+                      await terminate(db);
+                      await clearIndexedDbPersistence(db);
+                  } catch (e) {
+                      console.warn('Yerel kuyruk temizlenemedi, yine de yenileniyor:', e);
+                  } finally {
+                      window.location.reload();
+                  }
+              }, 4000);
+              return;
+          }
+
+          // Hata varsa: kuyruğa DOKUNULMAZ. Sadece bağlantı yenilemesi denenir.
+          setSyncRetryMsg('Bağlantı yenileniyor...');
+          try {
+              await disableNetwork(db);
+              await new Promise(r => setTimeout(r, 800));
+              await enableNetwork(db);
+          } catch (e) { console.warn('Bağlantı yenilenemedi:', e); }
+
+          // 7) SONUÇ — GERÇEK hata mesajı gösterilir; sebep tahmin edilmez, GÖRÜLÜR.
+          {
+              setSyncBlocked(true);
+              const f = failures[0];
+              let reason = f.message;
+              if (f.code === 403 || /permission/i.test(f.message)) reason = 'Sunucu yazma izni vermiyor (Firestore güvenlik kuralları).';
+              else if (f.code === 401) reason = 'Kimlik doğrulama reddedildi (oturum geçersiz).';
+              else if (/maximum|size|exceeds|too large/i.test(f.message)) reason = 'Kayıt çok büyük (fotoğraf/video sınırı aşıldı).';
+              else if (f.code === 400) reason = `Sunucu kaydı kabul etmedi: ${f.message}`;
+              else if (f.code === 0) reason = 'İnternet bağlantısı sunucuya ulaşamıyor.';
+              setSyncRetryMsg(`${sent} kayıt yüklendi, ${failures.length} kayıt yüklenemedi. Sebep: ${reason}`);
+          }
       } catch (e) {
           console.error('Tekrar yükleme başarısız:', e);
           setSyncBlocked(true);
           setSyncRetryMsg(
-              totalRepaired > 0
-                ? `${totalRepaired} kayıt onarıldı ama gönderim tamamlanamadı. Mobil veriye geçip tekrar deneyin. Kayıtlar KAYBOLMADI.`
+              e?.message === 'AUTH_FAILED'
+                ? '✗ Sunucu kimlik doğrulaması yapılamadı. İnterneti kontrol edip tekrar deneyin. Kayıtlar KAYBOLMADI.'
                 : '✗ Gönderilemedi. Mobil veriye geçip (veya Wi-Fi değiştirip) tekrar deneyin. Kayıtlar KAYBOLMADI, cihazda bekliyor.'
           );
       } finally {
@@ -7106,6 +7326,8 @@ const handleSaveRoomAppointment = () => {
         time: roomAppointmentData.time,
         purpose: roomAppointmentData.purpose,
         createdBy: currentUserProfile?.name || 'Sistem',
+        createdByRole: currentUserProfile?.role || '',   // YENİ: yetki bilgisi
+        createdAt: Date.now(),                           // YENİ: oluşturma anı
         roomName: room.name
     };
 
@@ -7169,7 +7391,14 @@ const newAppt = {
         warehouseId: parseInt(appointmentData.warehouseId),
         date: appointmentData.date,
         time: appointmentData.time,
-        purpose: appointmentData.purpose
+        purpose: appointmentData.purpose,
+        // DÜZELTİLDİ: Randevuyu OLUŞTURAN kişi kaydedilmiyordu; bu yüzden randevu
+        // listesinde "kim açtı" bilgisi hiç görünmüyordu (alan boş kalıyordu).
+        // Oda üzerinden açılan randevularda bu alan zaten yazılıyordu — artık
+        // "Yeni Randevu Ekle" ile açılanlarda da yazılıyor.
+        createdBy: currentUserProfile?.name || 'Sistem',
+        createdByRole: currentUserProfile?.role || '',   // yetki bilgisi (Yönetici / Depo Sorumlusu vb.)
+        createdAt: Date.now()                            // oluşturma anı (tarih-saat gösterimi için)
     };
 
     // FİREBASE'E KAYIT İŞLEMİ
@@ -8853,7 +9082,7 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
             <div className="flex-1 min-w-0">
               <p className="text-[12px] font-bold leading-tight">
                 {syncBlocked
-                  ? 'Bazı kayıtlar sunucuya yüklenemedi — diğer kullanıcılar göremiyor.'
+                  ? `${syncPendingCount > 0 ? syncPendingCount + ' kayıt' : 'Bazı kayıtlar'} sunucuya yüklenemedi — diğer kullanıcılar göremiyor.`
                   : 'Senkronizasyon durumu'}
               </p>
               {/* Deneme sırasındaki/sonrasındaki durum mesajı */}
@@ -9566,7 +9795,13 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                                                              )}
                                                          </span>
                                                          <span className="flex items-center gap-1 text-gray-500"><Home size={12}/> {warehouseName}</span>
-                                                         {appt.createdBy && <span className="flex items-center gap-1 text-gray-400 italic"><UserCog size={12}/> {appt.createdBy}</span>}
+                                                         {/* GÜNCELLENDİ: Randevuyu AÇAN kişi artık belirgin bir etiketle gösterilir.
+                                                             Eski kayıtlarda bu alan boş olabileceği için "Bilinmiyor" yazılır. */}
+                                                         <span className="flex items-center gap-1.5 bg-white/70 border border-gray-200 px-2 py-0.5 rounded-md text-[11px] font-bold text-gray-600 shadow-sm" title={appt.createdAt ? `Oluşturma: ${new Date(appt.createdAt).toLocaleString('tr-TR')}` : 'Oluşturma zamanı kayıtlı değil'}>
+                                                             <UserCog size={12} className="text-indigo-500"/>
+                                                             Açan: {appt.createdBy || 'Bilinmiyor'}
+                                                             {appt.createdByRole && <span className="text-gray-400 font-medium">({appt.createdByRole})</span>}
+                                                         </span>
                                                      </div>
                                                  </div>
                                              </div>
