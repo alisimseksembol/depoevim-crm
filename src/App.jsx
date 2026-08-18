@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, where, limit, orderBy, deleteDoc, arrayUnion, waitForPendingWrites } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, where, limit, orderBy, deleteDoc, arrayUnion, waitForPendingWrites, enableNetwork, disableNetwork } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
   Users, 
@@ -480,6 +480,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   // DOKUNULMAMIŞTIR — bekçi tamamen bağımsız çalışır.
   // ═══════════════════════════════════════════════════════════════════
   const [syncBlocked, setSyncBlocked] = useState(false);
+  const [syncRetrying, setSyncRetrying] = useState(false);   // "Tekrar Yükle" butonu çalışıyor mu?
+  const [syncRetryMsg, setSyncRetryMsg] = useState('');      // Kullanıcıya gösterilen deneme sonucu
   useEffect(() => {
       if (!db || !auth) return;
       let cancelled = false;
@@ -502,6 +504,49 @@ const [firebaseUser, setFirebaseUser] = useState(null);
       const interval = setInterval(checkSync, 30000); // sonra her 30 sn'de bir
       return () => { cancelled = true; clearInterval(interval); };
   }, []);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // YENİ EKLENEN: "TEKRAR YÜKLE" — TAKILI KAYITLARI ELLE SUNUCUYA GÖNDERME
+  // Bekleyen kayıtlar Firestore'un YEREL KUYRUĞUNDA durur; kuyruk kaybolmaz,
+  // sadece akmıyordur. Bu buton kuyruğu zorla akıtmak için sırayla dener:
+  //   1) Oturum kontrolü — düşmüşse yeniden açılır (yetkisiz yazma reddedilir).
+  //   2) Ağ bağlantısı KAPATILIP AÇILIR (disableNetwork → enableNetwork):
+  //      Firestore'un takılı kalan sunucu kanalını sıfırlar; yeniden bağlanınca
+  //      SDK bekleyen tüm yazmaları kendisi baştan gönderir. Takılmayı çözen ana adım.
+  //   3) waitForPendingWrites ile kuyruğun GERÇEKTEN boşaldığı doğrulanır (20 sn).
+  // Kayıt verileri bu süreçte ASLA silinmez/değiştirilmez — sadece yeniden gönderilir.
+  // ═══════════════════════════════════════════════════════════════════
+  const handleRetrySync = async () => {
+      if (!db || syncRetrying) return;
+      setSyncRetrying(true);
+      setSyncRetryMsg('Bekleyen kayıtlar sunucuya gönderiliyor...');
+      try {
+          // 1) Oturum yoksa aç — oturumsuz yazma Firestore kuralları tarafından reddedilir
+          if (auth && !auth.currentUser) {
+              setSyncRetryMsg('Oturum yenileniyor...');
+              await signInAnonymously(auth);
+          }
+          // 2) Bağlantıyı sıfırla → SDK bekleyen tüm yazmaları yeniden gönderir
+          setSyncRetryMsg('Bağlantı sıfırlanıyor...');
+          try { await disableNetwork(db); } catch (e) { console.warn('disableNetwork atlandı:', e); }
+          await new Promise(r => setTimeout(r, 800));
+          await enableNetwork(db);
+          // 3) Kuyruk gerçekten boşaldı mı? (20 sn tolerans)
+          setSyncRetryMsg('Kayıtların sunucuya işlendiği doğrulanıyor...');
+          const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('SYNC_TIMEOUT')), 20000));
+          await Promise.race([waitForPendingWrites(db), timeout]);
+          // BAŞARILI: tüm bekleyen kayıtlar sunucuda — artık diğer kullanıcılar da görür
+          setSyncBlocked(false);
+          setSyncRetryMsg('✓ Tüm kayıtlar sunucuya yüklendi. Diğer kullanıcılar artık görebilir.');
+          setTimeout(() => setSyncRetryMsg(''), 6000);
+      } catch (e) {
+          console.error('Tekrar yükleme başarısız:', e);
+          setSyncBlocked(true);
+          setSyncRetryMsg('✗ Yükleme başarısız. Mobil veriye geçip (veya Wi-Fi değiştirip) tekrar deneyin. Kayıtlar KAYBOLMADI, cihazda bekliyor.');
+      } finally {
+          setSyncRetrying(false);
+      }
+  };
 
   // 1. Firebase Kimlik Doğrulama
   useEffect(() => {
@@ -8621,12 +8666,36 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
 
   return (
     <div className="fixed inset-0 flex bg-slate-50 font-sans overflow-hidden">
-      {/* YENİ EKLENEN: SENKRON ENGELİ UYARI ŞERİDİ — kayıtlar sunucuya ulaşmıyorsa
-          kullanıcı ARTIK GÖRÜR (eskiden sessizce kayboluyordu). Kuyruk akınca otomatik kaybolur. */}
-      {syncBlocked && (
-        <div className="fixed top-0 left-0 right-0 z-[100] bg-red-600 text-white text-center px-4 py-2.5 text-sm font-bold shadow-lg flex items-center justify-center gap-2">
-          <AlertCircle size={18} className="shrink-0" />
-          <span>DİKKAT: Girdiğiniz kayıtlar sunucuya ULAŞMIYOR — diğer kullanıcılar göremez! İnternet bağlantınızı kontrol edin, uyarı kaybolana kadar uygulamayı KAPATMAYIN.</span>
+      {/* YENİ EKLENEN: SENKRON ENGELİ UYARI ŞERİDİ + "TEKRAR YÜKLE" BUTONU
+          Kayıtlar sunucuya ulaşmıyorsa kullanıcı ARTIK GÖRÜR ve tek tuşla yeniden
+          göndermeyi deneyebilir. Kuyruk boşalınca şerit otomatik kaybolur.
+          Şerit kompakt tutuldu; üstteki arama/menü çubuğunu kapatmaz. */}
+      {(syncBlocked || syncRetryMsg) && (
+        <div className={`fixed top-0 left-0 right-0 z-[100] px-3 py-2 shadow-lg ${syncBlocked ? 'bg-red-600' : 'bg-emerald-600'} text-white`}>
+          <div className="flex items-center gap-2 max-w-5xl mx-auto">
+            <AlertCircle size={16} className="shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[12px] font-bold leading-tight">
+                {syncBlocked
+                  ? 'Bazı kayıtlar sunucuya yüklenemedi — diğer kullanıcılar göremiyor.'
+                  : 'Senkronizasyon durumu'}
+              </p>
+              {/* Deneme sırasındaki/sonrasındaki durum mesajı */}
+              {syncRetryMsg && <p className="text-[11px] opacity-90 leading-tight mt-0.5">{syncRetryMsg}</p>}
+            </div>
+            {/* TEKRAR YÜKLE: takılı kayıtları elle yeniden gönderir */}
+            {syncBlocked && (
+              <button
+                onClick={handleRetrySync}
+                disabled={syncRetrying}
+                className="shrink-0 flex items-center gap-1.5 bg-white text-red-700 hover:bg-red-50 disabled:opacity-60 disabled:cursor-wait px-3 py-1.5 rounded-lg text-[12px] font-bold shadow-sm transition-colors"
+                title="Sunucuya yüklenemeyen kayıtları tekrar gönder"
+              >
+                <RefreshCcw size={14} className={syncRetrying ? 'animate-spin' : ''} />
+                {syncRetrying ? 'Yükleniyor...' : 'Tekrar Yükle'}
+              </button>
+            )}
+          </div>
         </div>
       )}
       {isSidebarOpen && <div className="fixed inset-0 bg-gray-800/50 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}/>}
