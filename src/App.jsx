@@ -206,6 +206,79 @@ const normalizeStr = (str) => {
 // Mini grafik bileşeni
 // ============================================================================
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔴 KÖK NEDEN VE ÇÖZÜMÜ: MOBİLDE KAYITLARIN SUNUCUYA ULAŞMAMASI
+// SORUN: upload.php erişilemezse (CORS/sunucu kapalı) dosya BASE64'e çevrilip
+// doğrudan Firestore dokümanına yazılıyordu. Firestore'un DOKÜMAN BAŞINA
+// KESİN SINIRI 1 MiB'dir. Telefon kamerasıyla çekilen fotoğraf 3–8 MB olur,
+// base64'e çevrilince ~%33 daha büyür (4–11 MB) → doküman sınırı KATİ ŞEKİLDE
+// AŞILIR → yazma sunucuda KALICI OLARAK REDDEDİLİR / kuyrukta takılır.
+// Sonuç: kaydı giren kişi (yerel önbellekten) görür, DİĞERLERİ ASLA GÖREMEZ.
+// Masaüstünden küçük dosya ekleyenlerde sınır aşılmadığı için sorun çıkmıyordu.
+// "Tekrar Yükle" de işe yaramıyordu: yazma geçersiz olduğu için kaç kez
+// gönderilse de sunucu kabul etmiyor.
+// ÇÖZÜM: Base64'e düşmeden ÖNCE görsel canvas ile küçültülüp sıkıştırılır
+// (uzun kenar 1600px, JPEG kalite kademeli düşürülerek hedef ~600 KB altı).
+// Böylece doküman 1 MiB sınırının altında kalır ve yazma sunucuya ULAŞIR.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Firestore doküman sınırı 1 MiB; medya için güvenli üst sınır (diğer alanlara pay bırakır)
+const MEDIA_MAX_BYTES = 600 * 1024;
+
+// data URL'in yaklaşık byte boyutu (base64 → ham byte)
+const dataUrlBytes = (dataUrl) => {
+    if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return 0;
+    const b64 = dataUrl.split(',')[1] || '';
+    return Math.floor(b64.length * 0.75);
+};
+
+// Bir görsel data URL'ini canvas ile küçültüp hedef boyutun altına indirir.
+// Kalite kademeli düşürülür; yetmezse boyut da küçültülür. Video ise dokunulmaz (null döner).
+const shrinkImageDataUrl = (dataUrl, maxBytes = MEDIA_MAX_BYTES, maxEdge = 1600) => {
+    return new Promise((resolve) => {
+        if (!dataUrl || !String(dataUrl).startsWith('data:image')) { resolve(null); return; }
+        const img = new Image();
+        img.onload = () => {
+            try {
+                let edge = maxEdge;
+                // Kalite ve boyutu sırayla düşürerek hedefin altına inmeye çalış
+                for (let pass = 0; pass < 6; pass++) {
+                    const scale = Math.min(1, edge / Math.max(img.width, img.height));
+                    const w = Math.max(1, Math.round(img.width * scale));
+                    const h = Math.max(1, Math.round(img.height * scale));
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w; canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    const qualities = [0.7, 0.55, 0.4];
+                    for (const q of qualities) {
+                        const out = canvas.toDataURL('image/jpeg', q);
+                        if (dataUrlBytes(out) <= maxBytes) { resolve(out); return; }
+                    }
+                    edge = Math.round(edge * 0.7); // hâlâ büyükse çözünürlüğü daha da düşür
+                }
+                // 6 denemede de inemediyse en agresif hâlini döndür (yine de sınırın çok altında olur)
+                const canvas = document.createElement('canvas');
+                const scale = Math.min(1, 640 / Math.max(img.width, img.height));
+                canvas.width = Math.max(1, Math.round(img.width * scale));
+                canvas.height = Math.max(1, Math.round(img.height * scale));
+                canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL('image/jpeg', 0.4));
+            } catch (e) { console.error('Görsel küçültme hatası:', e); resolve(null); }
+        };
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+    });
+};
+
+// Dosyayı (File) base64 data URL'e çevirir
+const fileToDataUrl = (file) => new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+});
+
 // --- RESİM/DOSYA YÜKLEME YARDIMCI FONKSİYONU ---
 const uploadImageToServer = async (file) => {
     if (!file) return null;
@@ -229,12 +302,37 @@ const uploadImageToServer = async (file) => {
         console.warn('Sunucuya yüklenemedi (API yok veya CORS hatası), Base64 olarak devam ediliyor.', error);
     }
     
-    // Sunucu başarısız olursa veya henüz PHP hazır değilse çökmeyi engellemek için Base64'e çevir
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.readAsDataURL(file);
-    });
+    // ───────────────────────────────────────────────────────────────────────
+    // Sunucu başarısız → Base64'e düşülür. ARTIK HAM HALDE DEĞİL:
+    // Görseller Firestore 1 MiB sınırının altına inecek şekilde sıkıştırılır.
+    // Videolar sıkıştırılamaz; sınırı aşan video Firestore'a YAZILAMAZ, bu yüzden
+    // sessizce kaybolmasın diye kullanıcı UYARILIR ve o dosya atlanır.
+    // ───────────────────────────────────────────────────────────────────────
+    const rawDataUrl = await fileToDataUrl(file);
+    if (!rawDataUrl) return null;
+
+    const isVideo = String(file.type || '').startsWith('video');
+    if (isVideo) {
+        if (dataUrlBytes(rawDataUrl) > MEDIA_MAX_BYTES) {
+            // Sınırı aşan video: yazma kalıcı olarak reddedilirdi → kaydın tamamı sunucuya gitmezdi.
+            alert(
+                'UYARI: Seçilen VİDEO çok büyük olduğu için sunucuya kaydedilemez ve bu yüzden EKLENMEDİ.\n\n' +
+                'Kaydın geri kalanı (oda/müşteri bilgileri) normal şekilde kaydedilecek ve tüm kullanıcılar görecek.\n' +
+                'Video yerine FOTOĞRAF ekleyin; fotoğraflar otomatik küçültülerek sorunsuz kaydedilir.'
+            );
+            return null;
+        }
+        return rawDataUrl; // küçük video → sorunsuz
+    }
+
+    // Görsel: sınırın altındaysa bile mobil kamera dosyaları için küçültmek faydalı
+    if (dataUrlBytes(rawDataUrl) <= MEDIA_MAX_BYTES) return rawDataUrl;
+    const shrunk = await shrinkImageDataUrl(rawDataUrl, MEDIA_MAX_BYTES);
+    if (shrunk) return shrunk;
+
+    // Küçültme mümkün olmadıysa (bozuk dosya vb.) ham veriyi YAZMA — kaydı zehirlemesin
+    alert('UYARI: Seçilen dosya işlenemedi ve çok büyük olduğu için eklenmedi. Kaydın geri kalanı normal kaydedilecek.');
+    return null;
 };
 
 // YENİ: Arşiv belgesini (base64 data URL veya normal http URL) güvenli şekilde yeni sekmede açar.
@@ -516,33 +614,111 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   //   3) waitForPendingWrites ile kuyruğun GERÇEKTEN boşaldığı doğrulanır (20 sn).
   // Kayıt verileri bu süreçte ASLA silinmez/değiştirilmez — sadece yeniden gönderilir.
   // ═══════════════════════════════════════════════════════════════════
+  // Bir oda/müşteri nesnesindeki TÜM medya alanlarını 1 MiB sınırının altına indirir.
+  // Görseller sıkıştırılır; sıkıştırılamayan (video/bozuk) ve sınırı aşan alanlar
+  // dokümandan çıkarılır — böylece kaydın KENDİSİ sunucuya ulaşır ve herkes görür.
+  const shrinkRecordMedia = async (obj) => {
+      let changed = false;
+      let droppedVideo = 0;
+      const fix = async (val) => {
+          if (typeof val === 'string' && val.startsWith('data:') && dataUrlBytes(val) > MEDIA_MAX_BYTES) {
+              if (val.startsWith('data:image')) {
+                  const s = await shrinkImageDataUrl(val, MEDIA_MAX_BYTES);
+                  if (s) { changed = true; return s; }
+              }
+              changed = true; droppedVideo++;
+              return null; // sıkıştırılamayan büyük medya (video) çıkarılır
+          }
+          if (Array.isArray(val)) {
+              const out = [];
+              for (const item of val) out.push(await fix(item));
+              return out;
+          }
+          if (val && typeof val === 'object') {
+              const out = {};
+              for (const k of Object.keys(val)) out[k] = await fix(val[k]);
+              return out;
+          }
+          return val;
+      };
+      const fixed = await fix(obj);
+      return { fixed, changed, droppedVideo };
+  };
+
   const handleRetrySync = async () => {
       if (!db || syncRetrying) return;
       setSyncRetrying(true);
-      setSyncRetryMsg('Bekleyen kayıtlar sunucuya gönderiliyor...');
+      let totalRepaired = 0, totalDroppedVideo = 0;
       try {
           // 1) Oturum yoksa aç — oturumsuz yazma Firestore kuralları tarafından reddedilir
           if (auth && !auth.currentUser) {
               setSyncRetryMsg('Oturum yenileniyor...');
               await signInAnonymously(auth);
           }
-          // 2) Bağlantıyı sıfırla → SDK bekleyen tüm yazmaları yeniden gönderir
-          setSyncRetryMsg('Bağlantı sıfırlanıyor...');
+
+          // ─────────────────────────────────────────────────────────────────
+          // 2) ASIL ÇÖZÜM: SINIRI AŞAN KAYITLARI ONAR
+          // Takılan yazmaların sebebi ağ değil, dokümanın 1 MiB sınırını aşmasıdır.
+          // Bu yüzden yalnızca "yeniden göndermek" işe yaramıyordu. Burada büyük
+          // medya içeren oda/müşteri kayıtları küçültülerek YENİDEN yazılır;
+          // küçülen doküman sunucu tarafından kabul edilir ve herkes görür.
+          // ─────────────────────────────────────────────────────────────────
+          setSyncRetryMsg('Sunucuya sığmayan kayıtlar taranıyor...');
+          // Doküman boyutu ölçümü: JSON uzunluğu, Firestore doküman boyutuna iyi bir yaklaşımdır.
+          const docTooBig = (o) => { try { return JSON.stringify(o).length > MEDIA_MAX_BYTES; } catch (e) { return false; } };
+          const oversizedRooms = (rooms || []).filter(docTooBig);
+          const oversizedCustomers = (customers || []).filter(docTooBig);
+
+          for (const r of oversizedRooms) {
+              setSyncRetryMsg(`Onarılıyor: ${r.name || 'Oda'} — görseller küçültülüyor...`);
+              const { fixed, changed, droppedVideo } = await shrinkRecordMedia(r);
+              if (!changed) continue;
+              const { id, ...payload } = fixed;
+              try {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(r.id)), payload, { merge: true });
+                  setRooms(prev => prev.map(x => String(x.id) === String(r.id) ? { ...x, ...payload } : x));
+                  totalRepaired++; totalDroppedVideo += droppedVideo;
+              } catch (e) { console.error('Oda onarım hatası:', r.id, e); }
+          }
+          for (const c of oversizedCustomers) {
+              setSyncRetryMsg(`Onarılıyor: ${c.name || 'Müşteri'} — belgeler küçültülüyor...`);
+              const { fixed, changed, droppedVideo } = await shrinkRecordMedia(c);
+              if (!changed) continue;
+              const { id, ...payload } = fixed;
+              try {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(c.id)), payload, { merge: true });
+                  setCustomers(prev => prev.map(x => String(x.id) === String(c.id) ? { ...x, ...payload } : x));
+                  totalRepaired++; totalDroppedVideo += droppedVideo;
+              } catch (e) { console.error('Müşteri onarım hatası:', c.id, e); }
+          }
+
+          // 3) Bağlantıyı sıfırla → SDK bekleyen tüm yazmaları yeniden gönderir
+          setSyncRetryMsg('Bağlantı sıfırlanıyor ve kayıtlar gönderiliyor...');
           try { await disableNetwork(db); } catch (e) { console.warn('disableNetwork atlandı:', e); }
           await new Promise(r => setTimeout(r, 800));
           await enableNetwork(db);
-          // 3) Kuyruk gerçekten boşaldı mı? (20 sn tolerans)
+
+          // 4) Kuyruk gerçekten boşaldı mı? (25 sn tolerans)
           setSyncRetryMsg('Kayıtların sunucuya işlendiği doğrulanıyor...');
-          const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('SYNC_TIMEOUT')), 20000));
+          const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('SYNC_TIMEOUT')), 25000));
           await Promise.race([waitForPendingWrites(db), timeout]);
+
           // BAŞARILI: tüm bekleyen kayıtlar sunucuda — artık diğer kullanıcılar da görür
           setSyncBlocked(false);
-          setSyncRetryMsg('✓ Tüm kayıtlar sunucuya yüklendi. Diğer kullanıcılar artık görebilir.');
-          setTimeout(() => setSyncRetryMsg(''), 6000);
+          setSyncRetryMsg(
+              `✓ Tüm kayıtlar sunucuya yüklendi, diğer kullanıcılar artık görebilir.` +
+              (totalRepaired > 0 ? ` (${totalRepaired} kayıttaki görseller küçültüldü)` : '') +
+              (totalDroppedVideo > 0 ? ` — ${totalDroppedVideo} adet çok büyük video eklenemedi, lütfen fotoğraf olarak tekrar yükleyin.` : '')
+          );
+          setTimeout(() => setSyncRetryMsg(''), 12000);
       } catch (e) {
           console.error('Tekrar yükleme başarısız:', e);
           setSyncBlocked(true);
-          setSyncRetryMsg('✗ Yükleme başarısız. Mobil veriye geçip (veya Wi-Fi değiştirip) tekrar deneyin. Kayıtlar KAYBOLMADI, cihazda bekliyor.');
+          setSyncRetryMsg(
+              totalRepaired > 0
+                ? `${totalRepaired} kayıt onarıldı ama gönderim tamamlanamadı. Mobil veriye geçip tekrar deneyin. Kayıtlar KAYBOLMADI.`
+                : '✗ Gönderilemedi. Mobil veriye geçip (veya Wi-Fi değiştirip) tekrar deneyin. Kayıtlar KAYBOLMADI, cihazda bekliyor.'
+          );
       } finally {
           setSyncRetrying(false);
       }
