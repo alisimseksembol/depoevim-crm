@@ -7291,6 +7291,78 @@ const handleChangeRoomConfirm = async () => {
           const zamPayDay = Math.min(anchorD.getDate(), zamMonthLastDay);
           const zamMonthsStr = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 
+          // ═══════════════════════════════════════════════════════════════════
+          // YENİ EKLENEN — KESİN ÇÖZÜM: GEÇMİŞ AYLARI ZAM ANINDA KİLİTLE
+          // SORUN: Zam sonrası geçmiş ayların kirası değişiyordu. Sebebi, geçmiş
+          // ayların her ekran açılışında YENİDEN HESAPLANMASI; hesaplama odanın
+          // güncel (zamlı) kirasına ve güncel KDV durumuna bakınca, "sonradan
+          // KDV'li yapılan" odalarda ilk yılların kirası da yükseliyordu.
+          // (Örn: 2022'de 500 TL olan T-103, zam sonrası 2.750 TL görünüyordu.)
+          //
+          // ÇÖZÜM: Zam UYGULANIRKEN, zam ayından ÖNCEKİ her ay için o ayın
+          // ZAM ÖNCESİ tutarı hesaplanıp cariye SABİT kayıt (override) olarak
+          // yazılır. Böylece geçmiş, hesaplamaya bağımlı olmaktan çıkar ve
+          // ileride ne olursa olsun DEĞİŞMEZ — mühürlenmiş olur.
+          // Kurallar:
+          //   • Zaten elle düzenlenmiş aylara DOKUNULMAZ (kullanıcı kaydı korunur).
+          //   • Hediye / ücretsiz aylar atlanır (0 TL kalır).
+          //   • Her ayın KDV durumu kendi dönemine göre yazılır (kdvStartKey).
+          //   • Ödeme günü o ayda yoksa ayın son gününe çekilir (28/29/30/31 güvenliği).
+          // ═══════════════════════════════════════════════════════════════════
+          const pastSnapshots = [];
+          const _snapEntryD = parseDateLocal(room.entryDate || '2026-01-01');
+          const _snapAnchor = room.paymentDate && room.paymentDate.includes('-') ? parseDateLocal(room.paymentDate) : _snapEntryD;
+          const _snapTargetDay = room.paymentDate && !room.paymentDate.includes('-') ? parseInt(room.paymentDate) : _snapAnchor.getDate();
+          const _snapStartIdx = _snapAnchor.getFullYear() * 12 + _snapAnchor.getMonth();
+          let _sy = _snapAnchor.getFullYear(), _sm = _snapAnchor.getMonth(), _guard = 0;
+
+          while ((_sy * 12 + _sm) < _effIdx && _guard < 600) {
+              const _sKey = `${_sy}-${_sm}`;
+              const _sTxId = `${ovPrefix}${_sKey}`;
+              const _alreadySet = keptOverrides.some(o => o && o.txId === _sTxId);
+              const _monthCounter = (_sy * 12 + _sm) - _snapStartIdx;
+              const _isGiftOrFree = isGiftedMonth(room, _monthCounter) || room.isFreeRoom;
+
+              if (!_alreadySet && !_isGiftOrFree) {
+                  // ZAM ÖNCESİ oda nesnesi (room) ile o ayın kirası → geçmiş aynen korunur
+                  const _fee = getRoomFeeForMonth(room, _sy, _sm);
+                  // O ayın KDV durumu: sonradan KDV'li yapıldıysa geçiş ayından itibaren geçerli
+                  let _mHasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
+                  let _mConverted = false;
+                  if (room.kdvStartKey) {
+                      const _sp = String(room.kdvStartKey).split('-');
+                      const _onward = (_sy > parseInt(_sp[0])) || (_sy === parseInt(_sp[0]) && _sm >= parseInt(_sp[1]));
+                      _mHasKdv = _onward;
+                      _mConverted = _onward;
+                  }
+                  let _tot, _base, _kdv;
+                  if (_mConverted) {
+                      // Dönüşüm sonrası: tutar KDV DAHİL kabul edilir, KDV içeriden ayrıştırılır
+                      _tot = _fee;
+                      _base = Math.round((_fee / 1.20) * 100) / 100;
+                      _kdv = Math.round((_fee - _base) * 100) / 100;
+                  } else {
+                      _tot = _mHasKdv ? Math.round(_fee * 1.20 * 100) / 100 : _fee;
+                      _base = _fee;
+                      _kdv = _mHasKdv ? Math.round(_fee * 0.20 * 100) / 100 : 0;
+                  }
+                  const _lastDay = new Date(_sy, _sm + 1, 0).getDate();
+                  const _payDay = Math.min(_snapTargetDay, _lastDay);
+                  pastSnapshots.push({
+                      txId: _sTxId,
+                      date: new Date(_sy, _sm, _payDay).getTime(),
+                      desc: `${room.name} Odası - ${zamMonthsStr[_sm]} ${_sy} Kirası`,
+                      debt: _tot,
+                      baseDebt: _base,
+                      kdvDebt: _kdv,
+                      credit: 0,
+                      frozenByIncrease: true   // bu kaydın zam anında mühürlendiğini belirtir
+                  });
+              }
+              _sm++; if (_sm > 11) { _sm = 0; _sy++; }
+              _guard++;
+          }
+
           // Zam ayına yeni (zamlı) tutarlı borç override'ı ekle
           const zamOverride = {
               txId: `${ovPrefix}${effectiveKey}`,
@@ -7301,7 +7373,14 @@ const handleChangeRoomConfirm = async () => {
               kdvDebt: kdvNew,     // KDV tutarı
               credit: 0
           };
-          const updatedOverrides = [...keptOverrides.filter(o => o.txId !== zamOverride.txId), zamOverride];
+          // GÜNCELLENDİ: Artık kilitlenen geçmiş aylar (pastSnapshots) da cariye yazılır.
+          // Sıra önemlidir: mevcut kayıtlar → mühürlenen geçmiş aylar → zam ayının yeni kaydı.
+          const _snapIds = new Set(pastSnapshots.map(s => s.txId));
+          const updatedOverrides = [
+              ...keptOverrides.filter(o => o.txId !== zamOverride.txId && !_snapIds.has(o.txId)),
+              ...pastSnapshots,
+              zamOverride
+          ];
 
           if (db && firebaseUser) {
               try {
