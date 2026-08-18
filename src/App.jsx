@@ -7001,21 +7001,41 @@ const handleChangeRoomConfirm = async () => {
       let effective = Number(room.monthlyFee || 0);
       if (Array.isArray(room.increaseHistory) && room.increaseHistory.length > 0) {
           const targetIdx = year * 12 + month;
-          // DÜZELTME: Kira geçmişte ASLA DÜŞMEMELİ. Önceden "en son geçerli kayıt" seçiliyordu;
-          // bu, yanlışlıkla düşük girilmiş bir zam kaydı varsa (ör. 250 TL) o kaydın seçilip
-          // önceki doğru/yüksek kirayı (ör. 4.200 TL) ezmesine yol açıyordu. Artık o aya kadar
-          // GEÇERLİ OLMUŞ TÜM kayıtların EN YÜKSEĞİ alınır — "Senesi Dolan Odalar" listesindeki
-          // (getRoomLatestFee) mevcut kira ile birebir tutarlı olur.
-          let best = effective;
-          room.increaseHistory.forEach(h => {
-              const parts = String(h.effectiveKey).split('-');
-              const hIdx = parseInt(parts[0]) * 12 + parseInt(parts[1]);
-              if (hIdx <= targetIdx) {
-                  const f = Number(h.baseFee);
-                  if (!isNaN(f) && f > best) best = f;
-              }
-          });
-          effective = best;
+          // ═══════════════════════════════════════════════════════════════════
+          // DÜZELTİLDİ: ZAM ARTIK GEÇMİŞ AYLARI ETKİLEMİYOR
+          // ESKİ HATA: Hesap "effective = room.monthlyFee" (yani ZAMLI GÜNCEL kira)
+          // ile başlayıp o aya kadar geçerli kayıtların EN YÜKSEĞİNİ alıyordu.
+          // Başlangıç değeri güncel kira olduğu için hiçbir eski kira onu geçemiyor
+          // ve 2023/2024 gibi GEÇMİŞ aylar da yeni zamlı tutarla hesaplanıyordu.
+          // (Sonradan KDV'li yapılan odalarda bu, geçmiş cariyi tamamen bozuyordu.)
+          //
+          // YENİ MANTIK — "kira geçmişte düşmez" kuralı korunarak:
+          //   1) Zam kayıtları etkin aya göre KRONOLOJİK sıralanır.
+          //   2) Kayıtlar üzerinde yürüyen maksimum (running max) uygulanır; böylece
+          //      yanlışlıkla düşük girilmiş bir kayıt önceki doğru kirayı EZEMEZ.
+          //   3) İstenen ay için, o aya kadar YÜRÜRLÜĞE GİRMİŞ EN SON kayıt seçilir —
+          //      sonraki zamlar geçmişe SIZMAZ.
+          //   4) İstenen ay ilk kayıttan da eskiyse, EN ESKİ kayıt (orijinal kira) kullanılır;
+          //      artık güncel zamlı kiraya düşülmez.
+          // ═══════════════════════════════════════════════════════════════════
+          const norm = room.increaseHistory
+              .map(h => {
+                  const parts = String(h.effectiveKey).split('-');
+                  return { idx: parseInt(parts[0]) * 12 + parseInt(parts[1]), fee: Number(h.baseFee) };
+              })
+              .filter(x => !isNaN(x.idx) && !isNaN(x.fee) && x.fee > 0)
+              .sort((a, b) => a.idx - b.idx);
+
+          if (norm.length > 0) {
+              // Yürüyen maksimum: kira zaman içinde asla düşmez
+              let run = 0;
+              norm.forEach(x => { run = Math.max(run, x.fee); x.fee = run; });
+              // O aya kadar yürürlüğe girmiş EN SON kayıt
+              const applicable = norm.filter(x => x.idx <= targetIdx);
+              effective = applicable.length > 0
+                  ? applicable[applicable.length - 1].fee   // geçerli dönemin kirası
+                  : norm[0].fee;                            // ilk kayıttan önceki aylar → orijinal kira
+          }
       }
       return effective;
   };
@@ -7174,10 +7194,47 @@ const handleChangeRoomConfirm = async () => {
       const _effMon = _effIdx % 12;
       const effectiveKey = `${_effYear}-${_effMon}`;
 
-      // increaseHistory boşsa, geçmiş ayların eski ücretle kalması için başlangıç kaydını da ekle
+      // ═══════════════════════════════════════════════════════════════════════
+      // DÜZELTİLDİ: GEÇMİŞ ZAM DÖNEMLERİ ARTIK DOĞRU KURULUYOR
+      // ESKİ HATA: increaseHistory boşsa SADECE tek bir başlangıç kaydı yazılıyordu
+      // ve bu kayda "oldFee" (yani SON zamdan hemen önceki kira) konuyordu. Oda
+      // yıllardır kiradaysa (ör. 2023 girişli, her yıl zamlı) bu tek kayıt
+      // 2023'ten itibaren TÜM geçmişi son kiraya eşitliyordu — 2023 ekstresinde
+      // 2026 kirası görünmesinin sebebi buydu.
+      // ÇÖZÜM: Oda zaten "priceHistory" içinde her zammın oldFee/newFee/yıl
+      // bilgisini tutuyor. Bu kayıtlardan dönem dönem geçmiş yeniden kurulur:
+      //   • Orijinal kira  = EN ESKİ zammın oldFee'si → giriş ayından itibaren geçerli
+      //   • Her zam        = kendi yıldönümü ayından itibaren geçerli
+      // Böylece her ay kendi döneminin kirasıyla hesaplanır, geçmiş bozulmaz.
+      // NOT: "Geçmiş Zam" (manuel düzenleme) kayıtları sayısal oldFee içermediği
+      // için bu kurguya dahil edilmez; onlar ayrı override kayıtlarıyla çalışır.
+      // ═══════════════════════════════════════════════════════════════════════
       let baseHistory = Array.isArray(room.increaseHistory) ? [...room.increaseHistory] : [];
+      const _anchorY = anchorD.getFullYear();
+      const _anchorM = anchorD.getMonth();
+      const _hasKey = (k) => baseHistory.some(h => String(h.effectiveKey) === k);
+
+      // priceHistory'den yalnızca gerçek (otomatik) zam kayıtlarını al
+      const _realPast = (Array.isArray(room.priceHistory) ? room.priceHistory : []).filter(p =>
+          p && p.anniversaryYear && !isNaN(Number(p.newFee)) && Number(p.newFee) > 0 &&
+          !isNaN(Number(p.oldFee)) && Number(p.oldFee) > 0 && p.percentage !== 'Geçmiş Zam'
+      ).sort((a, b) => Number(a.anniversaryYear) - Number(b.anniversaryYear));
+
+      if (_realPast.length > 0) {
+          // 1) Orijinal kira → giriş/ödeme ayından itibaren
+          const _origFee = Number(_realPast[0].oldFee);
+          const _origKey = `${_anchorY}-${_anchorM}`;
+          if (!_hasKey(_origKey)) baseHistory.push({ effectiveKey: _origKey, baseFee: _origFee });
+          // 2) Her geçmiş zam → kendi yıldönümü ayından itibaren
+          _realPast.forEach(p => {
+              const k = `${Number(p.anniversaryYear)}-${_anchorM}`;
+              if (!_hasKey(k)) baseHistory.push({ effectiveKey: k, baseFee: Number(p.newFee) });
+          });
+      }
+
+      // Hiç geçmiş bilgisi yoksa (ilk zam): giriş ayından itibaren eski kira geçerli sayılır
       if (baseHistory.length === 0) {
-          baseHistory.push({ effectiveKey: `${anchorD.getFullYear()}-${anchorD.getMonth()}`, baseFee: oldFee });
+          baseHistory.push({ effectiveKey: `${_anchorY}-${_anchorM}`, baseFee: oldFee });
       }
       // Aynı etkin ay varsa güncelle, yoksa ekle
       const newIncreaseHistory = [...baseHistory.filter(h => h.effectiveKey !== effectiveKey), { effectiveKey, baseFee: newFee }];
@@ -8597,19 +8654,12 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
                   // YENİ EKLENEN: Zam geçmişi (increaseHistory) — o aya geçerli baz kira seçilir.
                   // Zam yalnızca etkin ayından (effectiveKey) itibaren geçerli olur; önceki aylar eski ücretle kalır.
                   // increaseHistory yoksa odanın güncel monthlyFee'si tüm aylara uygulanır (eski davranış korunur).
-                  let effectiveBase = baseAmt;
-                  if (Array.isArray(room.increaseHistory) && room.increaseHistory.length > 0) {
-                      const monthIndexVal = year * 12 + month;
-                      let chosen = null;
-                      room.increaseHistory.forEach(h => {
-                          const parts = String(h.effectiveKey).split('-');
-                          const hIdx = parseInt(parts[0]) * 12 + parseInt(parts[1]);
-                          if (hIdx <= monthIndexVal) {
-                              if (!chosen || hIdx > chosen.idx) chosen = { idx: hIdx, fee: Number(h.baseFee) };
-                          }
-                      });
-                      if (chosen) effectiveBase = chosen.fee;
-                  }
+                  // DÜZELTİLDİ: Buradaki hesap kendi içinde tekrar yazılmıştı ve zam kaydı
+                  // bulunamayan (ilk zamdan ESKİ) aylarda "baseAmt" (odanın GÜNCEL zamlı kirası)
+                  // kullanıyordu — bu yüzden zam yapılınca geçmiş ayların cari tutarları da
+                  // değişiyordu. Artık tek kaynak olan getRoomFeeForMonth kullanılıyor:
+                  // her ay, YALNIZCA o ayda yürürlükte olan kira ile hesaplanır.
+                  const effectiveBase = getRoomFeeForMonth(room, year, month);
                   // YENİ EKLENEN: "Carisini KDV'li Yap" sonrası, sadece geçiş ayından (kdvStartKey) itibaren
                   // borçlandırma KDV dahil işlenir; öncesi eski (KDV'siz) haliyle kalır.
                   // kdvStartKey yoksa odanın kendi hasKdv değeri tüm aylara uygulanır (eski davranış korunur).
