@@ -4860,6 +4860,9 @@ const [isPastIncreaseModalOpen, setIsPastIncreaseModalOpen] = useState(false);
 
   // --- HEDİYE AY STATE'LERİ ---
   const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
+  // YENİ: Hediyenin BAŞLAYACAĞI ay ('YYYY-AyIndex'). Varsayılan: içinde bulunulan ay.
+  // Böylece "Hediye Ay Ver" butonu, sözleşme yılının başına değil, SEÇİLEN AYA hediye uygular.
+  const [giftStartMonthKey, setGiftStartMonthKey] = useState(`${new Date().getFullYear()}-${new Date().getMonth()}`);
   const [giftMonthValue, setGiftMonthValue] = useState(1);
 
   // --- ÜCRETSİZ ODA STATE'LERİ ---
@@ -4989,10 +4992,20 @@ const handleEntryExitSave = async () => {
       const customerToUpdate = customers.find(c => c.name === selectedRoomDetail.customerName);
       const roomToUpdate = rooms.find(r => r.id === selectedRoomId);
 
+      // ═══════════════════════════════════════════════════════════════════════
+      // YENİ EKLENEN: ÇIKIŞ YAPMIŞ MÜŞTERİYE ÜCRET YANSITILMAZ
+      // Depodan tamamen çıkmış (aktif odası kalmamış) bir müşterinin carisine
+      // mühür ücreti eklenmesi engellenir — çıkış sonrası bakiye SABİT kalmalıdır.
+      // ═══════════════════════════════════════════════════════════════════════
+      const __custHasActiveRoom = customerToUpdate
+          ? rooms.some(r => r.customerName && r.customerName === customerToUpdate.name)
+          : false;
+      const __chargeSealFee = !!customerToUpdate && __custHasActiveRoom;
+
       if (db && firebaseUser) {
           try {
-              // 1. Müşteri Carisine Mühür Ücreti Ekle
-              if (customerToUpdate) {
+              // 1. Müşteri Carisine Mühür Ücreti Ekle (yalnızca AKTİF odası olan müşteriye)
+              if (__chargeSealFee) {
                   const newDebt = {
                       id: Date.now(),
                       type: 'seal_fee',
@@ -5136,18 +5149,31 @@ const handleEntryExitSave = async () => {
   };
 
  const handleSetGiftMonths = async (months) => {
-      // YENİ: Hediye, verildiği anda BULUNULAN SÖZLEŞME YILININ ilk aylarına uygulanır.
-      // Girişten bugüne geçen TAM yıl sayısı bulunur; hediye o yılın başından (tamYıl*12) başlar.
-      // Örn: 3. yılı dolan odaya 2 ay hediye → yeni yılın (37. ve 38. ay) ilk 2 ayı hediye olur.
+      // ═══════════════════════════════════════════════════════════════════════
+      // GÜNCELLENDİ: HEDİYE ARTIK SEÇİLEN AYA UYGULANIR
+      // ESKİ DAVRANIŞ: Hediye, bulunulan SÖZLEŞME YILININ İLK AYINDAN başlıyordu.
+      // Bu yüzden Ağustos'ta hediye verildiğinde, hediye aylar öncesine (yıl
+      // başına) düşüyor; içinde bulunulan ay 0 TL olmuyordu.
+      // YENİ DAVRANIŞ: Pencerede seçilen ay (varsayılan: içinde bulunulan ay)
+      // hediye ayı olur. Hediye o aydan itibaren "months" kadar ay sürer.
+      // Cari ekstrede bu aylar 0 TL ve "(HEDİYE)" etiketiyle görünür.
+      // ═══════════════════════════════════════════════════════════════════════
       let giftStartMonthIndex = 0;
       const giftRoom = rooms.find(r => String(r.id) === String(selectedRoomId));
-      const entry = giftRoom ? parseAnyDate(giftRoom.entryDate) : null;
-      if (months > 0 && entry) {
-          const now = new Date();
-          let diffMonths = (now.getFullYear() - entry.getFullYear()) * 12 + (now.getMonth() - entry.getMonth());
-          if (now.getDate() < entry.getDate()) diffMonths -= 1; // Yıldönümü günü henüz gelmediyse tam ay sayılmaz
-          const fullYears = Math.max(0, Math.floor(diffMonths / 12));
-          giftStartMonthIndex = fullYears * 12;
+
+      if (months > 0 && giftRoom) {
+          // Ay sayacının başlangıcı: cari/oda dökümüyle BİREBİR aynı çıpa (ödeme tarihi, yoksa giriş tarihi)
+          const _entryD = parseDateLocal(giftRoom.entryDate || '2026-01-01');
+          const _anchorD = giftRoom.paymentDate && giftRoom.paymentDate.includes('-')
+              ? parseDateLocal(giftRoom.paymentDate) : _entryD;
+          const _anchorIdx = _anchorD.getFullYear() * 12 + _anchorD.getMonth();
+
+          // Seçilen hediye ayı
+          const _sel = String(giftStartMonthKey).split('-');
+          const _selIdx = parseInt(_sel[0]) * 12 + parseInt(_sel[1]);
+
+          // Hediye, girişten önceki bir aya verilemez → en erken giriş ayı
+          giftStartMonthIndex = Math.max(0, _selIdx - _anchorIdx);
       }
 
       // Yerel state ANINDA güncellenir (önizleme modunda da çalışır)
@@ -5158,6 +5184,33 @@ const handleEntryExitSave = async () => {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(selectedRoomId)), { giftMonths: months, giftStartMonthIndex }, { merge: true });
           } catch(e) { console.error("Firebase Hediye Ay Hatası:", e); }
       }
+
+      // YENİ: Hediye verilen aylarda cari üzerinde ESKİ borç kaydı (override) varsa temizlenir;
+      // aksi halde o ay 0 TL yerine eski tutarıyla görünmeye devam ederdi.
+      const _giftCustomer = customers.find(c => c.name === giftRoom?.customerName);
+      if (_giftCustomer && months > 0 && giftRoom) {
+          const _ovPrefix = `debt-${giftRoom.id}-`;
+          const _entryD2 = parseDateLocal(giftRoom.entryDate || '2026-01-01');
+          const _anchorD2 = giftRoom.paymentDate && giftRoom.paymentDate.includes('-') ? parseDateLocal(giftRoom.paymentDate) : _entryD2;
+          const _startIdx = _anchorD2.getFullYear() * 12 + _anchorD2.getMonth() + giftStartMonthIndex;
+          // Hediye kapsamındaki ayların anahtarları
+          const _giftKeys = new Set();
+          for (let i = 0; i < months; i++) {
+              const _idx = _startIdx + i;
+              _giftKeys.add(`${_ovPrefix}${Math.floor(_idx / 12)}-${_idx % 12}`);
+          }
+          const _cleaned = (_giftCustomer.ledgerOverrides || []).filter(o => !(o && _giftKeys.has(o.txId)));
+          if (_cleaned.length !== (_giftCustomer.ledgerOverrides || []).length) {
+              if (db && firebaseUser) {
+                  try {
+                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(_giftCustomer.id)), { ledgerOverrides: _cleaned }, { merge: true });
+                  } catch (e) { console.error('Hediye Ay Cari Temizleme Hatası:', e); }
+              } else {
+                  setCustomers(prev => prev.map(c => c.id === _giftCustomer.id ? { ...c, ledgerOverrides: _cleaned } : c));
+              }
+          }
+      }
+
       setIsGiftModalOpen(false);
   };
 
@@ -8912,6 +8965,32 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
       const today = new Date();
       today.setHours(23, 59, 59, 999);
 
+      // ═══════════════════════════════════════════════════════════════════════
+      // YENİ EKLENEN: ÇIKIŞ SONRASI CARİ DONDURMA
+      // SORUN: Depodan çıkış yapan müşterilerde gecikme faizi her 30 günde bir
+      // işlemeye DEVAM ediyordu. Müşteri aylar önce çıkmış olsa bile bakiyesi
+      // kendiliğinden büyüyor, cari hiç sabitlenmiyordu.
+      // ÇÖZÜM: Müşterinin AKTİF odası kalmamışsa (tümünden çıkış yapmışsa),
+      // en son çıkış tarihi "dondurma anı" kabul edilir. Bu andan SONRASI için
+      // yeni faiz ÜRETİLMEZ; bakiye çıkıştaki haliyle sabit kalır.
+      // NOT: Çıkıştan ÖNCE doğmuş faizler aynen korunur (silinmez), ayrıca
+      // çıkış sonrası yapılan TAHSİLATLAR normal işler — borç kapatılabilsin.
+      // ═══════════════════════════════════════════════════════════════════════
+      const __activeRooms = rooms.filter(r => r.customerName && r.customerName === customer.name);
+      let interestFreezeTime = null;
+      if (__activeRooms.length === 0) {
+          let __latestExit = 0;
+          (customer.roomHistory || []).forEach(h => {
+              const _d = parseAnyDate(h?.exitDate);
+              if (_d && !isNaN(_d.getTime())) __latestExit = Math.max(__latestExit, _d.getTime());
+          });
+          if (__latestExit > 0) {
+              const _fz = new Date(__latestExit);
+              _fz.setHours(23, 59, 59, 999);   // çıkış gününün sonu
+              interestFreezeTime = _fz.getTime();
+          }
+      }
+
       // GÜNCELLENDİ: Faiz artık AKTİVASYON TARİHİNE bağlı DEĞİL — aktif edildiğinde, müşterinin
       // SON TAHSİLATINDAN (veya ana borcun en son sıfırlandığı andan) itibaren GEÇMİŞE DÖNÜK işler.
       // Kurallar:
@@ -8976,7 +9055,10 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
 
       const baseTransactions = [...modifiedLedger];
       // Bugüne kadar olan faizleri tetiklemek için dummy bir hareket ekliyoruz.
-      baseTransactions.push({ id: 'dummy-today', date: today, debt: 0, credit: 0, isDummy: true });
+      // GÜNCELLENDİ: Çıkış yapmış müşteride tetikleyici tarih ÇIKIŞ GÜNÜdür; böylece
+      // çıkıştan bugüne kadar geçen aylar için faiz üretilmez.
+      const __interestTriggerDate = interestFreezeTime ? new Date(Math.min(today.getTime(), interestFreezeTime)) : today;
+      baseTransactions.push({ id: 'dummy-today', date: __interestTriggerDate, debt: 0, credit: 0, isDummy: true });
 
       baseTransactions.forEach(tx => {
           // Eğer borç varsa ve üzerinden zaman geçmişse faizi uygula (VE AYARLARDAN AKTİF EDİLDİYSE VE MÜŞTERİ MUAF DEĞİLSE)
@@ -8984,6 +9066,8 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
               let nextInterestDate = addDays(lastInterestAppliedDate, 30);
               
               while (nextInterestDate <= tx.date) {
+                  // YENİ: ÇIKIŞ SONRASI FAİZ ÜRETİLMEZ — bakiye çıkış anında dondurulur.
+                  if (interestFreezeTime && nextInterestDate.getTime() > interestFreezeTime) break;
                   // YENİ: Faiz yalnızca aktivasyon tarihinden VE ana borcun en son sıfırlandığı andan
                   // (hangisi sonraysa) sonrasına işlenir. Böylece ödenip sıfırlanmış geçmiş dönemlere faiz gelmez.
                   // GÜNCELLENDİ: Kapı olarak interestGateTime kullanılır — tahsilat yapılınca
@@ -13515,7 +13599,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                        <button onClick={() => { if(!checkActionPerm('action-hediye-ay')) return; handleSetGiftMonths(0); }} className="text-[10px] text-purple-500 hover:text-purple-800 underline" title="Hediyeyi Kaldır">Kaldır</button>
                                     </div>
                                  ) : (
-                                    <button onClick={() => { if(!checkActionPerm('action-hediye-ay')) return; setGiftMonthValue(1); setIsGiftModalOpen(true); }} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-purple-50 hover:bg-purple-100 border border-purple-100 text-purple-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
+                                    <button onClick={() => { if(!checkActionPerm('action-hediye-ay')) return; setGiftMonthValue(1); setGiftStartMonthKey(`${new Date().getFullYear()}-${new Date().getMonth()}`); setIsGiftModalOpen(true); }} className="group flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl bg-purple-50 hover:bg-purple-100 border border-purple-100 text-purple-700 font-bold text-xs transition-all hover:-translate-y-0.5 hover:shadow-md">
                                        <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center shadow-sm shadow-purple-500/30 group-hover:scale-110 transition-transform"><Gift size={18}/></div>
                                        <span className="text-center leading-tight">Hediye Ay Ver</span>
                                     </button>
@@ -16748,7 +16832,34 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  <button onClick={() => setIsGiftModalOpen(false)}><X size={20} className="text-purple-400 hover:text-purple-600"/></button>
              </div>
              <div className="p-6">
-                <p className="text-sm text-gray-500 mb-5 text-center">Kaç ay hediye vermek istiyorsunuz? Hediye, <b>bulunulan sözleşme yılının ilk aylarından</b> başlayarak uygulanır ve bu aylar için cari hesaba borç yansıtılmaz.</p>
+                <p className="text-sm text-gray-500 mb-5 text-center">Hediye, <b>aşağıda seçtiğiniz aydan</b> başlayarak uygulanır. Bu aylar cari hesapta <b>0 TL (HEDİYE)</b> olarak görünür ve borç yansıtılmaz.</p>
+
+                {/* YENİ: HEDİYENİN BAŞLAYACAĞI AY — varsayılan olarak içinde bulunulan ay seçilidir */}
+                <div className="flex flex-col gap-2 mb-5">
+                    <label className="text-xs font-bold text-gray-600 uppercase tracking-wider text-center">Hediye Edilecek Ay</label>
+                    <select
+                        value={giftStartMonthKey}
+                        onChange={(e) => setGiftStartMonthKey(e.target.value)}
+                        className="w-full border-2 border-purple-200 rounded-xl px-3 py-3 text-sm font-bold focus:outline-none focus:border-purple-500 text-purple-700 bg-purple-50/50"
+                    >
+                        {(() => {
+                            // Odanın giriş ayından bugünün 12 ay sonrasına kadar seçenek üretilir
+                            const _r = rooms.find(x => String(x.id) === String(selectedRoomId));
+                            const _e = _r ? parseDateLocal(_r.paymentDate && _r.paymentDate.includes('-') ? _r.paymentDate : (_r.entryDate || '2026-01-01')) : new Date();
+                            const _startIdx = _e.getFullYear() * 12 + _e.getMonth();
+                            const _n = new Date();
+                            const _endIdx = _n.getFullYear() * 12 + _n.getMonth() + 12;
+                            const _ms = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+                            const _opts = [];
+                            for (let i = _startIdx; i <= _endIdx; i++) {
+                                const _y = Math.floor(i / 12), _m = i % 12;
+                                _opts.push(<option key={`${_y}-${_m}`} value={`${_y}-${_m}`}>{_ms[_m]} {_y}</option>);
+                            }
+                            return _opts;
+                        })()}
+                    </select>
+                </div>
+
                 <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider text-center">Hediye Edilecek Ay Sayısı</label>
                     <div className="flex items-center justify-center gap-4 mt-2">
