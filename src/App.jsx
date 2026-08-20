@@ -4131,6 +4131,31 @@ const handleSaveCollectionNote = async () => {
       // YENİ: Ödeme sözü tarihi girildiyse, aynı bilgiyi HATIRLATMALAR takvimine "Ödeme Sözü" olarak da ekle.
       if (collectionNoteData.promiseDate) {
           const _remId = `rem_promise_${newNote.id}`;
+          const _custName = customerToUpdate?.name || '';
+
+          // ═══════════════════════════════════════════════════════════════════
+          // YENİ EKLENEN: ESKİ ÖDEME SÖZÜ TAKVİMDEN KALDIRILIR
+          // SORUN: Müşteri yeni söz verdiğinde eski söz takvimde kalıyor,
+          // hatırlatmalarda aynı müşteri için birden fazla açık söz görünüyordu.
+          // ÇÖZÜM: Yeni söz kaydedilirken, AYNI MÜŞTERİNİN henüz tamamlanmamış
+          // (açık) eski ödeme sözü kayıtları takvimden silinir. Böylece takvimde
+          // her müşteri için TEK ve GÜNCEL söz kalır.
+          // NOT: Tamamlanmış (completed) sözler ARŞİV olarak korunur, silinmez.
+          // ═══════════════════════════════════════════════════════════════════
+          const _oldPromises = (reminders || []).filter(r =>
+              r && r.type === 'promise' && !r.completed &&
+              r.customerName === _custName && String(r.id) !== String(_remId)
+          );
+          for (const _old of _oldPromises) {
+              if (db && firebaseUser) {
+                  try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reminders', String(_old.id))); }
+                  catch (e) { console.error('Eski ödeme sözü silme hatası:', e); }
+              }
+          }
+          // Yerel listeden de çıkar (anında görünürlük)
+          const _oldIds = new Set(_oldPromises.map(o => String(o.id)));
+          if (_oldIds.size > 0) setReminders(prev => prev.filter(r => !_oldIds.has(String(r.id))));
+
           const _remRecord = {
               id: _remId,
               date: collectionNoteData.promiseDate, // YYYY-MM-DD
@@ -4138,9 +4163,11 @@ const handleSaveCollectionNote = async () => {
               title: 'Cari',
               note: collectionNoteData.text || '',
               type: 'promise',
-              customerName: customerToUpdate?.name || '',
+              customerName: _custName,
               files: [],
               completed: false,
+              // YENİ: Söz güncelleme notları burada tarihiyle birlikte tutulur
+              promiseUpdates: [],
               createdBy: currentUserProfile?.name || '',
               createdAt: Date.now()
           };
@@ -4153,6 +4180,49 @@ const handleSaveCollectionNote = async () => {
 
       setIsCollectionNoteModalOpen(false);
       setCollectionNoteData({ customerId: null, text: '', promiseDate: '' });
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // YENİ EKLENEN: ÖDEME SÖZÜ GÜNCELLEME
+  // Hatırlatma kartındaki "Güncelle" butonu ile çalışır:
+  //   • Girilen not, TARİHİ ve girenin adıyla birlikte kayda eklenir (geçmiş korunur).
+  //   • Hatırlatmanın takvimdeki işareti BUGÜNE taşınır (müşteriyle bugün konuşuldu).
+  //   • Kaydın tamamlanmadı durumu korunur; takip devam eder.
+  // ═══════════════════════════════════════════════════════════════════════
+  const [isPromiseUpdateOpen, setIsPromiseUpdateOpen] = useState(false);
+  const [promiseUpdateTarget, setPromiseUpdateTarget] = useState(null);
+  const [promiseUpdateText, setPromiseUpdateText] = useState('');
+  const [promiseUpdateDate, setPromiseUpdateDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const handleSavePromiseUpdate = async () => {
+      if (!promiseUpdateTarget || !promiseUpdateText.trim()) return;
+      const _r = promiseUpdateTarget;
+      const _newDate = promiseUpdateDate || new Date().toISOString().split('T')[0];
+      const _entry = {
+          id: `pu_${Date.now()}`,
+          text: promiseUpdateText.trim(),
+          at: Date.now(),
+          by: currentUserProfile?.name || 'Sistem',
+          movedFrom: (_r.date && _r.date !== _newDate)
+              ? new Date(_r.date).toLocaleDateString('tr-TR')   // taşınmadan önceki tarih
+              : ''
+      };
+      const _updates = [...(_r.promiseUpdates || []), _entry];
+      const _payload = { date: _newDate, promiseUpdates: _updates, completed: false };
+
+      // Yerel state ANINDA güncellenir (önizlemede de çalışır)
+      setReminders(prev => prev.map(x => String(x.id) === String(_r.id) ? { ...x, ..._payload } : x));
+
+      if (db && firebaseUser) {
+          try {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reminders', String(_r.id)), _payload, { merge: true });
+          } catch (e) { console.error('Ödeme sözü güncelleme hatası:', e); }
+      }
+      logActivity('Ödeme Sözü', `${_r.customerName || ''} ödeme sözü güncellendi ve ${new Date(_newDate).toLocaleDateString('tr-TR')} tarihine taşındı.`);
+
+      setIsPromiseUpdateOpen(false);
+      setPromiseUpdateTarget(null);
+      setPromiseUpdateText('');
   };
 
 const handleSaveContractSettings = async () => {
@@ -12045,6 +12115,26 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                     );
                                                 })() : null}
                                                 {r.note ? <div className="text-xs text-gray-600 mt-1 whitespace-pre-wrap">{r.note}</div> : null}
+
+                                                {/* ═══════════════════════════════════════════════════
+                                                    YENİ EKLENEN: ÖDEME SÖZÜ GÜNCELLEME NOTLARI
+                                                    Her güncelleme, notu ve TARİHİ ile birlikte listelenir.
+                                                    Böylece sözün nasıl geliştiği (kim, ne zaman, ne dedi) görünür.
+                                                    ═══════════════════════════════════════════════════ */}
+                                                {Array.isArray(r.promiseUpdates) && r.promiseUpdates.length > 0 && (
+                                                   <div className="flex flex-col gap-1 mt-2">
+                                                      {r.promiseUpdates.slice().sort((a,b) => (a.at||0)-(b.at||0)).map(u => (
+                                                         <div key={u.id} className="bg-orange-50/70 border-l-[3px] border-orange-400 rounded-r-md px-2 py-1">
+                                                            <div className="text-[11px] text-slate-700 font-medium whitespace-pre-wrap">{u.text}</div>
+                                                            <div className="text-[9px] text-gray-400 font-bold mt-0.5">
+                                                               {u.at ? new Date(u.at).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : ''}
+                                                               {u.by ? ` · ${u.by}` : ''}
+                                                               {u.movedFrom ? ` · ${u.movedFrom} → bugüne taşındı` : ''}
+                                                            </div>
+                                                         </div>
+                                                      ))}
+                                                   </div>
+                                                )}
                                                 {Array.isArray(r.files) && r.files.length > 0 && (
                                                    <div className="flex flex-wrap gap-1 mt-1.5">
                                                       {r.files.map((f, i) => (
@@ -12054,6 +12144,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                 )}
                                              </div>
                                              <div className="flex flex-col gap-1 shrink-0">
+                                                {/* YENİ: GÜNCELLE — yalnızca ödeme sözü kartlarında görünür.
+                                                    Not girilir, kayıt BUGÜNE taşınır ve not tarihiyle birlikte saklanır. */}
+                                                {r.type === 'promise' && (
+                                                   <button onClick={() => { setPromiseUpdateTarget(r); setPromiseUpdateText(''); setPromiseUpdateDate(new Date().toISOString().split('T')[0]); setIsPromiseUpdateOpen(true); }} className="text-orange-600 hover:text-orange-700 bg-orange-50 rounded p-1 border border-orange-200" title="Güncelle: not ekle ve bugüne taşı"><RefreshCcw size={12}/></button>
+                                                )}
                                                 <button onClick={() => setReminderModal({ mode: 'edit', data: { ...r } })} className="text-blue-500 hover:text-blue-700 bg-blue-50 rounded p-1 border border-blue-100"><Edit size={12}/></button>
                                                 <button onClick={() => handleDeleteReminder(r.id)} className="text-red-500 hover:text-red-700 bg-red-50 rounded p-1 border border-red-100"><Trash2 size={12}/></button>
                                              </div>
@@ -16817,6 +16912,62 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                   <button onClick={handleLegalActionConfirm} disabled={legalActionData.type === 'start' && !legalActionData.reason} className={`disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg transition-colors flex items-center gap-2 ${legalActionData.type === 'start' ? 'bg-red-600 hover:bg-red-700 shadow-red-500/30' : 'bg-gray-800 hover:bg-gray-900 shadow-gray-500/30'}`}>
                       {legalActionData.type === 'start' ? <><Shield size={18}/> İcrayı Başlat</> : <><RefreshCcw size={18}/> İcrayı Kaldır ve Normale Dön</>}
                   </button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          YENİ: ÖDEME SÖZÜ GÜNCELLEME PENCERESİ
+          Not girilir, kayıt seçilen güne (varsayılan BUGÜN) taşınır ve
+          not tarihiyle birlikte geçmişe eklenir.
+          ═══════════════════════════════════════════════════════════════════ */}
+      {isPromiseUpdateOpen && promiseUpdateTarget && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={() => setIsPromiseUpdateOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-orange-50 rounded-t-2xl">
+                 <h3 className="text-base font-bold text-orange-700 flex items-center gap-2"><RefreshCcw size={17} /> Ödeme Sözü Güncelle</h3>
+                 <button onClick={() => setIsPromiseUpdateOpen(false)}><X size={20} className="text-orange-400 hover:text-orange-600"/></button>
+             </div>
+             <div className="p-6 flex flex-col gap-4">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Müşteri</p>
+                    <p className="text-sm font-black text-slate-800">{promiseUpdateTarget.customerName || '-'}</p>
+                    <p className="text-[11px] text-gray-500 font-semibold mt-0.5">
+                        Mevcut söz tarihi: {promiseUpdateTarget.date ? new Date(promiseUpdateTarget.date).toLocaleDateString('tr-TR') : '-'}
+                    </p>
+                </div>
+
+                {/* Önceki güncellemeler — tarihiyle birlikte */}
+                {Array.isArray(promiseUpdateTarget.promiseUpdates) && promiseUpdateTarget.promiseUpdates.length > 0 && (
+                    <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Önceki Güncellemeler</p>
+                        {promiseUpdateTarget.promiseUpdates.slice().sort((a,b)=>(a.at||0)-(b.at||0)).map(u => (
+                            <div key={u.id} className="bg-orange-50/70 border-l-[3px] border-orange-400 rounded-r-md px-2.5 py-1.5">
+                                <div className="text-[12px] text-slate-700 font-medium whitespace-pre-wrap">{u.text}</div>
+                                <div className="text-[9px] text-gray-400 font-bold mt-0.5">
+                                    {u.at ? new Date(u.at).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : ''}{u.by ? ` · ${u.by}` : ''}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Yeni Not (Zorunlu)</label>
+                    <textarea rows="3" value={promiseUpdateText} onChange={(e) => setPromiseUpdateText(e.target.value)} placeholder="Örn: Bugün arandı, cuma günü ödeme yapacağını belirtti." className="w-full border-2 border-orange-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-500 resize-none font-medium text-gray-700 bg-orange-50/30"></textarea>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Takvimde Taşınacağı Gün</label>
+                    <input type="date" value={promiseUpdateDate} onChange={(e) => setPromiseUpdateDate(e.target.value)} className="w-full border-2 border-orange-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-orange-500 text-slate-700 bg-orange-50/30" />
+                    <span className="text-[10px] text-gray-400 font-semibold">Varsayılan bugündür — kayıt takvimde bu güne taşınır.</span>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-gray-100">
+                  <button onClick={() => setIsPromiseUpdateOpen(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors">İptal</button>
+                  <button onClick={handleSavePromiseUpdate} disabled={!promiseUpdateText.trim()} className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 flex items-center gap-2 transition-colors"><Check strokeWidth={3} size={17}/> Güncelle</button>
                 </div>
              </div>
           </div>
