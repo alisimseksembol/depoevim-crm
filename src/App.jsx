@@ -16249,20 +16249,33 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
           const _lp = [...(_lr.legalProcess || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.createdAt || 0) - (a.createdAt || 0));
           const _lf = _lr.legalFiles || [];
           const _statusColor = (s) => /ödeme al[ıi]nd[ıi]|kısmi|kismi|dosya kapand/i.test(s) ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : /ihtar|icra|haciz/i.test(s) ? 'bg-red-100 text-red-700 border-red-200' : /ulaşılamadı|ulasilamadi/i.test(s) ? 'bg-gray-100 text-gray-600 border-gray-200' : 'bg-blue-100 text-blue-700 border-blue-200';
-          const _readOnly = isAvukat();
+          // ═══════════════════════════════════════════════════════════════════
+          // GÜNCELLENDİ: AVUKAT ROLÜ ARTIK İCRA DOSYASINA EKLEME YAPABİLİR
+          // ESKİ DAVRANIŞ: Tek bir "_readOnly = isAvukat()" bayrağı hem ekleme
+          // hem silme alanlarını kapatıyordu; avukat dosyasına ne süreç hareketi
+          // ne de belge ekleyebiliyordu — oysa bu işi asıl yapan kişi avukattır.
+          // YENİ DAVRANIŞ: Yetki ikiye ayrıldı:
+          //   • _canAddLegal    → süreç hareketi + belge EKLEME (avukata AÇIK)
+          //   • _canDeleteLegal → mevcut kayıt/belge SİLME-DÜZENLEME (avukata KAPALI)
+          // Böylece avukat dosyayı işleyebilir ama geçmiş kayıtları yanlışlıkla
+          // silemez; veri güvenliği korunur.
+          // ═══════════════════════════════════════════════════════════════════
+          const _isAvukatUser = isAvukat();
+          const _canAddLegal = true;              // ekleme: avukat dahil tüm yetkili kullanıcılar
+          const _canDeleteLegal = !_isAvukatUser; // silme/düzenleme: avukat hariç
           return (
             <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setLegalFileModalRoomId(null)}>
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="p-5 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-10">
                    <div>
                       <h3 className="text-base font-bold text-slate-800 flex items-center gap-2"><Shield size={18} className="text-purple-600"/> İcra Dosyası — {_lr.name}</h3>
-                      <p className="text-[11px] text-gray-400 font-medium mt-0.5">{_lr.customerName || 'Müşteri yok'} • Yasal süreç takibi ve belgeler{_readOnly ? ' (yalnızca görüntüleme)' : ''}</p>
+                      <p className="text-[11px] text-gray-400 font-medium mt-0.5">{_lr.customerName || 'Müşteri yok'} • Yasal süreç takibi ve belgeler{_isAvukatUser ? ' (ekleme yapabilirsiniz)' : ''}</p>
                    </div>
                    <button onClick={() => setLegalFileModalRoomId(null)} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500"><X size={16}/></button>
                 </div>
                 <div className="p-5 space-y-6">
-                   {/* SÜREÇ HAREKETİ EKLE/DÜZENLE */}
-                   {!_readOnly && (
+                   {/* SÜREÇ HAREKETİ EKLE/DÜZENLE — avukat dahil ekleme yetkisi olanlara açık */}
+                   {_canAddLegal && (
                    <div className="bg-purple-50/60 border border-purple-100 rounded-2xl p-4">
                       <h4 className="text-[11px] font-bold text-purple-700 uppercase tracking-wider mb-3">{legalProcForm.id ? 'Süreç Hareketini Düzenle' : 'Yeni Süreç Hareketi Ekle'}</h4>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -16299,7 +16312,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                      {e.note ? <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">{e.note}</p> : null}
                                      {e.createdBy ? <p className="text-[9px] text-gray-300 font-bold mt-1">{e.createdBy}</p> : null}
                                   </div>
-                                  {!_readOnly && (
+                                  {_canDeleteLegal && (
                                   <div className="flex items-center gap-1 shrink-0">
                                      <button onClick={() => setLegalProcForm({ id: e.id, date: e.date, status: e.status, amount: e.amount != null ? String(e.amount) : '', note: e.note || '' })} className="text-amber-600 hover:text-amber-700 p-1" title="Düzenle"><Edit size={13}/></button>
                                      <button onClick={() => handleDeleteLegalProcEntry(_lr.id, e.id)} className="text-red-500 hover:text-red-600 p-1" title="Sil"><Trash2 size={13}/></button>
@@ -16319,17 +16332,17 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                <a href={f.url} target="_blank" rel="noreferrer" className="hover:underline flex items-center gap-1 max-w-[170px] truncate" title={f.name}>
                                   {f.kind === 'video' ? '🎬' : f.kind === 'pdf' ? '📄' : '🖼️'} {f.name || 'Belge'}
                                </a>
-                               {!_readOnly && <button onClick={() => handleRemoveLegalFile(_lr.id, f.id)} className="text-red-500 hover:text-red-700 p-0.5"><X size={12}/></button>}
+                               {_canDeleteLegal && <button onClick={() => handleRemoveLegalFile(_lr.id, f.id)} className="text-red-500 hover:text-red-700 p-0.5"><X size={12}/></button>}
                             </div>
                          ))}
-                         {!_readOnly && (
+                         {_canAddLegal && (
                          <label className={`cursor-pointer flex items-center gap-1 bg-white border-2 border-dashed border-purple-200 hover:bg-purple-50 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-purple-600 ${legalFilesUploading ? 'opacity-50 pointer-events-none' : ''}`}>
                             <Plus size={12}/> {legalFilesUploading ? 'Yükleniyor...' : 'Dosya / Foto / Video Ekle'}
                             <input type="file" multiple accept="image/*,video/*,application/pdf" className="hidden" onChange={async (e) => { const fl = e.target.files; e.persist && e.persist(); await handleAddLegalFiles(_lr.id, fl); e.target.value = ''; }}/>
                          </label>
                          )}
                       </div>
-                      {_lf.length === 0 && _readOnly && <p className="text-xs text-gray-400 mt-2">Ekli belge yok.</p>}
+                      {_lf.length === 0 && <p className="text-xs text-gray-400 mt-2">Ekli belge yok.</p>}
                    </div>
                 </div>
               </div>
