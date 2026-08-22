@@ -33,6 +33,9 @@ import {
   LogOut,
   TrendingUp,
   RefreshCcw,
+  MoveHorizontal,
+  MoveVertical,
+  MoveDiagonal,
   MessageCircle,
   Phone,
   FileText as FileTextIcon,
@@ -4584,6 +4587,8 @@ const handleAddInvoice = async () => {
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [newRoomM3, setNewRoomM3] = useState('');
+  // YENİ: Yeni oda ölçüleri — en (genişlik), boy (uzunluk), yükseklik (metre)
+  const [newRoomDims, setNewRoomDims] = useState({ width: '', length: '', height: '' });
   
   const [isDeleteRoomModalOpen, setIsDeleteRoomModalOpen] = useState(false);
   const [roomToDelete, setRoomToDelete] = useState(null);
@@ -4595,9 +4600,48 @@ const handleAddInvoice = async () => {
       logActivity('Oda Ekleme', `Yeni oda eklendi.`);
       if (!newRoomName || !selectedBlockId) return;
       const currentRooms = rooms.filter(r => r.blockId === selectedBlockId);
-      const newRoom = { id: Date.now(), blockId: selectedBlockId, name: newRoomName, customerName: null, m3: newRoomM3 || 0, isReserved: false, paidMonths: [], orderIndex: currentRooms.length };
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // YENİ EKLENEN: EN / BOY / YÜKSEKLİK ÖLÇÜLERİ + OTOMATİK m³ HESABI
+      // Üç ölçü de girildiyse hacim otomatik hesaplanır (en × boy × yükseklik).
+      // Ölçü girilmediyse elle yazılan m³ değeri aynen kullanılır (eski davranış korunur).
+      // ═══════════════════════════════════════════════════════════════════════
+      const _w = parseFloat(String(newRoomDims.width).replace(',', '.'));
+      const _l = parseFloat(String(newRoomDims.length).replace(',', '.'));
+      const _h = parseFloat(String(newRoomDims.height).replace(',', '.'));
+      const _hasDims = [_w, _l, _h].every(v => !isNaN(v) && v > 0);
+      const _autoM3 = _hasDims ? Math.round(_w * _l * _h * 100) / 100 : null;
+
+      const newRoom = {
+          id: Date.now(),
+          blockId: selectedBlockId,
+          name: newRoomName,
+          customerName: null,
+          m3: _autoM3 != null ? _autoM3 : (newRoomM3 || 0),
+          // Ölçüler ayrı alanlarda saklanır; kartta ve oda içinde gösterilir
+          width: _hasDims ? _w : null,
+          length: _hasDims ? _l : null,
+          height: _hasDims ? _h : null,
+          isReserved: false,
+          paidMonths: [],
+          orderIndex: currentRooms.length
+      };
       if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), newRoom);
       setIsAddRoomModalOpen(false); setNewRoomName(''); setNewRoomM3('');
+      setNewRoomDims({ width: '', length: '', height: '' });
+  };
+
+  // YENİ: Oda ölçülerini "3×2×2,5 m" biçiminde kısa metne çevirir (kart ve oda içi gösterim).
+  const formatRoomDims = (room) => {
+      if (!room) return '';
+      const f = (v) => {
+          const n = Number(v);
+          if (isNaN(n) || n <= 0) return null;
+          return String(n).replace('.', ',');   // Türkçe ondalık gösterim
+      };
+      const w = f(room.width), l = f(room.length), h = f(room.height);
+      if (!w || !l || !h) return '';
+      return `${w}×${l}×${h} m`;
   };
 
   const [isEditRoomModalOpen, setIsEditRoomModalOpen] = useState(false);
@@ -4605,9 +4649,23 @@ const handleAddInvoice = async () => {
 
   const handleEditRoom = async () => {
       if (!editRoomData?.name) return;
+      // YENİ: Üç ölçü de girildiyse hacim otomatik hesaplanır; aksi halde elle yazılan m³ kalır.
+      const _w = parseFloat(String(editRoomData.width ?? '').replace(',', '.'));
+      const _l = parseFloat(String(editRoomData.length ?? '').replace(',', '.'));
+      const _h = parseFloat(String(editRoomData.height ?? '').replace(',', '.'));
+      const _hasDims = [_w, _l, _h].every(v => !isNaN(v) && v > 0);
+      const _payload = {
+          name: editRoomData.name,
+          m3: _hasDims ? Math.round(_w * _l * _h * 100) / 100 : editRoomData.m3,
+          width: _hasDims ? _w : null,
+          length: _hasDims ? _l : null,
+          height: _hasDims ? _h : null
+      };
+      // Yerel state anında güncellenir
+      setRooms(prev => prev.map(r => String(r.id) === String(editRoomData.id) ? { ...r, ..._payload } : r));
       if (db && firebaseUser) {
           try {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(editRoomData.id)), { name: editRoomData.name, m3: editRoomData.m3 }, { merge: true });
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(editRoomData.id)), _payload, { merge: true });
           } catch (e) { console.error("Firebase Oda Güncelleme Hatası:", e); }
       }
       setIsEditRoomModalOpen(false); setEditRoomData(null);
@@ -12840,7 +12898,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                 <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
                                                 <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
                                             </div>
-                                            <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner shrink-0">{oda.m3} m³</span>
+                                            {/* YENİ: m³ etiketinin SOLUNDA oda ölçüleri (en×boy×yükseklik) gösterilir */}
+                                            <div className="flex items-center gap-1 shrink-0">
+                                                {formatRoomDims(oda) && <span className="text-[9px] font-bold bg-black/15 px-1.5 py-1 rounded shadow-inner whitespace-nowrap" title="En × Boy × Yükseklik">{formatRoomDims(oda)}</span>}
+                                                <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner">{oda.m3} m³</span>
+                                            </div>
                                         </div>
                                         <div className="flex-1 relative flex flex-col justify-center items-center min-h-[140px]"
                                             style={{ backgroundImage: 'repeating-linear-gradient(to bottom, #f8fafc, #f8fafc 12px, #e2e8f0 12px, #e2e8f0 14px)' }}>
@@ -12900,7 +12962,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                                 <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
                                                 <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
                                             </div>
-                                            <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner shrink-0">{oda.m3} m³</span>
+                                            {/* YENİ: m³ etiketinin SOLUNDA oda ölçüleri (en×boy×yükseklik) gösterilir */}
+                                            <div className="flex items-center gap-1 shrink-0">
+                                                {formatRoomDims(oda) && <span className="text-[9px] font-bold bg-black/15 px-1.5 py-1 rounded shadow-inner whitespace-nowrap" title="En × Boy × Yükseklik">{formatRoomDims(oda)}</span>}
+                                                <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner">{oda.m3} m³</span>
+                                            </div>
                                         </div>
                                         <div className="flex-1 relative flex flex-col justify-center items-center gap-2 min-h-[150px] p-3"
                                             style={{ backgroundImage: 'repeating-linear-gradient(to bottom, #f8fafc, #f8fafc 12px, #e2e8f0 12px, #e2e8f0 14px)' }}>
@@ -13175,7 +13241,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
                                 <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${currentWarehouse?.name} - ${currentBlock?.name}`}>{currentWarehouse?.name} - {currentBlock?.name}</span>
                             </div>
-                            <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner shrink-0">{oda.m3} m³</span>
+                            {/* YENİ: m³ etiketinin SOLUNDA oda ölçüleri gösterilir */}
+                            <div className="flex items-center gap-1 shrink-0">
+                                {formatRoomDims(oda) && <span className="text-[9px] font-bold bg-black/15 px-1.5 py-1 rounded shadow-inner whitespace-nowrap" title="En × Boy × Yükseklik">{formatRoomDims(oda)}</span>}
+                                <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner">{oda.m3} m³</span>
+                            </div>
                         </div>
                         
                         {/* Oda Kapısı Dokusu (Kepenk Görünümü) — YENİ: kart büyütüldü (min yükseklik artırıldı) */}
@@ -13242,7 +13312,15 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                        <button onClick={() => setRoomPhotoViewer(selectedRoomDetail?.id)} title="Oda Fotoğrafı" className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors bg-teal-50 hover:bg-teal-100 text-[#1bc5bd] border border-teal-200"><Eye size={16}/></button>
                        <div className="flex items-center gap-2 text-[#1bc5bd]"><Box size={20}/><span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Oda</span></div>
                        <h2 className="text-3xl font-extrabold text-[#1bc5bd] tracking-tight text-center">{selectedRoomDetail?.name}</h2>
-                       <span className="text-sm font-bold text-[#1bc5bd] bg-teal-50 px-3 py-0.5 rounded-full border border-teal-100">{selectedRoomDetail?.m3} m³</span>
+                       {/* YENİ: m³ rozetinin SOLUNDA oda ölçüleri (en×boy×yükseklik) gösterilir */}
+                       <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                          {formatRoomDims(selectedRoomDetail) && (
+                             <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200 flex items-center gap-1" title="En × Boy × Yükseklik">
+                                <MoveHorizontal size={12} className="text-slate-400"/> {formatRoomDims(selectedRoomDetail)}
+                             </span>
+                          )}
+                          <span className="text-sm font-bold text-[#1bc5bd] bg-teal-50 px-3 py-0.5 rounded-full border border-teal-100">{selectedRoomDetail?.m3} m³</span>
+                       </div>
                     </div>
                   </div>
 {(() => {
@@ -16118,8 +16196,50 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
              <div className="p-5 border-b border-gray-100 flex justify-between items-center"><h3 className="text-lg font-medium w-full text-center">Yeni Oda Ekle</h3><button onClick={()=>setIsAddRoomModalOpen(false)}><X size={20} className="text-gray-400"/></button></div>
              <div className="p-6">
-                <input type="text" value={newRoomName} onChange={(e)=>setNewRoomName(e.target.value.toUpperCase())} placeholder="Oda Adı" className="w-full border border-gray-300 rounded px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500" />
-                <input type="number" value={newRoomM3} onChange={(e)=>setNewRoomM3(e.target.value)} placeholder="Hacim (m³)" className="w-full border border-gray-300 rounded px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500" />
+                <input type="text" value={newRoomName} onChange={(e)=>setNewRoomName(e.target.value.toUpperCase())} placeholder="Oda Adı" className="w-full border border-gray-300 rounded px-3 py-2 mb-4 focus:outline-none focus:border-cyan-500" />
+
+                {/* ═══════════════════════════════════════════════════════════
+                    YENİ: ODA ÖLÇÜLERİ — EN / BOY / YÜKSEKLİK
+                    Her alanın başında kendi anlamını gösteren simge bulunur.
+                    Üç ölçü de girildiğinde hacim (m³) OTOMATİK hesaplanır.
+                    ═══════════════════════════════════════════════════════════ */}
+                <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">Oda Ölçüleri (metre)</label>
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                   {/* EN (Genişlik) — yatay ok simgesi */}
+                   <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-cyan-500 pointer-events-none"><MoveHorizontal size={15}/></span>
+                      <input type="number" step="0.01" value={newRoomDims.width} onChange={(e)=>setNewRoomDims(d=>({...d, width:e.target.value}))} placeholder="En" className="w-full border border-gray-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-cyan-500" />
+                   </div>
+                   {/* BOY (Uzunluk) — derinlik/çapraz ok simgesi */}
+                   <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-indigo-500 pointer-events-none"><MoveDiagonal size={15}/></span>
+                      <input type="number" step="0.01" value={newRoomDims.length} onChange={(e)=>setNewRoomDims(d=>({...d, length:e.target.value}))} placeholder="Boy" className="w-full border border-gray-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+                   </div>
+                   {/* YÜKSEKLİK — dikey ok simgesi */}
+                   <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-500 pointer-events-none"><MoveVertical size={15}/></span>
+                      <input type="number" step="0.01" value={newRoomDims.height} onChange={(e)=>setNewRoomDims(d=>({...d, height:e.target.value}))} placeholder="Yük." className="w-full border border-gray-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-orange-500" />
+                   </div>
+                </div>
+
+                {/* OTOMATİK HACİM — üç ölçü girildiyse hesaplanan m³ anında gösterilir */}
+                {(() => {
+                    const w = parseFloat(String(newRoomDims.width).replace(',', '.'));
+                    const l = parseFloat(String(newRoomDims.length).replace(',', '.'));
+                    const h = parseFloat(String(newRoomDims.height).replace(',', '.'));
+                    const ok = [w, l, h].every(v => !isNaN(v) && v > 0);
+                    if (!ok) return null;
+                    const m3 = Math.round(w * l * h * 100) / 100;
+                    return (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 mb-3 flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1.5"><Box size={14}/> Otomatik Hesaplanan Hacim</span>
+                            <span className="text-base font-black text-emerald-700">{String(m3).replace('.', ',')} m³</span>
+                        </div>
+                    );
+                })()}
+
+                {/* Ölçü girilmediyse hacim elle de yazılabilir (eski kullanım korundu) */}
+                <input type="number" value={newRoomM3} onChange={(e)=>setNewRoomM3(e.target.value)} placeholder="Hacim (m³) — ölçü girilmezse elle yazın" className="w-full border border-gray-300 rounded px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 text-sm" />
                 <button onClick={handleAddRoom} className="w-full bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded transition-colors">Kaydet</button>
              </div>
           </div>
@@ -16145,6 +16265,24 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
              <div className="p-5 border-b border-gray-100 flex justify-between items-center"><h3 className="text-lg font-medium w-full text-center">Oda Özelliklerini Düzenle</h3><button onClick={()=>setIsEditRoomModalOpen(false)}><X size={20} className="text-gray-400"/></button></div>
              <div className="p-6">
                 <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Oda Adı</label><input type="text" value={editRoomData.name} onChange={(e)=>setEditRoomData({...editRoomData, name: e.target.value.toUpperCase()})} placeholder="Oda Adı" className="w-full border border-gray-300 rounded px-3 py-2 mb-4 focus:outline-none focus:border-cyan-500" />
+
+                {/* YENİ: MEVCUT ODANIN ÖLÇÜLERİ — üç ölçü girildiğinde hacim otomatik güncellenir */}
+                <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Oda Ölçüleri (metre)</label>
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                   <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-cyan-500 pointer-events-none"><MoveHorizontal size={15}/></span>
+                      <input type="number" step="0.01" value={editRoomData.width ?? ''} onChange={(e)=>setEditRoomData({...editRoomData, width: e.target.value})} placeholder="En" className="w-full border border-gray-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-cyan-500" />
+                   </div>
+                   <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-indigo-500 pointer-events-none"><MoveDiagonal size={15}/></span>
+                      <input type="number" step="0.01" value={editRoomData.length ?? ''} onChange={(e)=>setEditRoomData({...editRoomData, length: e.target.value})} placeholder="Boy" className="w-full border border-gray-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+                   </div>
+                   <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-500 pointer-events-none"><MoveVertical size={15}/></span>
+                      <input type="number" step="0.01" value={editRoomData.height ?? ''} onChange={(e)=>setEditRoomData({...editRoomData, height: e.target.value})} placeholder="Yük." className="w-full border border-gray-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-orange-500" />
+                   </div>
+                </div>
+
                 <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Hacim (m³)</label><input type="number" value={editRoomData.m3} onChange={(e)=>setEditRoomData({...editRoomData, m3: e.target.value})} placeholder="Hacim (m³)" className="w-full border border-gray-300 rounded px-3 py-2 mb-6 focus:outline-none focus:border-cyan-500" />
                 <button onClick={handleEditRoom} className="w-full bg-[#1bc5bd] hover:bg-teal-500 text-white px-4 py-2 rounded transition-colors font-medium">Değişiklikleri Kaydet</button>
              </div>
