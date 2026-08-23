@@ -4229,6 +4229,60 @@ const handleSaveCollectionNote = async () => {
       setPromiseUpdateText('');
   };
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // YENİ: TOPLU m³ KÜSURAT DÜZELTME
+  // Tüm depolardaki odaları tarar; m³ değeri küsuratlı olanları yuvarlama
+  // kuralına göre TAM SAYIYA çevirir (0,20 ve altı aşağı / 0,21 ve üstü yukarı)
+  // ve veritabanına yazar. Zaten tam sayı olan odalara DOKUNULMAZ.
+  // Yalnızca m³ alanı değişir; ölçüler, müşteri ve kira bilgileri korunur.
+  // ═══════════════════════════════════════════════════════════════════════
+  const [bulkM3Fixing, setBulkM3Fixing] = useState(false);
+  const [bulkM3Result, setBulkM3Result] = useState('');
+
+  const handleBulkFixRoomM3 = async () => {
+      // Düzeltilecek odaları önce tespit et (küsuratı olanlar)
+      const targets = (rooms || []).filter(r => {
+          const n = Number(r?.m3);
+          if (isNaN(n) || n <= 0) return false;
+          return roundRoomM3(n) !== n;   // yuvarlanmış değer farklıysa küsurat var
+      });
+
+      if (targets.length === 0) {
+          setBulkM3Result('✓ Küsuratlı oda bulunamadı — tüm odalar zaten tam sayı.');
+          setTimeout(() => setBulkM3Result(''), 6000);
+          return;
+      }
+
+      if (!window.confirm(`${targets.length} odanın m³ değerinde küsurat var.\n\nHepsi tam sayıya yuvarlanacak (0,20 ve altı aşağı, 0,21 ve üstü yukarı).\nÖlçüler, müşteri ve kira bilgileri DEĞİŞMEZ.\n\nDevam edilsin mi?`)) return;
+
+      setBulkM3Fixing(true);
+      let done = 0, failed = 0;
+      for (const r of targets) {
+          const newM3 = roundRoomM3(r.m3);
+          try {
+              if (db && firebaseUser) {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(r.id)), { m3: newM3 }, { merge: true });
+              }
+              done++;
+          } catch (e) {
+              failed++;
+              console.error(`Oda m³ düzeltme hatası (${r.name}):`, e);
+          }
+          setBulkM3Result(`Düzeltiliyor ${done + failed}/${targets.length}...`);
+      }
+
+      // Yerel listeyi de güncelle (anında görünürlük)
+      const _map = new Map(targets.map(t => [String(t.id), roundRoomM3(t.m3)]));
+      setRooms(prev => prev.map(r => _map.has(String(r.id)) ? { ...r, m3: _map.get(String(r.id)) } : r));
+
+      logActivity('Toplu Düzeltme', `${done} odanın m³ küsuratı tam sayıya yuvarlandı.`);
+      setBulkM3Result(failed === 0
+          ? `✓ ${done} odanın m³ değeri tam sayıya yuvarlandı.`
+          : `${done} oda düzeltildi, ${failed} oda düzeltilemedi. İnternet bağlantısını kontrol edin.`);
+      setBulkM3Fixing(false);
+      setTimeout(() => setBulkM3Result(''), 10000);
+  };
+
 const handleSaveContractSettings = async () => {
       if (db && firebaseUser) {
           try {
@@ -4627,8 +4681,9 @@ const handleAddInvoice = async () => {
       const _grossM3 = calcVolume(newRoomDims.width, newRoomDims.length, newRoomDims.height);
       const _colM3 = newRoomHasColumn ? calcVolume(newRoomCol.width, newRoomCol.length, newRoomCol.height) : null;
       // Net hacim negatif olamaz — kolon odadan büyük girilirse 0'a sabitlenir
+      // GÜNCELLENDİ: Net hacim TAM SAYIYA yuvarlanır (0,20 altı aşağı / 0,21 üstü yukarı)
       const _autoM3 = _grossM3 != null
-          ? Math.max(0, Math.round((_grossM3 - (_colM3 || 0)) * 100) / 100)
+          ? roundRoomM3(Math.max(0, Math.round((_grossM3 - (_colM3 || 0)) * 100) / 100))
           : null;
 
       const newRoom = {
@@ -4656,6 +4711,30 @@ const handleAddInvoice = async () => {
       setIsAddRoomModalOpen(false); setNewRoomName(''); setNewRoomM3('');
       setNewRoomDims({ width: '', length: '', height: '' });
       setNewRoomHasColumn(false); setNewRoomCol({ width: '', length: '', height: '' });
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // YENİ: ODA m³ KÜSURAT YUVARLAMA KURALI
+  // Ölçüden hesaplanan hacimlerde küsurat oluşuyordu (22,11 / 11,82 gibi).
+  // Firma kuralı: küsurat 0,20 ve ALTI ise AŞAĞI, 0,21 ve ÜSTÜ ise YUKARI
+  // yuvarlanır. Böylece odaların m³ değerleri her zaman TAM SAYI olur.
+  // Örn: 22,11 → 22 | 11,82 → 12 | 19,23 → 20 | 13,06 → 13
+  // ═══════════════════════════════════════════════════════════════════════
+  const roundRoomM3 = (v) => {
+      const n = Number(v);
+      if (isNaN(n) || n <= 0) return 0;
+      const rounded = Math.round(n * 100) / 100;   // kayan nokta hatasını temizle
+      const base = Math.floor(rounded);
+      const frac = Math.round((rounded - base) * 100) / 100;
+      return frac <= 0.20 ? base : base + 1;
+  };
+
+  // Kart/detay ekranlarında oda hacmini gösterir.
+  // Ölçüsü girilmiş odalarda TAM SAYI (yuvarlama kuralı), diğerlerinde mevcut değer gösterilir.
+  const displayRoomM3 = (room) => {
+      if (!room) return '0';
+      const hasDims = [room.width, room.length, room.height].every(v => Number(v) > 0);
+      return hasDims ? String(roundRoomM3(room.m3)) : formatM3(room.m3);
   };
 
   // YENİ: m³ değerini Türkçe ondalık biçiminde gösterir (22.11 → 22,11). Tam sayıysa ondalık yazılmaz.
@@ -4686,7 +4765,8 @@ const handleAddInvoice = async () => {
       // YENİ: Üç ölçü de girildiyse hacim otomatik hesaplanır; KOLON varsa hacmi düşülür.
       const _gross = calcVolume(editRoomData.width, editRoomData.length, editRoomData.height);
       const _col = editRoomData.hasColumn ? calcVolume(editRoomData.columnWidth, editRoomData.columnLength, editRoomData.columnHeight) : null;
-      const _net = _gross != null ? Math.max(0, Math.round((_gross - (_col || 0)) * 100) / 100) : null;
+      // GÜNCELLENDİ: Net hacim TAM SAYIYA yuvarlanır (0,20 altı aşağı / 0,21 üstü yukarı)
+      const _net = _gross != null ? roundRoomM3(Math.max(0, Math.round((_gross - (_col || 0)) * 100) / 100)) : null;
       const _num = (v) => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isNaN(n) ? null : n; };
       const _payload = {
           name: editRoomData.name,
@@ -9422,15 +9502,18 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
     return { empty, full, reserved };
   };
 
-  const getBlockCapacityM3 = (blockId) => rooms.filter(r => r.blockId === blockId).reduce((sum, room) => sum + Number(room.m3 || 0), 0);
+  // GÜNCELLENDİ: Kapasite/doluluk toplamları da odaların YUVARLANMIŞ m³ değerinden hesaplanır.
+  // Böylece kartlarda görünen tam sayılar ile şube toplamları birebir tutar (küsurat farkı oluşmaz).
+  const _roomM3 = (room) => roundRoomM3(room?.m3 || 0);
+  const getBlockCapacityM3 = (blockId) => rooms.filter(r => r.blockId === blockId).reduce((sum, room) => sum + _roomM3(room), 0);
   const getWarehouseCapacityM3 = (warehouseId) => {
     const whBlockIds = blocks.filter(b => b.warehouseId === warehouseId).map(b => b.id);
-    return rooms.filter(r => whBlockIds.includes(r.blockId)).reduce((sum, room) => sum + Number(room.m3 || 0), 0);
+    return rooms.filter(r => whBlockIds.includes(r.blockId)).reduce((sum, room) => sum + _roomM3(room), 0);
   };
-  const getBlockOccupiedM3 = (blockId) => rooms.filter(r => r.blockId === blockId && (r.customerName || (r.isReserved && (!r.reserveExpiryTimestamp || r.reserveExpiryTimestamp > Date.now())))).reduce((sum, room) => sum + Number(room.m3 || 0), 0);
+  const getBlockOccupiedM3 = (blockId) => rooms.filter(r => r.blockId === blockId && (r.customerName || (r.isReserved && (!r.reserveExpiryTimestamp || r.reserveExpiryTimestamp > Date.now())))).reduce((sum, room) => sum + _roomM3(room), 0);
 const getWarehouseOccupiedM3 = (warehouseId) => {
     const whBlockIds = blocks.filter(b => b.warehouseId === warehouseId).map(b => b.id);
-    return rooms.filter(r => whBlockIds.includes(r.blockId) && (r.customerName || (r.isReserved && (!r.reserveExpiryTimestamp || r.reserveExpiryTimestamp > Date.now())))).reduce((sum, room) => sum + Number(room.m3 || 0), 0);
+    return rooms.filter(r => whBlockIds.includes(r.blockId) && (r.customerName || (r.isReserved && (!r.reserveExpiryTimestamp || r.reserveExpiryTimestamp > Date.now())))).reduce((sum, room) => sum + _roomM3(room), 0);
   };
 
   // ==========================================
@@ -11050,7 +11133,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   <div className="absolute top-0 right-0 p-3"><span className="bg-cyan-50 text-cyan-600 px-3 py-1 rounded-full text-[10px] font-bold border border-cyan-100 uppercase">Aktif Kiralama</span></div>
                                   <div className="flex items-center gap-3 mb-4">
                                      <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center text-gray-400"><Box size={20}/></div>
-                                     <div><h5 className="font-bold text-gray-800 text-lg">{room.name}</h5><p className="text-xs text-gray-500 font-medium">Giriş: {room.entryDate} • {formatM3(room.m3)} m³</p></div>
+                                     <div><h5 className="font-bold text-gray-800 text-lg">{room.name}</h5><p className="text-xs text-gray-500 font-medium">Giriş: {room.entryDate} • {displayRoomM3(room)} m³</p></div>
                                   </div>
                                   <div className="bg-gray-50 rounded-xl p-4 mb-4 border border-gray-100 flex flex-col gap-2">
                                      <div className="flex justify-between items-center"><span className="text-xs text-gray-500 font-semibold">Aylık Kira Bedeli:</span><span className="text-sm font-bold text-gray-700">{Math.round(monthlyTotal).toLocaleString('tr-TR')} TL {hasKdv && <span className="text-[9px] text-gray-400 font-normal">(KDV Dahil)</span>}</span></div>
@@ -12319,7 +12402,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       <div className="flex flex-wrap justify-between items-start gap-2 mb-3">
                                           <div>
                                               <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><Box size={18} className="text-red-500" /> {room.name}</h3>
-                                              <p className="text-xs text-gray-500 font-medium mt-0.5">{warehouse?.name} — {block?.name} • {formatM3(room.m3)} m³</p>
+                                              <p className="text-xs text-gray-500 font-medium mt-0.5">{warehouse?.name} — {block?.name} • {displayRoomM3(room)} m³</p>
                                           </div>
                                           <span className="bg-red-100 text-red-600 text-[10px] font-black px-2.5 py-1.5 rounded-full uppercase tracking-wide animate-pulse">İcra Sürecinde</span>
                                       </div>
@@ -12942,7 +13025,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                             <div className="flex flex-col min-w-0 w-full gap-1">
                                                 <div className="flex items-center justify-between gap-2 min-w-0">
                                                     <h3 className="font-black text-lg sm:text-xl tracking-wide leading-none drop-shadow-sm truncate min-w-0">{oda.name}</h3>
-                                                    <span className="text-[10px] font-bold bg-black/25 px-2 py-1 rounded shadow-inner shrink-0 whitespace-nowrap">{formatM3(oda.m3)} m³</span>
+                                                    <span className="text-[10px] font-bold bg-black/25 px-2 py-1 rounded shadow-inner shrink-0 whitespace-nowrap">{displayRoomM3(oda)} m³</span>
                                                 </div>
                                                 <div className="flex items-center justify-between gap-2 min-w-0">
                                                     <span className="text-[9px] opacity-90 font-medium truncate min-w-0" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
@@ -13012,7 +13095,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                             <div className="flex flex-col min-w-0 w-full gap-1">
                                                 <div className="flex items-center justify-between gap-2 min-w-0">
                                                     <h3 className="font-black text-lg sm:text-xl tracking-wide leading-none drop-shadow-sm truncate min-w-0">{oda.name}</h3>
-                                                    <span className="text-[10px] font-bold bg-black/25 px-2 py-1 rounded shadow-inner shrink-0 whitespace-nowrap">{formatM3(oda.m3)} m³</span>
+                                                    <span className="text-[10px] font-bold bg-black/25 px-2 py-1 rounded shadow-inner shrink-0 whitespace-nowrap">{displayRoomM3(oda)} m³</span>
                                                 </div>
                                                 <div className="flex items-center justify-between gap-2 min-w-0">
                                                     <span className="text-[9px] opacity-90 font-medium truncate min-w-0" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
@@ -13036,10 +13119,20 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                  </div>
               ) : !selectedWarehouseId ? (
                 <>
-                  <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-col sm:flex-row gap-4 sm:gap-0">
+                  <div className="flex justify-between items-center mb-2 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-col sm:flex-row gap-4 sm:gap-0">
                     <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
                     {/* YENİ: Üç küçük buton tek satırda yan yana — Oda Boyutu Bul / Rezerve Göster / Depo Ekle */}
                     <div className="flex flex-nowrap items-center gap-2">
+                        {/* YENİ: TOPLU m³ DÜZELTME — tüm depolardaki küsuratlı odaları tam sayıya çevirir */}
+                        {(() => {
+                            const kusuratli = (rooms || []).filter(r => { const n = Number(r?.m3); return !isNaN(n) && n > 0 && roundRoomM3(n) !== n; }).length;
+                            if (kusuratli === 0) return null;   // düzeltilecek oda yoksa buton hiç görünmez
+                            return (
+                                <button onClick={handleBulkFixRoomM3} disabled={bulkM3Fixing} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-md shadow-emerald-500/30 whitespace-nowrap" title="Tüm depolardaki küsuratlı m³ değerlerini tam sayıya yuvarlar">
+                                    <RefreshCcw size={14} className={bulkM3Fixing ? 'animate-spin' : ''} /> m³ Düzelt ({kusuratli})
+                                </button>
+                            );
+                        })()}
                         {/* YENİ: "Oda Boyutu Bul" — seçenekler ortada modal pencerede açılır (tüm depolar kapsamı) */}
                         <button onClick={() => setSizeFilterModal({ scope: null })} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all shadow-md shadow-purple-500/30 whitespace-nowrap">
                             <Search size={14} /> Oda Boyutu Bul
@@ -13051,6 +13144,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                         <button onClick={() => setIsAddWarehouseModalOpen(true)} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-sm whitespace-nowrap">Depo Ekle <Plus size={14} /></button>
                     </div>
                   </div>
+                  {/* YENİ: Toplu düzeltme durum mesajı */}
+                  {bulkM3Result && (
+                    <div className={`mb-4 px-4 py-2.5 rounded-xl text-sm font-bold border ${bulkM3Result.startsWith('✓') ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+                      {bulkM3Result}
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-8">
                   {warehouses.map((depo, index) => {
                     const stats = getWarehouseStats(depo.id);
@@ -13293,7 +13392,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             <div className="flex flex-col min-w-0 w-full gap-1">
                                 <div className="flex items-center justify-between gap-2 min-w-0">
                                     <h3 className="font-black text-lg sm:text-xl tracking-wide leading-none drop-shadow-sm truncate min-w-0">{oda.name}</h3>
-                                    <span className="text-[10px] font-bold bg-black/25 px-2 py-1 rounded shadow-inner shrink-0 whitespace-nowrap">{formatM3(oda.m3)} m³</span>
+                                    <span className="text-[10px] font-bold bg-black/25 px-2 py-1 rounded shadow-inner shrink-0 whitespace-nowrap">{displayRoomM3(oda)} m³</span>
                                 </div>
                                 <div className="flex items-center justify-between gap-2 min-w-0">
                                     <span className="text-[9px] opacity-90 font-medium truncate min-w-0" title={`${currentWarehouse?.name} - ${currentBlock?.name}`}>{currentWarehouse?.name} - {currentBlock?.name}</span>
@@ -13379,7 +13478,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 <Columns size={12}/> Kolon −{String(selectedRoomDetail.columnM3).replace('.', ',')} m³
                              </span>
                           )}
-                          <span className="text-sm font-bold text-[#1bc5bd] bg-teal-50 px-3 py-0.5 rounded-full border border-teal-100">{formatM3(selectedRoomDetail?.m3)} m³</span>
+                          <span className="text-sm font-bold text-[#1bc5bd] bg-teal-50 px-3 py-0.5 rounded-full border border-teal-100">{displayRoomM3(selectedRoomDetail)} m³</span>
                        </div>
                     </div>
                   </div>
@@ -16337,7 +16436,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             )}
                             <div className="flex items-center justify-between">
                                <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1.5"><Box size={14}/> {col != null ? 'Net Kullanılabilir Hacim' : 'Otomatik Hesaplanan Hacim'}</span>
-                               <span className="text-base font-black text-emerald-700">{fmt(net)} m³</span>
+                               {/* GÜNCELLENDİ: Kaydedilecek TAM SAYI gösterilir; ham hesap altta küçük yazıyla kalır */}
+                               <span className="text-right">
+                                  <span className="block text-base font-black text-emerald-700 leading-none">{roundRoomM3(net)} m³</span>
+                                  {roundRoomM3(net) !== net && <span className="block text-[9px] text-emerald-600/70 font-bold mt-0.5">ham: {fmt(net)} m³</span>}
+                               </span>
                             </div>
                         </div>
                     );
@@ -16432,7 +16535,11 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                             )}
                             <div className="flex items-center justify-between">
                                <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1.5"><Box size={14}/> {col != null ? 'Net Kullanılabilir Hacim' : 'Otomatik Hesaplanan Hacim'}</span>
-                               <span className="text-base font-black text-emerald-700">{fmt(net)} m³</span>
+                               {/* GÜNCELLENDİ: Kaydedilecek TAM SAYI gösterilir; ham hesap altta küçük yazıyla kalır */}
+                               <span className="text-right">
+                                  <span className="block text-base font-black text-emerald-700 leading-none">{roundRoomM3(net)} m³</span>
+                                  {roundRoomM3(net) !== net && <span className="block text-[9px] text-emerald-600/70 font-bold mt-0.5">ham: {fmt(net)} m³</span>}
+                               </span>
                             </div>
                         </div>
                     );
