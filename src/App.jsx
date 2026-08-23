@@ -4658,6 +4658,13 @@ const handleAddInvoice = async () => {
       setNewRoomHasColumn(false); setNewRoomCol({ width: '', length: '', height: '' });
   };
 
+  // YENİ: m³ değerini Türkçe ondalık biçiminde gösterir (22.11 → 22,11). Tam sayıysa ondalık yazılmaz.
+  const formatM3 = (v) => {
+      const n = Number(v);
+      if (isNaN(n)) return '0';
+      return (Math.round(n * 100) / 100).toString().replace('.', ',');
+  };
+
   // YENİ: Oda ölçülerini "3×2×2,5 m" biçiminde kısa metne çevirir (kart ve oda içi gösterim).
   const formatRoomDims = (room) => {
       if (!room) return '';
@@ -11043,7 +11050,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                   <div className="absolute top-0 right-0 p-3"><span className="bg-cyan-50 text-cyan-600 px-3 py-1 rounded-full text-[10px] font-bold border border-cyan-100 uppercase">Aktif Kiralama</span></div>
                                   <div className="flex items-center gap-3 mb-4">
                                      <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center text-gray-400"><Box size={20}/></div>
-                                     <div><h5 className="font-bold text-gray-800 text-lg">{room.name}</h5><p className="text-xs text-gray-500 font-medium">Giriş: {room.entryDate} • {room.m3} m³</p></div>
+                                     <div><h5 className="font-bold text-gray-800 text-lg">{room.name}</h5><p className="text-xs text-gray-500 font-medium">Giriş: {room.entryDate} • {formatM3(room.m3)} m³</p></div>
                                   </div>
                                   <div className="bg-gray-50 rounded-xl p-4 mb-4 border border-gray-100 flex flex-col gap-2">
                                      <div className="flex justify-between items-center"><span className="text-xs text-gray-500 font-semibold">Aylık Kira Bedeli:</span><span className="text-sm font-bold text-gray-700">{Math.round(monthlyTotal).toLocaleString('tr-TR')} TL {hasKdv && <span className="text-[9px] text-gray-400 font-normal">(KDV Dahil)</span>}</span></div>
@@ -12312,7 +12319,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                       <div className="flex flex-wrap justify-between items-start gap-2 mb-3">
                                           <div>
                                               <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><Box size={18} className="text-red-500" /> {room.name}</h3>
-                                              <p className="text-xs text-gray-500 font-medium mt-0.5">{warehouse?.name} — {block?.name} • {room.m3} m³</p>
+                                              <p className="text-xs text-gray-500 font-medium mt-0.5">{warehouse?.name} — {block?.name} • {formatM3(room.m3)} m³</p>
                                           </div>
                                           <span className="bg-red-100 text-red-600 text-[10px] font-black px-2.5 py-1.5 rounded-full uppercase tracking-wide animate-pulse">İcra Sürecinde</span>
                                       </div>
@@ -12926,15 +12933,21 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                         setActiveSizeFilter(null);
                                         setSizeFilterScope(null);
                                     }} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
-                                        <div className="px-4 py-3 flex justify-between items-center bg-[#1bc5bd] text-white shadow-md z-10">
-                                            <div className="flex flex-col min-w-0 mr-2">
-                                                <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
-                                                <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
-                                            </div>
-                                            {/* YENİ: m³ etiketinin SOLUNDA oda ölçüleri (en×boy×yükseklik) gösterilir */}
-                                            <div className="flex items-center gap-1 shrink-0">
-                                                {formatRoomDims(oda) && <span className="text-[9px] font-bold bg-black/15 px-1.5 py-1 rounded shadow-inner whitespace-nowrap" title="En × Boy × Yükseklik">{formatRoomDims(oda)}</span>}
-                                                <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner">{oda.m3} m³</span>
+                                        <div className="px-3 sm:px-4 py-2.5 flex items-center bg-[#1bc5bd] text-white shadow-md z-10">
+                                            {/* GÜNCELLENDİ (MOBİL DÜZELTMESİ): Başlık İKİ SATIRA bölündü.
+                                                ESKİ SORUN: Ölçü rozeti "shrink-0" olduğu için dar ekranda tüm
+                                                genişliği kaplıyor, oda adı sıfıra kadar kırpılıp GÖRÜNMÜYORDU.
+                                                YENİ DÜZEN: 1. satır → oda adı + m³ | 2. satır → şube/blok + ölçüler.
+                                                Böylece dar ekranda da üç bilgi birden okunur. */}
+                                            <div className="flex flex-col min-w-0 w-full gap-1">
+                                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                                    <h3 className="font-black text-lg sm:text-xl tracking-wide leading-none drop-shadow-sm truncate min-w-0">{oda.name}</h3>
+                                                    <span className="text-[10px] font-bold bg-black/25 px-2 py-1 rounded shadow-inner shrink-0 whitespace-nowrap">{formatM3(oda.m3)} m³</span>
+                                                </div>
+                                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                                    <span className="text-[9px] opacity-90 font-medium truncate min-w-0" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
+                                                    {formatRoomDims(oda) && <span className="text-[9px] font-bold bg-black/15 px-1.5 py-0.5 rounded shadow-inner shrink-0 whitespace-nowrap" title="En × Boy × Yükseklik">{formatRoomDims(oda)}</span>}
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="flex-1 relative flex flex-col justify-center items-center min-h-[140px]"
@@ -12990,15 +13003,21 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                         setShowReservedView(false);
                                         setReservedViewScope(null);
                                     }} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
-                                        <div className="px-4 py-3 flex justify-between items-center bg-orange-500 text-white shadow-md z-10">
-                                            <div className="flex flex-col min-w-0 mr-2">
-                                                <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
-                                                <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
-                                            </div>
-                                            {/* YENİ: m³ etiketinin SOLUNDA oda ölçüleri (en×boy×yükseklik) gösterilir */}
-                                            <div className="flex items-center gap-1 shrink-0">
-                                                {formatRoomDims(oda) && <span className="text-[9px] font-bold bg-black/15 px-1.5 py-1 rounded shadow-inner whitespace-nowrap" title="En × Boy × Yükseklik">{formatRoomDims(oda)}</span>}
-                                                <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner">{oda.m3} m³</span>
+                                        <div className="px-3 sm:px-4 py-2.5 flex items-center bg-orange-500 text-white shadow-md z-10">
+                                            {/* GÜNCELLENDİ (MOBİL DÜZELTMESİ): Başlık İKİ SATIRA bölündü.
+                                                ESKİ SORUN: Ölçü rozeti "shrink-0" olduğu için dar ekranda tüm
+                                                genişliği kaplıyor, oda adı sıfıra kadar kırpılıp GÖRÜNMÜYORDU.
+                                                YENİ DÜZEN: 1. satır → oda adı + m³ | 2. satır → şube/blok + ölçüler.
+                                                Böylece dar ekranda da üç bilgi birden okunur. */}
+                                            <div className="flex flex-col min-w-0 w-full gap-1">
+                                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                                    <h3 className="font-black text-lg sm:text-xl tracking-wide leading-none drop-shadow-sm truncate min-w-0">{oda.name}</h3>
+                                                    <span className="text-[10px] font-bold bg-black/25 px-2 py-1 rounded shadow-inner shrink-0 whitespace-nowrap">{formatM3(oda.m3)} m³</span>
+                                                </div>
+                                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                                    <span className="text-[9px] opacity-90 font-medium truncate min-w-0" title={`${warehouse?.name} - ${block?.name}`}>{warehouse?.name} - {block?.name}</span>
+                                                    {formatRoomDims(oda) && <span className="text-[9px] font-bold bg-black/15 px-1.5 py-0.5 rounded shadow-inner shrink-0 whitespace-nowrap" title="En × Boy × Yükseklik">{formatRoomDims(oda)}</span>}
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="flex-1 relative flex flex-col justify-center items-center gap-2 min-h-[150px] p-3"
@@ -13269,15 +13288,17 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       <div key={oda.id} onClick={() => setSelectedRoomId(oda.id)} className="relative rounded-xl overflow-hidden shadow-sm group hover:shadow-xl transition-all transform hover:-translate-y-1 cursor-pointer bg-white border border-gray-300 flex flex-col">
                         
                         {/* Oda Kapı Üst Pervazı (Duruma Göre Renkli) */}
-                        <div className={`px-4 py-3 flex justify-between items-center ${headerBg} text-white shadow-md z-10`}>
-                            <div className="flex flex-col min-w-0 mr-2">
-                                <h3 className="font-black text-xl tracking-wider leading-none drop-shadow-sm truncate">{oda.name}</h3>
-                                <span className="text-[9px] opacity-90 mt-1 font-medium truncate" title={`${currentWarehouse?.name} - ${currentBlock?.name}`}>{currentWarehouse?.name} - {currentBlock?.name}</span>
-                            </div>
-                            {/* YENİ: m³ etiketinin SOLUNDA oda ölçüleri gösterilir */}
-                            <div className="flex items-center gap-1 shrink-0">
-                                {formatRoomDims(oda) && <span className="text-[9px] font-bold bg-black/15 px-1.5 py-1 rounded shadow-inner whitespace-nowrap" title="En × Boy × Yükseklik">{formatRoomDims(oda)}</span>}
-                                <span className="text-[10px] font-bold bg-black/20 px-2 py-1 rounded shadow-inner">{oda.m3} m³</span>
+                        <div className={`px-3 sm:px-4 py-2.5 flex items-center ${headerBg} text-white shadow-md z-10`}>
+                            {/* GÜNCELLENDİ (MOBİL): Başlık iki satıra bölündü — oda adı artık kırpılmıyor */}
+                            <div className="flex flex-col min-w-0 w-full gap-1">
+                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                    <h3 className="font-black text-lg sm:text-xl tracking-wide leading-none drop-shadow-sm truncate min-w-0">{oda.name}</h3>
+                                    <span className="text-[10px] font-bold bg-black/25 px-2 py-1 rounded shadow-inner shrink-0 whitespace-nowrap">{formatM3(oda.m3)} m³</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                    <span className="text-[9px] opacity-90 font-medium truncate min-w-0" title={`${currentWarehouse?.name} - ${currentBlock?.name}`}>{currentWarehouse?.name} - {currentBlock?.name}</span>
+                                    {formatRoomDims(oda) && <span className="text-[9px] font-bold bg-black/15 px-1.5 py-0.5 rounded shadow-inner shrink-0 whitespace-nowrap" title="En × Boy × Yükseklik">{formatRoomDims(oda)}</span>}
+                                </div>
                             </div>
                         </div>
                         
@@ -13358,7 +13379,7 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 <Columns size={12}/> Kolon −{String(selectedRoomDetail.columnM3).replace('.', ',')} m³
                              </span>
                           )}
-                          <span className="text-sm font-bold text-[#1bc5bd] bg-teal-50 px-3 py-0.5 rounded-full border border-teal-100">{selectedRoomDetail?.m3} m³</span>
+                          <span className="text-sm font-bold text-[#1bc5bd] bg-teal-50 px-3 py-0.5 rounded-full border border-teal-100">{formatM3(selectedRoomDetail?.m3)} m³</span>
                        </div>
                     </div>
                   </div>
