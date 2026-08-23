@@ -36,6 +36,7 @@ import {
   MoveHorizontal,
   MoveVertical,
   MoveDiagonal,
+  Columns,
   MessageCircle,
   Phone,
   FileText as FileTextIcon,
@@ -4589,6 +4590,21 @@ const handleAddInvoice = async () => {
   const [newRoomM3, setNewRoomM3] = useState('');
   // YENİ: Yeni oda ölçüleri — en (genişlik), boy (uzunluk), yükseklik (metre)
   const [newRoomDims, setNewRoomDims] = useState({ width: '', length: '', height: '' });
+  // ═══════════════════════════════════════════════════════════════════════
+  // YENİ: KOLON (SÜTUN) DÜŞÜMÜ
+  // Bazı odaların içinde taşıyıcı kolon bulunur; bu hacim kullanılamaz.
+  // Kolon ölçüleri girildiğinde hacmi hesaplanıp odanın toplam m³'ünden DÜŞÜLÜR.
+  // hasColumn: kolon var mı? / newRoomCol: kolonun en-boy-yükseklik ölçüleri
+  // ═══════════════════════════════════════════════════════════════════════
+  const [newRoomHasColumn, setNewRoomHasColumn] = useState(false);
+  const [newRoomCol, setNewRoomCol] = useState({ width: '', length: '', height: '' });
+
+  // Üç ölçüden hacim hesaplar (virgüllü girişleri de kabul eder). Geçersizse null döner.
+  const calcVolume = (w, l, h) => {
+      const a = [w, l, h].map(v => parseFloat(String(v ?? '').replace(',', '.')));
+      if (!a.every(v => !isNaN(v) && v > 0)) return null;
+      return Math.round(a[0] * a[1] * a[2] * 100) / 100;
+  };
   
   const [isDeleteRoomModalOpen, setIsDeleteRoomModalOpen] = useState(false);
   const [roomToDelete, setRoomToDelete] = useState(null);
@@ -4604,13 +4620,16 @@ const handleAddInvoice = async () => {
       // ═══════════════════════════════════════════════════════════════════════
       // YENİ EKLENEN: EN / BOY / YÜKSEKLİK ÖLÇÜLERİ + OTOMATİK m³ HESABI
       // Üç ölçü de girildiyse hacim otomatik hesaplanır (en × boy × yükseklik).
-      // Ölçü girilmediyse elle yazılan m³ değeri aynen kullanılır (eski davranış korunur).
+      // GÜNCELLENDİ: Odada KOLON varsa kolonun hacmi brüt hacimden DÜŞÜLÜR;
+      // kullanılabilir (net) m³ kaydedilir. Ölçü girilmediyse elle yazılan
+      // m³ değeri aynen kullanılır (eski davranış korunur).
       // ═══════════════════════════════════════════════════════════════════════
-      const _w = parseFloat(String(newRoomDims.width).replace(',', '.'));
-      const _l = parseFloat(String(newRoomDims.length).replace(',', '.'));
-      const _h = parseFloat(String(newRoomDims.height).replace(',', '.'));
-      const _hasDims = [_w, _l, _h].every(v => !isNaN(v) && v > 0);
-      const _autoM3 = _hasDims ? Math.round(_w * _l * _h * 100) / 100 : null;
+      const _grossM3 = calcVolume(newRoomDims.width, newRoomDims.length, newRoomDims.height);
+      const _colM3 = newRoomHasColumn ? calcVolume(newRoomCol.width, newRoomCol.length, newRoomCol.height) : null;
+      // Net hacim negatif olamaz — kolon odadan büyük girilirse 0'a sabitlenir
+      const _autoM3 = _grossM3 != null
+          ? Math.max(0, Math.round((_grossM3 - (_colM3 || 0)) * 100) / 100)
+          : null;
 
       const newRoom = {
           id: Date.now(),
@@ -4619,9 +4638,16 @@ const handleAddInvoice = async () => {
           customerName: null,
           m3: _autoM3 != null ? _autoM3 : (newRoomM3 || 0),
           // Ölçüler ayrı alanlarda saklanır; kartta ve oda içinde gösterilir
-          width: _hasDims ? _w : null,
-          length: _hasDims ? _l : null,
-          height: _hasDims ? _h : null,
+          width: _grossM3 != null ? parseFloat(String(newRoomDims.width).replace(',', '.')) : null,
+          length: _grossM3 != null ? parseFloat(String(newRoomDims.length).replace(',', '.')) : null,
+          height: _grossM3 != null ? parseFloat(String(newRoomDims.height).replace(',', '.')) : null,
+          // YENİ: Kolon bilgileri — brüt hacim ve düşülen kolon hacmi de saklanır
+          hasColumn: !!(_colM3 != null),
+          columnWidth: _colM3 != null ? parseFloat(String(newRoomCol.width).replace(',', '.')) : null,
+          columnLength: _colM3 != null ? parseFloat(String(newRoomCol.length).replace(',', '.')) : null,
+          columnHeight: _colM3 != null ? parseFloat(String(newRoomCol.height).replace(',', '.')) : null,
+          columnM3: _colM3 != null ? _colM3 : null,
+          grossM3: _grossM3 != null ? _grossM3 : null,
           isReserved: false,
           paidMonths: [],
           orderIndex: currentRooms.length
@@ -4629,6 +4655,7 @@ const handleAddInvoice = async () => {
       if (db && firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', String(newRoom.id)), newRoom);
       setIsAddRoomModalOpen(false); setNewRoomName(''); setNewRoomM3('');
       setNewRoomDims({ width: '', length: '', height: '' });
+      setNewRoomHasColumn(false); setNewRoomCol({ width: '', length: '', height: '' });
   };
 
   // YENİ: Oda ölçülerini "3×2×2,5 m" biçiminde kısa metne çevirir (kart ve oda içi gösterim).
@@ -4649,17 +4676,23 @@ const handleAddInvoice = async () => {
 
   const handleEditRoom = async () => {
       if (!editRoomData?.name) return;
-      // YENİ: Üç ölçü de girildiyse hacim otomatik hesaplanır; aksi halde elle yazılan m³ kalır.
-      const _w = parseFloat(String(editRoomData.width ?? '').replace(',', '.'));
-      const _l = parseFloat(String(editRoomData.length ?? '').replace(',', '.'));
-      const _h = parseFloat(String(editRoomData.height ?? '').replace(',', '.'));
-      const _hasDims = [_w, _l, _h].every(v => !isNaN(v) && v > 0);
+      // YENİ: Üç ölçü de girildiyse hacim otomatik hesaplanır; KOLON varsa hacmi düşülür.
+      const _gross = calcVolume(editRoomData.width, editRoomData.length, editRoomData.height);
+      const _col = editRoomData.hasColumn ? calcVolume(editRoomData.columnWidth, editRoomData.columnLength, editRoomData.columnHeight) : null;
+      const _net = _gross != null ? Math.max(0, Math.round((_gross - (_col || 0)) * 100) / 100) : null;
+      const _num = (v) => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isNaN(n) ? null : n; };
       const _payload = {
           name: editRoomData.name,
-          m3: _hasDims ? Math.round(_w * _l * _h * 100) / 100 : editRoomData.m3,
-          width: _hasDims ? _w : null,
-          length: _hasDims ? _l : null,
-          height: _hasDims ? _h : null
+          m3: _net != null ? _net : editRoomData.m3,
+          width: _gross != null ? _num(editRoomData.width) : null,
+          length: _gross != null ? _num(editRoomData.length) : null,
+          height: _gross != null ? _num(editRoomData.height) : null,
+          hasColumn: !!(_col != null),
+          columnWidth: _col != null ? _num(editRoomData.columnWidth) : null,
+          columnLength: _col != null ? _num(editRoomData.columnLength) : null,
+          columnHeight: _col != null ? _num(editRoomData.columnHeight) : null,
+          columnM3: _col != null ? _col : null,
+          grossM3: _gross != null ? _gross : null
       };
       // Yerel state anında güncellenir
       setRooms(prev => prev.map(r => String(r.id) === String(editRoomData.id) ? { ...r, ..._payload } : r));
@@ -13319,6 +13352,12 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                                 <MoveHorizontal size={12} className="text-slate-400"/> {formatRoomDims(selectedRoomDetail)}
                              </span>
                           )}
+                          {/* YENİ: Odada kolon varsa düşülen hacim rozeti */}
+                          {selectedRoomDetail?.columnM3 > 0 && (
+                             <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 flex items-center gap-1" title={`Brüt ${String(selectedRoomDetail.grossM3 ?? '').replace('.', ',')} m³ — kolon düşüldü`}>
+                                <Columns size={12}/> Kolon −{String(selectedRoomDetail.columnM3).replace('.', ',')} m³
+                             </span>
+                          )}
                           <span className="text-sm font-bold text-[#1bc5bd] bg-teal-50 px-3 py-0.5 rounded-full border border-teal-100">{selectedRoomDetail?.m3} m³</span>
                        </div>
                     </div>
@@ -16222,18 +16261,63 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                    </div>
                 </div>
 
-                {/* OTOMATİK HACİM — üç ölçü girildiyse hesaplanan m³ anında gösterilir */}
+                {/* ═══════════════════════════════════════════════════════════
+                    YENİ: KOLON VAR BUTONU
+                    Odada taşıyıcı kolon varsa açılır; kolon ölçüleri girilir ve
+                    hacmi toplam m³'ten DÜŞÜLÜR (kullanılamayan alan).
+                    ═══════════════════════════════════════════════════════════ */}
+                <button
+                   onClick={() => { const v = !newRoomHasColumn; setNewRoomHasColumn(v); if (!v) setNewRoomCol({ width:'', length:'', height:'' }); }}
+                   className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold mb-3 border-2 transition-all ${newRoomHasColumn ? 'bg-amber-500 border-amber-500 text-white shadow-md' : 'bg-white border-dashed border-amber-300 text-amber-600 hover:bg-amber-50'}`}
+                >
+                   <Columns size={15}/> {newRoomHasColumn ? 'Kolon Var (ölçüleri girin)' : 'Kolon Var mı? — Ekle'}
+                </button>
+
+                {/* KOLON ÖLÇÜLERİ — yalnızca "Kolon Var" seçiliyken görünür */}
+                {newRoomHasColumn && (
+                   <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-3 mb-3">
+                      <label className="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-2 block">Kolon Ölçüleri (metre)</label>
+                      <div className="grid grid-cols-3 gap-2">
+                         <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-600 pointer-events-none"><MoveHorizontal size={14}/></span>
+                            <input type="number" step="0.01" value={newRoomCol.width} onChange={(e)=>setNewRoomCol(d=>({...d, width:e.target.value}))} placeholder="En" className="w-full border border-amber-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-amber-500 bg-white" />
+                         </div>
+                         <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-600 pointer-events-none"><MoveDiagonal size={14}/></span>
+                            <input type="number" step="0.01" value={newRoomCol.length} onChange={(e)=>setNewRoomCol(d=>({...d, length:e.target.value}))} placeholder="Boy" className="w-full border border-amber-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-amber-500 bg-white" />
+                         </div>
+                         <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-600 pointer-events-none"><MoveVertical size={14}/></span>
+                            <input type="number" step="0.01" value={newRoomCol.height} onChange={(e)=>setNewRoomCol(d=>({...d, height:e.target.value}))} placeholder="Yük." className="w-full border border-amber-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-amber-500 bg-white" />
+                         </div>
+                      </div>
+                      <p className="text-[10px] text-amber-600 font-semibold mt-2">Kolon hacmi odanın toplam m³'ünden düşülür.</p>
+                   </div>
+                )}
+
+                {/* OTOMATİK HACİM — brüt hacim, kolon düşümü ve net kullanılabilir hacim */}
                 {(() => {
-                    const w = parseFloat(String(newRoomDims.width).replace(',', '.'));
-                    const l = parseFloat(String(newRoomDims.length).replace(',', '.'));
-                    const h = parseFloat(String(newRoomDims.height).replace(',', '.'));
-                    const ok = [w, l, h].every(v => !isNaN(v) && v > 0);
-                    if (!ok) return null;
-                    const m3 = Math.round(w * l * h * 100) / 100;
+                    const gross = calcVolume(newRoomDims.width, newRoomDims.length, newRoomDims.height);
+                    if (gross == null) return null;
+                    const col = newRoomHasColumn ? calcVolume(newRoomCol.width, newRoomCol.length, newRoomCol.height) : null;
+                    const net = Math.max(0, Math.round((gross - (col || 0)) * 100) / 100);
+                    const fmt = (v) => String(v).replace('.', ',');
                     return (
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 mb-3 flex items-center justify-between">
-                            <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1.5"><Box size={14}/> Otomatik Hesaplanan Hacim</span>
-                            <span className="text-base font-black text-emerald-700">{String(m3).replace('.', ',')} m³</span>
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 mb-3">
+                            {col != null && (
+                               <>
+                                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 mb-1">
+                                    <span>Brüt Hacim</span><span>{fmt(gross)} m³</span>
+                                 </div>
+                                 <div className="flex items-center justify-between text-[11px] font-bold text-amber-600 mb-1.5 pb-1.5 border-b border-emerald-200">
+                                    <span className="flex items-center gap-1"><Columns size={12}/> Kolon Düşümü</span><span>− {fmt(col)} m³</span>
+                                 </div>
+                               </>
+                            )}
+                            <div className="flex items-center justify-between">
+                               <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1.5"><Box size={14}/> {col != null ? 'Net Kullanılabilir Hacim' : 'Otomatik Hesaplanan Hacim'}</span>
+                               <span className="text-base font-black text-emerald-700">{fmt(net)} m³</span>
+                            </div>
                         </div>
                     );
                 })()}
@@ -16282,6 +16366,56 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                       <input type="number" step="0.01" value={editRoomData.height ?? ''} onChange={(e)=>setEditRoomData({...editRoomData, height: e.target.value})} placeholder="Yük." className="w-full border border-gray-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-orange-500" />
                    </div>
                 </div>
+
+                {/* YENİ: KOLON — mevcut odada kolon varsa ölçüleri girilir, hacim düşülür */}
+                <button
+                   onClick={() => setEditRoomData(d => ({ ...d, hasColumn: !d.hasColumn, ...(d.hasColumn ? { columnWidth:'', columnLength:'', columnHeight:'' } : {}) }))}
+                   className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold mb-3 border-2 transition-all ${editRoomData.hasColumn ? 'bg-amber-500 border-amber-500 text-white shadow-md' : 'bg-white border-dashed border-amber-300 text-amber-600 hover:bg-amber-50'}`}
+                >
+                   <Columns size={15}/> {editRoomData.hasColumn ? 'Kolon Var (ölçüleri girin)' : 'Kolon Var mı? — Ekle'}
+                </button>
+                {editRoomData.hasColumn && (
+                   <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-3 mb-3">
+                      <label className="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-2 block">Kolon Ölçüleri (metre)</label>
+                      <div className="grid grid-cols-3 gap-2">
+                         <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-600 pointer-events-none"><MoveHorizontal size={14}/></span>
+                            <input type="number" step="0.01" value={editRoomData.columnWidth ?? ''} onChange={(e)=>setEditRoomData({...editRoomData, columnWidth: e.target.value})} placeholder="En" className="w-full border border-amber-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-amber-500 bg-white" />
+                         </div>
+                         <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-600 pointer-events-none"><MoveDiagonal size={14}/></span>
+                            <input type="number" step="0.01" value={editRoomData.columnLength ?? ''} onChange={(e)=>setEditRoomData({...editRoomData, columnLength: e.target.value})} placeholder="Boy" className="w-full border border-amber-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-amber-500 bg-white" />
+                         </div>
+                         <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-600 pointer-events-none"><MoveVertical size={14}/></span>
+                            <input type="number" step="0.01" value={editRoomData.columnHeight ?? ''} onChange={(e)=>setEditRoomData({...editRoomData, columnHeight: e.target.value})} placeholder="Yük." className="w-full border border-amber-300 rounded pl-7 pr-2 py-2 text-sm focus:outline-none focus:border-amber-500 bg-white" />
+                         </div>
+                      </div>
+                   </div>
+                )}
+
+                {/* Hesap dökümü: brüt − kolon = net */}
+                {(() => {
+                    const gross = calcVolume(editRoomData.width, editRoomData.length, editRoomData.height);
+                    if (gross == null) return null;
+                    const col = editRoomData.hasColumn ? calcVolume(editRoomData.columnWidth, editRoomData.columnLength, editRoomData.columnHeight) : null;
+                    const net = Math.max(0, Math.round((gross - (col || 0)) * 100) / 100);
+                    const fmt = (v) => String(v).replace('.', ',');
+                    return (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 mb-3">
+                            {col != null && (
+                               <>
+                                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 mb-1"><span>Brüt Hacim</span><span>{fmt(gross)} m³</span></div>
+                                 <div className="flex items-center justify-between text-[11px] font-bold text-amber-600 mb-1.5 pb-1.5 border-b border-emerald-200"><span className="flex items-center gap-1"><Columns size={12}/> Kolon Düşümü</span><span>− {fmt(col)} m³</span></div>
+                               </>
+                            )}
+                            <div className="flex items-center justify-between">
+                               <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1.5"><Box size={14}/> {col != null ? 'Net Kullanılabilir Hacim' : 'Otomatik Hesaplanan Hacim'}</span>
+                               <span className="text-base font-black text-emerald-700">{fmt(net)} m³</span>
+                            </div>
+                        </div>
+                    );
+                })()}
 
                 <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Hacim (m³)</label><input type="number" value={editRoomData.m3} onChange={(e)=>setEditRoomData({...editRoomData, m3: e.target.value})} placeholder="Hacim (m³)" className="w-full border border-gray-300 rounded px-3 py-2 mb-6 focus:outline-none focus:border-cyan-500" />
                 <button onClick={handleEditRoom} className="w-full bg-[#1bc5bd] hover:bg-teal-500 text-white px-4 py-2 rounded transition-colors font-medium">Değişiklikleri Kaydet</button>
