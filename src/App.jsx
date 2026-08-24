@@ -9301,76 +9301,123 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
       // Sonraki tahsilatlar kapıyı oynatmadığından, işlenmiş faizler artık silinmez.
       const interestGateTime = Math.max(__preCutoffSettle, __preCutoffPayment);
 
-      const baseTransactions = [...modifiedLedger];
-      // Bugüne kadar olan faizleri tetiklemek için dummy bir hareket ekliyoruz.
-      // GÜNCELLENDİ: Çıkış yapmış müşteride tetikleyici tarih ÇIKIŞ GÜNÜdür; böylece
-      // çıkıştan bugüne kadar geçen aylar için faiz üretilmez.
-      const __interestTriggerDate = interestFreezeTime ? new Date(Math.min(today.getTime(), interestFreezeTime)) : today;
-      baseTransactions.push({ id: 'dummy-today', date: __interestTriggerDate, debt: 0, credit: 0, isDummy: true });
+      // ═══════════════════════════════════════════════════════════════════════════
+      // YENİDEN YAZILDI: BORÇ-BAZLI FAİZ MOTORU (HER ÖDEME KENDİ 30 GÜNÜNÜ DOLDURUNCA)
+      //
+      // ESKİ SORUN: Faiz her 30 günde bir müşterinin TÜM bakiyesine işliyordu.
+      // Bakiyeye yeni eklenen bir borç (ikinci deponun kirası, mühür ücreti,
+      // nakliye ücreti...) daha 30 günü DOLMADAN faiz kapsamına giriyordu.
+      // Örn: 16 gün önce tahakkuk eden Ağustos kirası ve 1 gün önce eklenen
+      // mühür ücreti, ertesi günkü faiz vuruşunda faizlendiriliyordu.
+      //
+      // YENİ KURAL:
+      //   • HER BORÇ KALEMİ kendi tarihinden itibaren AYRI izlenir.
+      //   • Bir kalem 30 gün içinde ödenmezse, 30. günde KALAN tutarına faiz işler;
+      //     ödenmediği sürece her 30 günde bir tekrar işler (o ayın oranıyla).
+      //   • 30 günü dolmamış kalemlere ASLA faiz işlemez.
+      //   • TAHSİLATLAR en eski borçtan başlayarak kapatır (FIFO). Kalemin
+      //     kapanan kısmına bir daha faiz işlemez; kalan kısmına işlemeye devam eder.
+      //   • Fazla ödeme (avans) havuzda bekler, sonraki borcu anında düşer.
+      //   • Faiz satırları da FIFO ile ödenebilir; ama faize faiz İŞLEMEZ (basit faiz).
+      //
+      // KORUNAN KURALLAR: faiz aktif/pasif anahtarı, müşteri muafiyeti, ay bazlı
+      // oranlar, 1 Ağustos 2026 koruma kapısı (interestGateTime) ve çıkış sonrası
+      // dondurma (interestFreezeTime) aynen geçerlidir.
+      // ═══════════════════════════════════════════════════════════════════════════
+      const _FAR_FUTURE = 8640000000000000;
+      const openDebts = [];   // { key, date, remaining, next } — açık borç kalemleri
+      let creditPool = 0;     // fazla ödeme (avans) havuzu
 
-      baseTransactions.forEach(tx => {
-          // Eğer borç varsa ve üzerinden zaman geçmişse faizi uygula (VE AYARLARDAN AKTİF EDİLDİYSE VE MÜŞTERİ MUAF DEĞİLSE)
-          if (collectionRates.isInterestActive && !isCustomerExempt && runningBalance > 0 && lastInterestAppliedDate) {
-              let nextInterestDate = addDays(lastInterestAppliedDate, 30);
-              
-              while (nextInterestDate <= tx.date) {
-                  // YENİ: ÇIKIŞ SONRASI FAİZ ÜRETİLMEZ — bakiye çıkış anında dondurulur.
-                  if (interestFreezeTime && nextInterestDate.getTime() > interestFreezeTime) break;
-                  // YENİ: Faiz yalnızca aktivasyon tarihinden VE ana borcun en son sıfırlandığı andan
-                  // (hangisi sonraysa) sonrasına işlenir. Böylece ödenip sıfırlanmış geçmiş dönemlere faiz gelmez.
-                  // GÜNCELLENDİ: Kapı olarak interestGateTime kullanılır — tahsilat yapılınca
-                  // daha önce cariye işlenmiş faiz satırları silinmez (bkz. yukarıdaki açıklama).
-                  if (nextInterestDate.getTime() >= interestGateTime) {
-                      // YENİ: O ayın faiz oranını kullan (girilmemişse genel orana düş). Anahtar 'YYYY-AyIndex'.
-                      const _mKey = `${nextInterestDate.getFullYear()}-${nextInterestDate.getMonth()}`;
-                      const _mRateRaw = (collectionRates.monthlyInterestRates || {})[_mKey];
-                      const _effRate = (_mRateRaw !== undefined && _mRateRaw !== '' && _mRateRaw !== null) ? Number(_mRateRaw) / 100 : interestRate;
-                      // YENİ: Faiz, KDV'siz "EKSTRA FAİZ" olarak kalan borç üzerine işlenir (KDV eklenmez).
-                      const interestAmount = runningBalance * _effRate;
-                      
-                      runningBalance += interestAmount;
-                      
-                      finalLedger.push({
-                          id: `interest-${nextInterestDate.getTime()}`,
-                          date: new Date(nextInterestDate),
-                          dateStr: `${nextInterestDate.getDate().toString().padStart(2, '0')}.${(nextInterestDate.getMonth() + 1).toString().padStart(2, '0')}.${nextInterestDate.getFullYear()}`,
-                          desc: `Ekstra Gecikme Faizi (%${(_effRate * 100).toLocaleString('tr-TR')})`,
-                          debt: interestAmount,
-                          baseDebt: interestAmount,
-                          kdvDebt: 0,
-                          credit: 0,
-                          balance: runningBalance,
-                          isInterest: true
-                      });
-                  }
-                  
-                  lastInterestAppliedDate = new Date(nextInterestDate);
-                  nextInterestDate = addDays(lastInterestAppliedDate, 30);
+      // Faiz vuruş tarihine göre geçerli oranı döndürür (ay bazlı oran > genel oran)
+      const _rateFor = (d) => {
+          const _k = `${d.getFullYear()}-${d.getMonth()}`;
+          const _raw = (collectionRates.monthlyInterestRates || {})[_k];
+          return (_raw !== undefined && _raw !== '' && _raw !== null) ? Number(_raw) / 100 : interestRate;
+      };
+
+      // Verilen zamana kadar VADESİ GELMİŞ tüm faiz vuruşlarını kronolojik işler.
+      const _chargeTicksUpTo = (limitTime) => {
+          if (!collectionRates.isInterestActive || isCustomerExempt) return;
+          let _safety = 0;
+          while (_safety++ < 5000) {
+              // Sıradaki en erken vuruş: kalanı olan kalemler içinde en küçük "next"
+              let _idx = -1, _min = Infinity;
+              openDebts.forEach((d, i) => {
+                  if (d.remaining > 0.01 && d.next < _min) { _min = d.next; _idx = i; }
+              });
+              if (_idx === -1 || _min > limitTime) break;
+              const _d = openDebts[_idx];
+
+              // Çıkış sonrası dondurma: dondurma anından sonra vuruş üretilmez
+              if (interestFreezeTime && _min > interestFreezeTime) { _d.next = _FAR_FUTURE; continue; }
+
+              // 1 Ağustos 2026 koruma kapısı: kapıdan önceki vuruşlar atlanır (takvim ilerler)
+              if (_min >= interestGateTime) {
+                  const _tickDate = new Date(_min);
+                  const _effRate = _rateFor(_tickDate);
+                  const _amt = _d.remaining * _effRate;   // yalnız BU KALEMİN kalanına faiz
+                  runningBalance += _amt;
+                  // Faiz de ödenebilir bir kalemdir; ama faize faiz işlemez (next = sonsuz)
+                  openDebts.push({ key: `${_d.key}-f${_min}`, date: _min, remaining: _amt, next: _FAR_FUTURE });
+                  finalLedger.push({
+                      id: `interest-${_min}-${_d.key}`,
+                      date: _tickDate,
+                      dateStr: `${_tickDate.getDate().toString().padStart(2, '0')}.${(_tickDate.getMonth() + 1).toString().padStart(2, '0')}.${_tickDate.getFullYear()}`,
+                      desc: `Ekstra Gecikme Faizi (%${(_effRate * 100).toLocaleString('tr-TR')})${_d.srcDesc ? ` — ${_d.srcDesc}` : ''}`,
+                      debt: _amt,
+                      baseDebt: _amt,
+                      kdvDebt: 0,
+                      credit: 0,
+                      balance: runningBalance,
+                      isInterest: true
+                  });
               }
+              _d.next = _d.next + 30 * 86400000;   // aynı kalem için bir sonraki 30 günlük vade
+          }
+      };
+
+      // Faiz üretiminin tavanı: bugün (çıkış yapmış müşteride çıkış günü)
+      const _interestHorizon = interestFreezeTime ? Math.min(today.getTime(), interestFreezeTime) : today.getTime();
+
+      modifiedLedger.forEach(tx => {
+          const _txTime = (tx.date instanceof Date ? tx.date : new Date(tx.date)).getTime();
+          // Önce bu işlem tarihine kadar vadesi gelen faizleri işle (kronolojik sıra korunur)
+          _chargeTicksUpTo(Math.min(_txTime, _interestHorizon));
+
+          // BORÇ: yeni kalem olarak izlemeye al. Avans havuzu varsa borcu anında düşer.
+          if ((Number(tx.debt) || 0) > 0.001 && !tx.isInterest) {
+              let _amt = Number(tx.debt);
+              if (creditPool > 0.01) {
+                  const _use = Math.min(creditPool, _amt);
+                  creditPool -= _use; _amt -= _use;
+              }
+              openDebts.push({
+                  key: String(tx.id || `d${_txTime}`),
+                  date: _txTime,
+                  remaining: _amt,
+                  next: _txTime + 30 * 86400000,   // İLK faiz vadesi: kalemin 30. günü
+                  srcDesc: (tx.desc || '').length > 45 ? (tx.desc || '').slice(0, 45) + '…' : (tx.desc || '')
+              });
           }
 
-          // Asıl hareketi (işlemi) uygula
-          if (!tx.isDummy) {
-              runningBalance += (tx.debt - tx.credit);
-              
-              if (runningBalance > 0) {
-                  // Eğer bakiye pozitifse ve daha önce faiz başlangıç tarihi yoksa yeni tarihi ata
-                  if (!lastInterestAppliedDate) {
-                      lastInterestAppliedDate = new Date(tx.date);
-                  }
-                  // YENİ: KISMİ/eksik TAHSİLAT yapıldıysa faiz döngüsü SON TAHSİLAT tarihine yeniden çıpalanır.
-                  // Böylece kalan bakiyeye, son tahsilattan 30 gün geçtikten sonra (o ayın oranıyla) faiz işler.
-                  if (Number(tx.credit) > 0 && !tx.isInterest) {
-                      lastInterestAppliedDate = new Date(tx.date);
-                  }
-              } else {
-                  // Borç sıfırlandıysa veya alacaklıysa faiz döngüsünü sıfırla
-                  lastInterestAppliedDate = null;
+          // TAHSİLAT: en eski borçtan başlayarak kapat (FIFO); artan avans havuzuna
+          if ((Number(tx.credit) || 0) > 0.001) {
+              let _pay = Number(tx.credit);
+              const _sorted = openDebts.filter(d => d.remaining > 0.01).sort((a, b) => a.date - b.date);
+              for (const d of _sorted) {
+                  if (_pay <= 0.01) break;
+                  const _use = Math.min(d.remaining, _pay);
+                  d.remaining -= _use; _pay -= _use;
               }
-              
-              finalLedger.push({ ...tx, balance: runningBalance });
+              if (_pay > 0.01) creditPool += _pay;
           }
+
+          runningBalance += ((Number(tx.debt) || 0) - (Number(tx.credit) || 0));
+          finalLedger.push({ ...tx, balance: runningBalance });
       });
+
+      // Son işlemden bugüne kadar vadesi gelmiş faizleri de işle
+      _chargeTicksUpTo(_interestHorizon);
 
       return { ledger: finalLedger, balance: runningBalance };
   };
