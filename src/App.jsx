@@ -3847,6 +3847,14 @@ const handleManualAddDebt = async () => {
     };
 
     const customerToUpdate = customers.find(c => c.id === selectedCustomerId);
+
+    // DÜZELTİLDİ: Kayıt artık YEREL listeye de anında ekleniyor. Eskiden yalnızca
+    // Firebase'e yazılıyordu; oturum sorunu olan cihazlarda veya önizleme modunda
+    // borç hiç görünmüyor, kullanıcı "eklenmedi" sanıp tekrar tekrar giriyordu.
+    if (customerToUpdate) {
+        setCustomers(prev => prev.map(c => c.id === selectedCustomerId ? { ...c, extraDebts: [...(c.extraDebts || []), newDebt] } : c));
+    }
+
     if (customerToUpdate && db && firebaseUser) {
         try {
             const existingDebts = customerToUpdate.extraDebts || [];
@@ -3855,6 +3863,7 @@ const handleManualAddDebt = async () => {
             }, { merge: true });
         } catch(e) { console.error("Manuel Borç Ekleme Hatası:", e); }
     }
+    logActivity('Cari Borç', `${customerToUpdate?.name || ''} carisine borç eklendi: ${newDebtData.desc} (${finalAmount.toLocaleString('tr-TR')} TL)`);
 
     setIsAddDebtModalOpen(false);
     setNewDebtData({ desc: '', amount: '', date: new Date().toISOString().split('T')[0], hasKdv: true });
@@ -9130,8 +9139,21 @@ if (isDueYet && !selectedRoomDetail.paidMonths?.includes(key) && !isGifted && !i
       // 3. Ekstra Borçlar
       if (customer.extraDebts) {
           customer.extraDebts.forEach(debt => {
-              // Nakliye/taşıma bedelleri kaldırıldı — cari ekstrede gösterilmez
-              if (debt.type === 'transport' || String(debt.desc || '').toLowerCase().includes('nakliye') || String(debt.desc || '').toLowerCase().includes('taşıma')) return;
+              // ═══════════════════════════════════════════════════════════════
+              // DÜZELTİLDİ: ELLE EKLENEN BORÇLAR ARTIK CARİDE GÖRÜNÜYOR
+              // ESKİ HATA: Açıklamasında "nakliye" veya "taşıma" geçen HER kayıt
+              // ekstreden gizleniyordu. Oysa "Cari Ödeme (Borç) Ekle" penceresinin
+              // örnek metni bile "Ekstra Nakliye Hizmeti" — kullanıcı bu şekilde
+              // borç girdiğinde kayıt veritabanına yazılıyor ama caride HİÇ
+              // görünmüyordu (sessizce filtreleniyordu).
+              // YENİ KURAL: Gizleme yalnızca SİSTEMİN otomatik ürettiği taşıma
+              // kayıtları (type='transport') ve elle GİRİLMEMİŞ eski nakliye
+              // kayıtları için geçerli. ELLE eklenen borçlar (type='manual_debt')
+              // açıklaması ne olursa olsun HER ZAMAN caride gösterilir.
+              // ═══════════════════════════════════════════════════════════════
+              const _isManual = debt.type === 'manual_debt';
+              const _descL = String(debt.desc || '').toLowerCase();
+              if (!_isManual && (debt.type === 'transport' || _descL.includes('nakliye') || _descL.includes('taşıma'))) return;
               const dDate = new Date(debt.date);
               const amount = Number(debt.amount);
               const hasKdv = debt.hasKdv !== false; // Eğer özellik yoksa KDV'li varsay (geçmişe dönük destek)
