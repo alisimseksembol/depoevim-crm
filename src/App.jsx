@@ -1986,16 +1986,27 @@ const handleSendEInvoice = async () => {
       if (!shareInvoiceData) return;
       const { customer, fileUrl, tx } = shareInvoiceData;
       const amountStr = Number(tx.amount).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
-      const bodyText = `Merhaba ${customer.name},\n\n${amountStr} TL tutarındaki faturanız ektedir. Faturanıza aşağıdaki bağlantıdan ulaşabilirsiniz:\n${fileUrl}\n\nDepoEvim`;
-      const encoded = encodeURIComponent(bodyText);
+
+      // ═══════════════════════════════════════════════════════════════════
+      // GÜNCELLENDİ: WHATSAPP MESAJINDA ARTIK BAĞLANTI (LİNK) GÖRÜNMÜYOR
+      // İSTEK: Müşteriye WhatsApp'tan fatura paylaşılırken mesajda dosya
+      // bağlantısı çıkmasın. Yalnızca WhatsApp kanalı için geçerlidir;
+      // Gmail ve SMS mesajları eskisi gibi bağlantı içermeye devam eder
+      // (bu kanallarda faturaya ulaşmanın tek yolu bağlantıdır).
+      // ═══════════════════════════════════════════════════════════════════
+      const bodyTextWithLink = `Merhaba ${customer.name},\n\n${amountStr} TL tutarındaki faturanız ektedir. Faturanıza aşağıdaki bağlantıdan ulaşabilirsiniz:\n${fileUrl}\n\nDepoEvim`;
+      const bodyTextNoLink = `Merhaba ${customer.name},\n\n${amountStr} TL tutarındaki faturanız ektedir.\n\nDepoEvim`;
 
       if (platform === 'whatsapp') {
+          const encoded = encodeURIComponent(bodyTextNoLink);
           window.open(`https://wa.me/90${customer.phone}?text=${encoded}`, '_blank');
       } else if (platform === 'gmail') {
+          const encoded = encodeURIComponent(bodyTextWithLink);
           const subject = encodeURIComponent(`DepoEvim - Faturanız (${amountStr} TL)`);
           // Gmail web compose penceresini aç (fatura bağlantısı gövdede yer alır)
           window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${customer.email || ''}&su=${subject}&body=${encoded}`, '_blank');
       } else if (platform === 'sms') {
+          const encoded = encodeURIComponent(bodyTextWithLink);
           const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
           const separator = isIOS ? '&' : '?';
           window.open(`sms:+90${customer.phone}${separator}body=${encoded}`, '_self');
@@ -13192,16 +13203,10 @@ const entryDate = parseDateLocal(room.entryDate || '2026-01-01');
                     <h2 className="text-2xl font-bold text-slate-800">Depo Listesi</h2>
                     {/* YENİ: Üç küçük buton tek satırda yan yana — Oda Boyutu Bul / Rezerve Göster / Depo Ekle */}
                     <div className="flex flex-nowrap items-center gap-2">
-                        {/* YENİ: TOPLU m³ DÜZELTME — tüm depolardaki küsuratlı odaları tam sayıya çevirir */}
-                        {(() => {
-                            const kusuratli = (rooms || []).filter(r => { const n = Number(r?.m3); return !isNaN(n) && n > 0 && roundRoomM3(n) !== n; }).length;
-                            if (kusuratli === 0) return null;   // düzeltilecek oda yoksa buton hiç görünmez
-                            return (
-                                <button onClick={handleBulkFixRoomM3} disabled={bulkM3Fixing} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-md shadow-emerald-500/30 whitespace-nowrap" title="Tüm depolardaki küsuratlı m³ değerlerini tam sayıya yuvarlar">
-                                    <RefreshCcw size={14} className={bulkM3Fixing ? 'animate-spin' : ''} /> m³ Düzelt ({kusuratli})
-                                </button>
-                            );
-                        })()}
+                        {/* KALDIRILDI: "m³ Düzelt" toplu düzeltme butonu — kullanıcı isteğiyle
+                            arayüzden kaldırıldı. Alttaki handleBulkFixRoomM3 fonksiyonu ve
+                            roundRoomM3 yardımcı fonksiyonu dokunulmadan kalıyor (başka yerlerde
+                            kullanılıyor); yalnızca bu buton görünümden çıkarıldı. */}
                         {/* YENİ: "Oda Boyutu Bul" — seçenekler ortada modal pencerede açılır (tüm depolar kapsamı) */}
                         <button onClick={() => setSizeFilterModal({ scope: null })} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all shadow-md shadow-purple-500/30 whitespace-nowrap">
                             <Search size={14} /> Oda Boyutu Bul
