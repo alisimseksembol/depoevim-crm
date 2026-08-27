@@ -62,8 +62,8 @@ const defaultFirebaseConfig = {
   };
 
 // 2) Sembol CRM > ALBARAKA BANK defteri Düzenle > Entegrasyon panelinden kopyalayın
-const SEMBOL_APP_ID = 'BURAYA_UYGULAMA_ID';      // panelde "Uygulama ID (SEMBOL_APP_ID)"
-const HEDEF_DEFTER_ID = 'BURAYA_DEFTER_ID';      // panelde "Defter ID (HEDEF_DEFTER_ID)"
+const SEMBOL_APP_ID = 'sembol-crm-lokal';      // panelde "Uygulama ID (SEMBOL_APP_ID)"
+const HEDEF_DEFTER_ID = 'appTS8SDGHo027PBLLWr';      // panelde "Defter ID (HEDEF_DEFTER_ID)"
 // ============================================================================
 
 // Sembol'e ikinci (adlandırılmış) Firebase bağlantısı — Depoevim'in kendi
