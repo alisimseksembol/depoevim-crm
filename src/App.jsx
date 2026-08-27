@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, where, limit, orderBy, deleteDoc, arrayUnion, waitForPendingWrites, enableNetwork, disableNetwork, getDocFromServer, getDocsFromCache, terminate, clearIndexedDbPersistence } from 'firebase/firestore';
+import { sembolTahsilatGonder } from './sembolKoprusu';
 import { 
   LayoutDashboard, 
   Users, 
