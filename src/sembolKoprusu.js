@@ -52,18 +52,18 @@ import { getAuth, signInAnonymously } from 'firebase/auth';
 
 // ============================== AYARLAR =====================================
 // 1) Sembol projesinin firebaseConfig'i (shared.tsx'in en üstünden kopyalayın)
-const defaultFirebaseConfig = {
-    apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
-    authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
-    projectId: "sembol-operasyon-merkezi",
-    storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
-    messagingSenderId: "1054049299174",
-    appId: "1:1054049299174:web:2193f916a3501543d92927"
-  };
+const SEMBOL_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
+  authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
+  projectId: "sembol-operasyon-merkezi",
+  storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
+  messagingSenderId: "1054049299174",
+  appId: "1:1054049299174:web:2193f916a3501543d92927",
+};
 
 // 2) Sembol CRM > ALBARAKA BANK defteri Düzenle > Entegrasyon panelinden kopyalayın
-const SEMBOL_APP_ID = 'sembol-crm-lokal';      // panelde "Uygulama ID (SEMBOL_APP_ID)"
-const HEDEF_DEFTER_ID = 'appTS8SDGHo027PBLLWr';      // panelde "Defter ID (HEDEF_DEFTER_ID)"
+const SEMBOL_APP_ID = 'sembol-crm-lokal';        // Sembol paneli: Uygulama ID
+const HEDEF_DEFTER_ID = 'appTS8SDGHo027PBLLWr';  // Sembol paneli: ALBARAKA BANK defteri
 // ============================================================================
 
 // Sembol'e ikinci (adlandırılmış) Firebase bağlantısı — Depoevim'in kendi
