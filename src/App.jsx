@@ -6504,6 +6504,22 @@ const handleGlobalPayment = async () => {
                     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
                         payments: [...existingPayments, newPayment]
                     }, { merge: true });
+
+                    // === YENİ: Sembol CRM'e otomatik gönderim ===
+                    try {
+                        sembolTahsilatGonder({
+                            tahsilatId: `${customerId}_${newPayment.date}_${Date.now()}`,
+                            musteriAdi: customerToUpdate.name || customerToUpdate.fullName || customerToUpdate.musteriAdi || 'Müşteri',
+                            musteriNo: String(customerId),
+                            tutar: Number(newPayment.netAmount || newPayment.amount || 0),
+                            tarih: newPayment.date,
+                            aciklama: newPayment.note || '',
+                        });
+                    } catch (sembolHata) {
+                        console.warn('Sembol CRM gönderimi başarısız (Depoevim kaydınız güvende):', sembolHata);
+                    }
+                    // === YENİ BÖLÜM SONU ===
+
                 } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
             } else {
                 setCustomers(prev => prev.map(c => String(c.id) === String(customerId) ? { ...c, payments: [...existingPayments, newPayment] } : c));
