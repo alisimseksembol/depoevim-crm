@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocs, collection, onSnapshot, query, where, limit, orderBy, deleteDoc, arrayUnion, waitForPendingWrites, enableNetwork, disableNetwork, getDocFromServer, getDocsFromCache, terminate, clearIndexedDbPersistence } from 'firebase/firestore';
 import { sembolTahsilatGonder } from './sembolKoprusu';
+import { sembolTahsilatSil } from './sembolKoprusu'; // YENİ: Sembol'den kayıt silme (mevcut import satırı değiştirilmedi)
 import { 
   LayoutDashboard, 
   Users, 
@@ -2047,6 +2048,24 @@ const sembolePaymentAktar = (customerLike, payment) => {
     }
 };
 
+// ============================================================================
+// SEMBOL KÖPRÜSÜ — ORTAK SİLME YARDIMCISI
+// Depoevim'de silinen (veya cariden askıya geri alınan) tahsilatın Sembol
+// ALBARAKA defterindeki karşılığını kaldırır. Gönderimle AYNI sabit kimliği
+// (`${müşteriId}_${ödemeId}`) kullanır. Kayıt Sembol'de yoksa sorun çıkmaz.
+// NOT: Bu sabit kimlik düzenine geçilmeden ÖNCE gönderilmiş eski kayıtlar
+// (kimliğinde Date.now() olanlar) buradan silinemez; onları Sembol CRM
+// ekranından elle silmek gerekir.
+// ============================================================================
+const sembolePaymentSil = (customerLike, paymentId) => {
+    try {
+        if (!customerLike || !paymentId) return; // eksik veri → işlem yapma
+        sembolTahsilatSil(`${customerLike.id}_${paymentId}`);
+    } catch (sembolHata) {
+        console.warn('Sembol CRM silme başarısız (Depoevim silme işleminiz güvende):', sembolHata);
+    }
+};
+
 const handleAssignPendingPayment = async () => {
       if (!assignData.paymentId || !assignData.customerId) return;
       const paymentToAssign = pendingCollections.find(p => p.id === assignData.paymentId);
@@ -3818,6 +3837,9 @@ const handleDeleteLedgerItem = async (txId) => {
         } else if (txId.startsWith('credit-global-')) {
             const payId = Number(txId.replace('credit-global-', ''));
             updatePayload = { payments: (customerToUpdate.payments || []).filter(p => Number(p.id) !== payId) };
+
+            // === SEMBOL KÖPRÜSÜ: Cari ekstreden silinen tahsilat ALBARAKA defterinden de kaldırılır ===
+            sembolePaymentSil(customerToUpdate, payId);
         } else {
             updatePayload = { 
                 ledgerOverrides: [
@@ -3865,6 +3887,11 @@ if (txId.startsWith('debt-extra-')) {
 
                 const updatedPayments = existingPayments.map(p => Number(p.id) === payId ? { ...p, date: editDate, note: editDesc, amount: newAmount } : p);
                 updatePayload = { payments: updatedPayments };
+
+                // === SEMBOL KÖPRÜSÜ: Düzenlenen tahsilat, sabit kimlik sayesinde Sembol'deki
+                // MEVCUT kaydın tutar/tarih/notunu günceller (yeni satır açılmaz) ===
+                const duzenlenenLedgerOdeme = updatedPayments.find(p => Number(p.id) === payId);
+                if (duzenlenenLedgerOdeme) sembolePaymentAktar(customerToUpdate, duzenlenenLedgerOdeme);
             } else {
                 // Otomatik hesaplanan oda kiralarına müdahale (Override)
                 const updatedOverrides = [
@@ -4000,6 +4027,9 @@ const handleManualAddPayment = async () => {
       } else {
           setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, payments: updated } : c));
       }
+      // === SEMBOL KÖPRÜSÜ: Güvenlik için Sembol'deki olası karşılık da silinir ===
+      // (Soluk kayıt hiç gönderilmediyse Sembol'de belge yoktur; olmayan belgeyi silmek sorun çıkarmaz)
+      sembolePaymentSil(cust, payId);
       logActivity('Tahsilat Silme', `${cust.name} - onay bekleyen tahsilat kaydı kaldırıldı.`);
   };
 
@@ -4015,6 +4045,9 @@ const handleManualAddPayment = async () => {
           try {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(pendingRecord.id)), pendingRecord);
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updatedPayments }, { merge: true });
+
+              // === SEMBOL KÖPRÜSÜ: Ödeme carideyken Sembol'e gitmişse, askıya alındığı için kaldırılır ===
+              sembolePaymentSil(cust, payId);
           } catch (e) { console.error("Tahsilat Askıya Gönderme Hatası:", e); }
       } else {
           setPendingCollections(prev => [...prev, pendingRecord]);
@@ -5947,6 +5980,9 @@ const handleCancelReservation = async () => {
                       const idsToRemove = customerGroups[cId];
                       const cleanedPayments = (customer.payments || []).filter(p => !idsToRemove.includes(Number(p.id)));
                       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cId)), { payments: cleanedPayments }, { merge: true });
+
+                      // === SEMBOL KÖPRÜSÜ: Geri alınan toplu tahsilatlar ALBARAKA defterinden de silinir ===
+                      idsToRemove.forEach(pid => sembolePaymentSil(customer, pid));
                   }
               }
 
@@ -6583,6 +6619,9 @@ const handleGlobalPayment = async () => {
       if (db && firebaseUser) {
           try {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), { payments: updatedPayments }, { merge: true });
+
+              // === SEMBOL KÖPRÜSÜ: Silinen tahsilat ALBARAKA defterinden de kaldırılır ===
+              sembolePaymentSil(customerToUpdate, paymentId);
           } catch(e) { console.error("Tahsilat Silme Hatası:", e); }
       }
   };
@@ -6613,6 +6652,10 @@ const handleGlobalPayment = async () => {
 
           // 2. Askıda Kalan Tahsilatlara (pendingCollections) yeni kayıt olarak ekle
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(newPendingId)), { ...paymentRest, id: newPendingId });
+
+          // === SEMBOL KÖPRÜSÜ: Ödeme artık caride değil (askıda) → ALBARAKA defterinden kaldırılır ===
+          // (Askıdan tekrar bir cariye atanırsa zaten yeniden gönderilecektir)
+          sembolePaymentSil(customerToUpdate, paymentId);
       } catch(e) { console.error("Askıya Gönderme Hatası:", e); }
   };
 
@@ -8499,7 +8542,12 @@ const newAppt = {
               const payment = { id: Date.now(), createdAt: Date.now(), amount: tx.amount, date: payDate, note: `Banka Otomatik: ${tx.description}`, hasEInvoice: false };
               const updatedPayments = [...(cust.payments || []), payment];
               if (db && firebaseUser) {
-                  try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updatedPayments }, { merge: true }); } catch(e){ console.error(e); }
+                  try {
+                      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cust.id)), { payments: updatedPayments }, { merge: true });
+
+                      // === SEMBOL KÖPRÜSÜ: Banka API'den cariye işlenen tahsilat ALBARAKA defterine gider ===
+                      sembolePaymentAktar(cust, payment);
+                  } catch(e){ console.error(e); }
               } else {
                   setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, payments: updatedPayments } : c));
               }
