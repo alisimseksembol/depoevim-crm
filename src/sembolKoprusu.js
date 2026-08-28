@@ -138,3 +138,47 @@ export async function sembolTahsilatGonder(t) {
     return false;
   }
 }
+
+// ============================================================================
+// YENİ EKLENEN: SİLME FONKSİYONU (mevcut kodların hiçbirine dokunulmadı)
+// AMAÇ: Depoevim'de bir tahsilat SİLİNDİĞİNDE (veya cariden askıya geri
+// alındığında), Sembol CRM'in ALBARAKA defterindeki karşılığını da kaldırmak.
+// Böylece iki sistem arasında hayalet kayıt kalmaz.
+// ============================================================================
+
+// Silme için gereken ek Firestore fonksiyonu (ayrı satırda içe aktarıldı,
+// yukarıdaki mevcut import satırı DEĞİŞTİRİLMEDİ).
+import { deleteDoc } from 'firebase/firestore';
+
+/**
+ * Depoevim'de silinen tahsilatın Sembol CRM ALBARAKA defterindeki kaydını siler.
+ * Gönderimle AYNI sabit kimlik kuralını kullanır: "depoevim_{tahsilatId}".
+ * Kayıt Sembol'de zaten yoksa hata çıkmaz (Firestore'da olmayan belgeyi silmek
+ * güvenlidir). Hata durumunda fırlatmaz; false döner ve konsola uyarı yazar —
+ * Depoevim'deki silme akışı asla bozulmaz.
+ *
+ * @param {string} tahsilatId  Gönderimde kullanılan tahsilat kimliği
+ *                             (Depoevim tarafında: `${müşteriId}_${ödemeId}`)
+ * @returns {Promise<boolean>} true = Sembol'den silindi, false = silinemedi
+ */
+export async function sembolTahsilatSil(tahsilatId) {
+  try {
+    // --- Basit doğrulama: kimliksiz silme isteği Sembol'e hiç gitmesin ---
+    if (!tahsilatId) { console.warn('[SembolKöprüsü] tahsilatId zorunlu — silme yapılmadı.'); return false; }
+
+    await oturumuGarantiEt();
+
+    // Gönderimdeki sabit kimliğin BİREBİR aynısı hedeflenir.
+    const belgeKimligi = `depoevim_${tahsilatId}`;
+    const hedef = doc(sembolDb, 'artifacts', SEMBOL_APP_ID, 'public', 'data', 'defterIslemleri', belgeKimligi);
+
+    await deleteDoc(hedef);
+
+    console.log('[SembolKöprüsü] Tahsilat Sembol CRM\'den silindi:', belgeKimligi);
+    return true;
+  } catch (e) {
+    // Köprü hatası Depoevim'i ASLA durdurmaz — yalnızca uyarı bırakır.
+    console.warn('[SembolKöprüsü] Sembol\'den silinemedi (Depoevim silme işleminiz güvende):', e);
+    return false;
+  }
+}
