@@ -2015,6 +2015,38 @@ const handleSendEInvoice = async () => {
       setShareInvoiceData(null);
   };
 
+// ============================================================================
+// SEMBOL KÖPRÜSÜ — ORTAK GÖNDERİM YARDIMCISI
+// Cariye işlenen (Tahsilat Hareketleri'nde görünen) HER tahsilatı Sembol CRM'in
+// ALBARAKA defterine aktarır. Nereden girilirse girilsin (tahsilat girişi,
+// askıdan atama, manuel ekleme, toplu banka yükleme, düzenleme) tek noktadan geçer.
+//
+// SABİT KİMLİK: `${müşteriId}_${ödemeId}` → aynı tahsilat tekrar gönderilirse
+// (örn. tutar/tarih düzenlendiğinde) Sembol'de YENİ satır açılmaz, mevcut kayıt
+// üzerine yazılır (setDoc + merge). Çift kayıt bu sayede imkânsızdır.
+//
+// NOT: Onay bekleyen (soluk / needsConfirm) tahsilatlar bakiyeye işlenmediği
+// için Sembol'e de GÖNDERİLMEZ; ancak "Onayla" denildiğinde gönderilir.
+// Köprü hata verirse Depoevim akışı asla bozulmaz (sembolKoprusu.js garantisi).
+// ============================================================================
+const sembolePaymentAktar = (customerLike, payment) => {
+    try {
+        if (!customerLike || !payment || !payment.id) return;      // eksik veri → gönderme
+        if (payment.needsConfirm) return;                          // onay bekleyen soluk kayıt → gönderme
+        sembolTahsilatGonder({
+            tahsilatId: `${customerLike.id}_${payment.id}`,        // sabit kimlik (çift kayıt koruması)
+            musteriAdi: customerLike.name || 'Müşteri',
+            musteriNo: String(customerLike.customerNo || customerLike.id || ''),
+            tutar: Number(payment.netAmount || payment.amount || 0), // kredi kartında NET tutar gider
+            tarih: payment.date,
+            aciklama: payment.note || '',
+            kaydeden: currentUserProfile?.name || '',
+        });
+    } catch (sembolHata) {
+        console.warn('Sembol CRM gönderimi başarısız (Depoevim kaydınız güvende):', sembolHata);
+    }
+};
+
 const handleAssignPendingPayment = async () => {
       if (!assignData.paymentId || !assignData.customerId) return;
       const paymentToAssign = pendingCollections.find(p => p.id === assignData.paymentId);
@@ -2027,9 +2059,13 @@ const handleAssignPendingPayment = async () => {
           try {
               // 1. Cariye tahsilat olarak ekle
               const existingPayments = customerToUpdate.payments || [];
+              const atananOdeme = { ...paymentToAssign, id: Date.now(), createdAt: Date.now() }; // Sembol'e de gidecek kayıt
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(customerId)), {
-                  payments: [...existingPayments, { ...paymentToAssign, id: Date.now(), createdAt: Date.now() }]
+                  payments: [...existingPayments, atananOdeme]
               }, { merge: true });
+
+              // === SEMBOL KÖPRÜSÜ: Askıdan cariye atanan tahsilat ALBARAKA defterine gider ===
+              sembolePaymentAktar(customerToUpdate, atananOdeme);
 
               // 2. Askıdan (pendingCollections) sil
               await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pendingCollections', String(assignData.paymentId)));
@@ -3919,6 +3955,11 @@ const handleManualAddPayment = async () => {
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(selectedCustomerId)), {
                     payments: [...existingPayments, newPayment]
                 }, { merge: true });
+
+                // === SEMBOL KÖPRÜSÜ: Manuel girilen tahsilat ALBARAKA defterine gider ===
+                // (needsConfirm=true olan soluk kayıtlar yardımcı fonksiyonda otomatik atlanır,
+                //  onaylandığı anda handleConfirmPendingPayment üzerinden gönderilir)
+                sembolePaymentAktar(customerToUpdate, newPayment);
             } catch(e) { console.error("Manuel Ödeme Ekleme Hatası:", e); }
         } else {
             setCustomers(prev => prev.map(c => c.id === selectedCustomerId ? { ...c, payments: [...existingPayments, newPayment] } : c));
@@ -3940,6 +3981,11 @@ const handleManualAddPayment = async () => {
       } else {
           setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, payments: updated } : c));
       }
+
+      // === SEMBOL KÖPRÜSÜ: Onaylanan tahsilat artık bakiyeye işlendi → ALBARAKA defterine gider ===
+      const onaylananOdeme = updated.find(p => Number(p.id) === Number(payId));
+      if (onaylananOdeme) sembolePaymentAktar(cust, onaylananOdeme);
+
       logActivity('Tahsilat Onayı', `${cust.name} - aynı gün/aynı tutar tahsilat onaylandı ve cariye işlendi.`);
   };
 
@@ -5844,6 +5890,9 @@ const handleCancelReservation = async () => {
                   await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(cId)), {
                       payments: [...(customerToUpdate.payments || []), ...customersUpdates[cId]]
                   }, { merge: true });
+
+                  // === SEMBOL KÖPRÜSÜ: Toplu banka yüklemesinde eşleşen her tahsilat ALBARAKA defterine gider ===
+                  customersUpdates[cId].forEach(yeniOdeme => sembolePaymentAktar(customerToUpdate, yeniOdeme));
               }
           }
       }
@@ -6506,20 +6555,10 @@ const handleGlobalPayment = async () => {
                         payments: [...existingPayments, newPayment]
                     }, { merge: true });
 
-                    // === YENİ: Sembol CRM'e otomatik gönderim ===
-                    try {
-                        sembolTahsilatGonder({
-                            tahsilatId: `${customerId}_${newPayment.date}_${Date.now()}`,
-                            musteriAdi: customerToUpdate.name || customerToUpdate.fullName || customerToUpdate.musteriAdi || 'Müşteri',
-                            musteriNo: String(customerId),
-                            tutar: Number(newPayment.netAmount || newPayment.amount || 0),
-                            tarih: newPayment.date,
-                            aciklama: newPayment.note || '',
-                        });
-                    } catch (sembolHata) {
-                        console.warn('Sembol CRM gönderimi başarısız (Depoevim kaydınız güvende):', sembolHata);
-                    }
-                    // === YENİ BÖLÜM SONU ===
+                    // === SEMBOL KÖPRÜSÜ: Tahsilat girişi ALBARAKA defterine gider ===
+                    // (Ortak yardımcı kullanılır; sabit kimlik = müşteriId_ödemeId → sonradan
+                    //  düzenlenirse Sembol'de aynı kayıt güncellenir, çift kayıt oluşmaz)
+                    sembolePaymentAktar(customerToUpdate, newPayment);
 
                 } catch(e) { console.error("Tahsilat İşleme Hatası:", e); }
             } else {
@@ -6665,6 +6704,11 @@ const handleGlobalPayment = async () => {
                   : p
               );
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customers', String(editCollectionData.customerId)), { payments: updatedPayments }, { merge: true });
+
+              // === SEMBOL KÖPRÜSÜ: Düzenlenen tahsilat, sabit kimlik sayesinde Sembol'de
+              // YENİ satır açmaz; ALBARAKA defterindeki MEVCUT kaydın tutar/tarih/notu güncellenir ===
+              const duzenlenenOdeme = updatedPayments.find(p => Number(p.id) === Number(editCollectionData.id));
+              if (duzenlenenOdeme) sembolePaymentAktar(customerToUpdate, duzenlenenOdeme);
           } catch(e) { console.error("Tahsilat Düzenleme Hatası:", e); }
       }
       setIsEditCollectionModalOpen(false);
