@@ -625,10 +625,9 @@ const handleSaveCollectionRates = async () => {
   // YENİ EKLENEN: Banka Otomatik Hareket Alma (canlı API) state'leri
   const [bankApiConfig, setBankApiConfig] = useState({ bankName: '', apiKey: '', apiSecret: '', iban: '', customerNo: '' });
   const [bankApiConnected, setBankApiConnected] = useState(false); // API bağlandı mı
-  const [bankApiRunning, setBankApiRunning] = useState(false);     // canlı çekim aktif mi
+  const [bankApiFetching, setBankApiFetching] = useState(false);   // "Hesap Hareketlerini Çek" işlemi sürüyor mu
   const [bankApiStatus, setBankApiStatus] = useState('idle');      // idle | connecting | connected | error
-  const [bankApiTransactions, setBankApiTransactions] = useState([]); // canlı gelen hareketler
-  const bankApiIntervalRef = useRef(null);
+  const [bankApiTransactions, setBankApiTransactions] = useState([]); // gelen hareketler
   // YENİ: "Beni Hatırla" — banka/API bilgileri Firestore'a kaydedilir, her açılışta otomatik dolar.
   const [bankApiRemember, setBankApiRemember] = useState(false);
   const bankApiLoadedRef = useRef(false);
@@ -1322,14 +1321,17 @@ const handleGlobalPayment = async () => {
   };
 
   const handleBankApiDisconnect = () => {
-      handleBankApiStop();
       setBankApiConnected(false); setBankApiStatus('idle');
   };
 
   // Tek seferlik hareket çekme (canlı: backend, önizleme: örnek üretimi yok — yalnızca gerçek veri)
   const fetchBankTransactionsOnce = async () => {
+      if (!bankApiConnected) { alert('Önce bankaya bağlanın.'); return; }
+      if (bankApiFetching) return; // çift tıklamada mükerrer istek atma
+      setBankApiFetching(true);
       if (!db) {
           // Önizleme modunda gerçek banka verisi olmadığından yeni hareket üretilmez.
+          setBankApiFetching(false);
           return;
       }
       try {
@@ -1412,25 +1414,14 @@ const handleGlobalPayment = async () => {
               return merged;
           });
       } catch (e) { console.error('Banka Hareket Çekme Hatası:', e); }
+      finally { setBankApiFetching(false); }
   };
 
-  const handleBankApiStart = () => {
-      if (!bankApiConnected) { alert('Önce bankaya bağlanın.'); return; }
-      setBankApiRunning(true);
-      fetchBankTransactionsOnce();
-      if (bankApiIntervalRef.current) clearInterval(bankApiIntervalRef.current);
-      bankApiIntervalRef.current = setInterval(fetchBankTransactionsOnce, 30000); // 30 sn'de bir canlı çek
-  };
-
-  const handleBankApiStop = () => {
-      setBankApiRunning(false);
-      if (bankApiIntervalRef.current) { clearInterval(bankApiIntervalRef.current); bankApiIntervalRef.current = null; }
-  };
-
-  useEffect(() => () => { if (bankApiIntervalRef.current) clearInterval(bankApiIntervalRef.current); }, []);
+  // NOT: Otomatik/periyodik çekim (setInterval) KALDIRILDI. Fixie kotasını tüketmemek için
+  // banka hareketleri YALNIZCA "Hesap Hareketlerini Çek" butonuna basıldığında, tek seferlik çekilir.
 
   // YENİ: KALICILIK — çekilen banka hareketleri Firestore'a kaydedilir; sayfa yenilenince
-  // liste kaybolmaz, kaldığınız yerden devam eder ("Şimdi Yenile" sonuçları da kalıcıdır).
+  // liste kaybolmaz, kaldığınız yerden devam eder ("Hesap Hareketlerini Çek" sonuçları da kalıcıdır).
   const bankTxLoadedRef = useRef(false);
   const bankTxSaveTimerRef = useRef(null);
   useEffect(() => {
@@ -1483,8 +1474,8 @@ const handleGlobalPayment = async () => {
       bankAutoConnectRef.current = true;
       (async () => {
           try {
-              // NOT: Yalnızca BAĞLANTI otomatik kurulur. Canlı çekim (periyodik hareket alma)
-              // KENDİLİĞİNDEN BAŞLAMAZ; yalnızca "Otomatik Çekimi Başlat" butonuna tıklanınca başlar.
+              // NOT: Yalnızca BAĞLANTI otomatik kurulur. Hareketler KENDİLİĞİNDEN ÇEKİLMEZ;
+              // yalnızca "Hesap Hareketlerini Çek" butonuna tıklanınca TEK SEFERLİK çekilir.
               await handleBankApiConnect();
           } catch (e) { console.error('Otomatik banka bağlantısı hatası:', e); }
       })();
@@ -1497,7 +1488,7 @@ const handleGlobalPayment = async () => {
   };
   const removeBankTx = (txId) => {
       // YENİ: Onay penceresi + KALICI gizleme (yenilemede bankadan tekrar eklenmez, eşleştirilmez).
-      if (!window.confirm('Bu banka hareketini silmek istediğinize emin misiniz?\n\nSilinen hareket bu ekranda bir daha görünmez ve "Şimdi Yenile" yapıldığında tekrar eklenmez.')) return;
+      if (!window.confirm('Bu banka hareketini silmek istediğinize emin misiniz?\n\nSilinen hareket bu ekranda bir daha görünmez ve "Hesap Hareketlerini Çek" yapıldığında tekrar eklenmez.')) return;
       const _tx = bankApiTransactions.find(t => String(t.id) === String(txId));
       setDeletedBankTxIds(prev => (prev.includes(String(txId)) ? prev : [...prev, String(txId)]));
       setBankApiTransactions(prev => prev.filter(t => String(t.id) !== String(txId)));
@@ -1745,14 +1736,14 @@ const handleGlobalPayment = async () => {
                   <div className="animate-in fade-in duration-300 flex flex-col gap-6">
                       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 md:p-8">
                           <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2"><RefreshCcw size={20} className="text-[#1bc5bd]" /> Banka Otomatik Hareket Alma (Canlı API)</h3>
-                          <p className="text-sm text-gray-500 mb-6">Çalıştığınız bankanın API bilgilerini girerek hesabınıza canlı bağlanın. Sistem, gelen banka hareketlerini açıklamadaki <strong>İsim, Müşteri No veya Oda No</strong> ile eşleştirir; eşleşenleri <strong>tahsilat</strong> olarak carilere, eşleşmeyenleri <strong>askıda</strong> olarak işaretler. İşlemeyi başlatabilir veya durdurabilirsiniz.</p>
+                          <p className="text-sm text-gray-500 mb-6">Çalıştığınız bankanın API bilgilerini girerek hesabınıza canlı bağlanın. Sistem, gelen banka hareketlerini açıklamadaki <strong>İsim, Müşteri No veya Oda No</strong> ile eşleştirir; eşleşenleri <strong>tahsilat</strong> olarak carilere, eşleşmeyenleri <strong>askıda</strong> olarak işaretler. Hareketler otomatik çekilmez; yalnızca <strong>"Hesap Hareketlerini Çek"</strong> butonuna bastığınızda tek seferlik alınır.</p>
 
                           {/* Bağlantı durumu şeridi */}
                           <div className={`mb-6 rounded-xl px-4 py-3 flex items-center justify-between border ${bankApiConnected ? 'bg-emerald-50 border-emerald-200' : bankApiStatus === 'error' ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
                               <div className="flex items-center gap-2">
-                                  <span className={`w-2.5 h-2.5 rounded-full ${bankApiConnected ? (bankApiRunning ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-500') : bankApiStatus === 'connecting' ? 'bg-amber-400 animate-pulse' : bankApiStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'}`}></span>
+                                  <span className={`w-2.5 h-2.5 rounded-full ${bankApiConnected ? (bankApiFetching ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-500') : bankApiStatus === 'connecting' ? 'bg-amber-400 animate-pulse' : bankApiStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'}`}></span>
                                   <span className="text-sm font-bold text-gray-700">
-                                      {bankApiStatus === 'connecting' ? 'Bankaya bağlanılıyor...' : bankApiConnected ? (bankApiRunning ? 'Bağlı • Canlı çekim aktif' : 'Bağlı • Beklemede') : bankApiStatus === 'error' ? 'Bağlantı hatası' : 'Bağlı değil'}
+                                      {bankApiStatus === 'connecting' ? 'Bankaya bağlanılıyor...' : bankApiConnected ? (bankApiFetching ? 'Bağlı • Hareketler çekiliyor...' : 'Bağlı • Hazır') : bankApiStatus === 'error' ? 'Bağlantı hatası' : 'Bağlı değil'}
                                   </span>
                               </div>
                               {bankApiConnected && <span className="text-xs font-semibold text-gray-500">{bankApiConfig.bankName}</span>}
@@ -1796,12 +1787,9 @@ const handleGlobalPayment = async () => {
                                   </button>
                               ) : (
                                   <>
-                                      {!bankApiRunning ? (
-                                          <button onClick={handleBankApiStart} className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors flex items-center gap-2"><RefreshCcw size={16}/> Otomatik Çekimi Başlat</button>
-                                      ) : (
-                                          <button onClick={handleBankApiStop} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors flex items-center gap-2"><X size={16}/> Durdur</button>
-                                      )}
-                                      <button onClick={fetchBankTransactionsOnce} className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 border border-blue-100"><RefreshCcw size={16}/> Şimdi Yenile</button>
+                                      <button onClick={fetchBankTransactionsOnce} disabled={bankApiFetching} className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors flex items-center gap-2">
+                                          {bankApiFetching ? <><RefreshCcw size={16} className="animate-spin"/> Çekiliyor...</> : <><RefreshCcw size={16}/> Hesap Hareketlerini Çek</>}
+                                      </button>
                                       <button onClick={handleBankApiDisconnect} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors">Bağlantıyı Kes</button>
                                   </>
                               )}
@@ -1906,7 +1894,7 @@ const handleGlobalPayment = async () => {
                                   </thead>
                                   <tbody className="divide-y divide-gray-100">
                                       {visibleTx.length === 0 ? (
-                                          <tr><td colSpan="6" className="p-10 text-center text-gray-400 font-medium">{bankApiTransactions.length > 0 ? 'Seçilen filtrede hareket yok. Tarih aralığını genişletin veya "Tümü" deyin.' : (bankApiRunning ? 'Yeni banka hareketi bekleniyor...' : 'Henüz hareket yok. Bağlanıp "Otomatik Çekimi Başlat" deyin.')}</td></tr>
+                                          <tr><td colSpan="6" className="p-10 text-center text-gray-400 font-medium">{bankApiTransactions.length > 0 ? 'Seçilen filtrede hareket yok. Tarih aralığını genişletin veya "Tümü" deyin.' : (bankApiFetching ? 'Banka hareketleri çekiliyor...' : 'Henüz hareket yok. Bağlanıp "Hesap Hareketlerini Çek" butonuna basın.')}</td></tr>
                                       ) : visibleTx.map((tx, _i) => {
                                           const _dir = dirOf(tx);
                                           const _isOut = _dir === 'out';
