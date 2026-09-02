@@ -646,6 +646,12 @@ const handleSaveCollectionRates = async () => {
   const [dupWarnTx, setDupWarnTx] = useState(null);
   // YENİ: "Eşleşmedi" satırında cari seçme modunda olan hareketin id'si
   const [matchEditTxId, setMatchEditTxId] = useState(null);
+  // YENİ: Cari seçme panelindeki ARAMA KUTUSU metni. İsim yazınca liste anında filtrelenir.
+  const [matchSearchTerm, setMatchSearchTerm] = useState('');
+  // YENİ: Türkçe karakter duyarsız arama ("uckac" yazınca "UÇKAÇ" da bulunur).
+  const foldTrSearch = (s) => String(s || '')
+      .toLocaleLowerCase('tr').replace(/\u0307/g, '')
+      .replace(/[ıİI]/g, 'i').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u');
   // YENİ: Aynı gün + aynı tutar ödeme tespit edilirse gösterilecek uyarı penceresi
   const [duplicatePayWarn, setDuplicatePayWarn] = useState(null);
   const [bankTxTo, setBankTxTo] = useState(() => new Date().toISOString().split('T')[0]);
@@ -822,7 +828,13 @@ const handleSaveCollectionRates = async () => {
 
           let matchedCustomer = null;
 
+          // KURAL 0 (YENİ - ÖĞRENME MODU): Daha önce ELLE ÖĞRETİLMİŞ gönderici kuralı en yüksek önceliktir.
+          // Hesap Adı (veya IBAN) daha önce bir cariye eşleştirildiyse, diğer kurallara hiç bakılmadan
+          // doğrudan o cariye tahsilat yazılır. (Örn: AYSEL UÇKAÇ → Ayhan Uçkaç carisi)
+          matchedCustomer = findLearnedCustomer(descStr);
+
           // KURAL 3: Müşteri Adı ile eşleştirme. Açıklamada birden fazla isim geçse bile veritabanındaki müşteri adını içeriyorsa eşleştirir.
+          if (!matchedCustomer)
           matchedCustomer = customers.find(c => c.name && descUpper.includes(c.name.toUpperCase()));
           
           if (!matchedCustomer) {
@@ -1221,6 +1233,40 @@ const handleGlobalPayment = async () => {
       return folded.length >= 5 ? 'ad:' + folded : null;
   };
 
+  // YENİ (ÖĞRENME MODU): Açıklamadan SADECE HESAP ADI (Ad Soyad) anahtarı üretir.
+  // bankTxRuleKey IBAN'a öncelik verdiği için, bazı hareketlerde IBAN olup bazılarında olmayınca
+  // anahtarlar farklılaşabiliyordu. Bu fonksiyon her zaman GÖNDEREN ADI'nı baz alır;
+  // böylece "Hesap Adı aynıysa" kuralı IBAN'dan bağımsız çalışır.
+  const bankTxNameKey = (description) => {
+      const d = String(description || '');
+      if (!d) return null;
+      const stop = '(?:A[çc][ıi]klama|A[çc]k|G[öo]nBanka|G[öo]n[ŞS]ube|FastRef|Ref\\s*No|M[ÜU][ŞS]TER[İI])';
+      let m = d.match(new RegExp(`SN[:\\s]*\\d+\\s+(.+?)(?=\\s*${stop}|$)`, 'i'));
+      let name = m ? m[1] : '';
+      if (!name) { m = d.match(new RegExp(`^\\s*([A-Za-zÇĞİÖŞÜçğıöşü.\\s]{5,60}?)(?=\\s*${stop}|$)`)); name = m ? m[1] : ''; }
+      const folded = String(name)
+          .toLocaleLowerCase('tr').replace(/\u0307/g, '')
+          .replace(/[ıİI]/g, 'i').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u')
+          .replace(/[^a-z0-9]+/g, ' ').trim();
+      return folded.length >= 5 ? 'ad:' + folded : null;
+  };
+
+  // YENİ (ÖĞRENME MODU): Bir açıklama için ÖĞRETİLMİŞ cari var mı diye bakar.
+  // Önce IBAN/genel anahtar, yoksa Ad-Soyad anahtarı ile bankMatchRules'ta arar.
+  // Örn: "AYSEL UÇKAÇ" hesabını bir kez "Ayhan Uçkaç" carisine öğrettiyseniz,
+  // AYSEL UÇKAÇ'tan gelen her yeni ödeme otomatik olarak o cariyi döndürür.
+  const findLearnedCustomer = (description) => {
+      const rules = bankMatchRules || {};
+      const keys = [bankTxRuleKey(description), bankTxNameKey(description)];
+      for (const k of keys) {
+          if (k && rules[k]) {
+              const c = customers.find(c => String(c.id) === String(rules[k]));
+              if (c) return c;
+          }
+      }
+      return null;
+  };
+
   // YENİ: Müşterinin carisinde AYNI GÜN + AYNI TUTAR ödeme var mı? (mükerrer tahsilat kontrolü)
   const hasSameDayAmountPayment = (customerId, dateISO, amount) => {
       if (!customerId || !dateISO) return false;
@@ -1245,10 +1291,27 @@ const handleGlobalPayment = async () => {
       const cust = customers.find(c => String(c.id) === String(customerId));
       if (!cust) { setMatchEditTxId(null); return; }
       const tx = bankApiTransactions.find(t => String(t.id) === String(txId));
-      setBankApiTransactions(prev => prev.map(t => String(t.id) === String(txId)
-          ? { ...t, matchedCustomerId: cust.id, matchedCustomerName: cust.name, status: 'tahsilat' } : t));
+      // ÖĞRENME MODU: Seçim hem IBAN/genel anahtarla hem de HESAP ADI (Ad Soyad) anahtarıyla
+      // kaydedilir. Böylece aynı isimden gelen ödemeler, açıklamada IBAN olsun olmasın tanınır.
       const key = tx ? bankTxRuleKey(tx.description) : null;
-      if (key) setBankMatchRules(prev => ({ ...prev, [key]: String(cust.id) }));
+      const nameKey = tx ? bankTxNameKey(tx.description) : null;
+      // GERİYE DÖNÜK DÜZELTME: Listedeki AYNI HESAP ADINA ait, henüz İŞLENMEMİŞ tüm hareketler de
+      // (askıda kalanlar VEYA yanlış cariye otomatik eşleşenler) öğretilen cariye çevrilir.
+      // İşlenmiş (carisine tahsilat yazılmış) satırlara DOKUNULMAZ.
+      setBankApiTransactions(prev => prev.map(t => {
+          if (String(t.id) === String(txId)) return { ...t, matchedCustomerId: cust.id, matchedCustomerName: cust.name, status: 'tahsilat' };
+          if (!t.processed && t.direction !== 'out') {
+              const sameSender = (key && bankTxRuleKey(t.description) === key) || (nameKey && bankTxNameKey(t.description) === nameKey);
+              if (sameSender) return { ...t, matchedCustomerId: cust.id, matchedCustomerName: cust.name, status: 'tahsilat' };
+          }
+          return t;
+      }));
+      if (key || nameKey) setBankMatchRules(prev => {
+          const next = { ...prev };
+          if (key) next[key] = String(cust.id);
+          if (nameKey) next[nameKey] = String(cust.id);
+          return next; // Firestore'a otomatik kaydedilir (mevcut useEffect ile) → kalıcı öğrenme
+      });
       setMatchEditTxId(null);
   };
 
@@ -1361,13 +1424,13 @@ const handleGlobalPayment = async () => {
                   || (dirRaw && /(out|debit|borc|borç|giden|cikis|çıkış|gider|havale gonderim|^d$)/.test(dirRaw))
                   || isOutgoingBankDesc(t.description);
               // Giden parada müşteri eşleştirmesi YAPILMAZ (yanlış tahsilat oluşmasın).
-              let matched = isOut ? null : matchBankTxToCustomer(t.description);
-              // YENİ: Otomatik eşleşme yoksa, daha önce ELLE eşleştirdiğimiz göndericiler için
-              // öğrenilen kural uygulanır → aynı göndericiden gelen ödeme doğrudan o cariye eşleşir.
-              if (!matched && !isOut) {
-                  const _k = bankTxRuleKey(t.description);
-                  if (_k && bankMatchRules[_k]) matched = customers.find(c => String(c.id) === String(bankMatchRules[_k])) || null;
-              }
+              // ÖĞRENME MODU (ÖNCELİK SIRASI DEĞİŞTİ):
+              // 1) Önce ÖĞRETİLMİŞ kurala bakılır → Hesap Adı daha önce elle bir cariye
+              //    eşleştirildiyse, otomatik tahminden BAĞIMSIZ olarak hep o cariye gider.
+              //    (Örn: AYSEL UÇKAÇ hesabı bir kez "Ayhan Uçkaç" carisine öğretildiyse,
+              //    sistem yanlışlıkla başka bir cariye benzetse bile öğretilen cari kazanır.)
+              // 2) Öğretilmiş kural yoksa mevcut otomatik eşleştirme aynen çalışır.
+              let matched = isOut ? null : (findLearnedCustomer(t.description) || matchBankTxToCustomer(t.description));
               return {
                   id: t.id || Date.now() + Math.random(),
                   rawDate: t.date,
@@ -1922,7 +1985,7 @@ const handleGlobalPayment = async () => {
                                                       <div className="flex items-center justify-center gap-1">
                                                           <span className="text-[11px] font-bold text-gray-800">{tx.matchedCustomerName}</span>
                                                           {!tx.processed && !_isOut && (
-                                                              <button onClick={() => setMatchEditTxId(matchEditTxId === tx.id ? null : tx.id)} className="text-indigo-500 hover:text-indigo-700 p-0.5" title="Cariyi değiştir"><Edit size={12}/></button>
+                                                              <button onClick={() => { setMatchEditTxId(matchEditTxId === tx.id ? null : tx.id); setMatchSearchTerm(''); }} className="text-indigo-500 hover:text-indigo-700 p-0.5" title="Cariyi değiştir"><Edit size={12}/></button>
                                                           )}
                                                       </div>
                                                   ) : (
@@ -1930,16 +1993,46 @@ const handleGlobalPayment = async () => {
                                                           <span className="text-[11px] text-gray-400 italic">{_isOut ? '—' : 'Eşleşmedi'}</span>
                                                           {/* YENİ: Eşleşmeyen tahsilata elle cari seçme */}
                                                           {!tx.processed && !_isOut && (
-                                                              <button onClick={() => setMatchEditTxId(matchEditTxId === tx.id ? null : tx.id)} className="text-indigo-500 hover:text-indigo-700 p-0.5" title="Cari seç"><Edit size={12}/></button>
+                                                              <button onClick={() => { setMatchEditTxId(matchEditTxId === tx.id ? null : tx.id); setMatchSearchTerm(''); }} className="text-indigo-500 hover:text-indigo-700 p-0.5" title="Cari seç"><Edit size={12}/></button>
                                                           )}
                                                       </div>
                                                   )}
-                                                  {matchEditTxId === tx.id && !tx.processed && !_isOut && (
-                                                      <select autoFocus defaultValue="" onChange={(e) => assignBankTxCustomer(tx.id, e.target.value)} className="mt-1 w-full max-w-[190px] border-2 border-indigo-200 rounded-lg px-1.5 py-1 text-[11px] font-bold text-slate-700 focus:outline-none focus:border-indigo-400 cursor-pointer">
-                                                          <option value="">— Cari Seç —</option>
-                                                          {[...customers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr')).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                                      </select>
-                                                  )}
+                                                  {matchEditTxId === tx.id && !tx.processed && !_isOut && (() => {
+                                                      // YENİ: ARAMA KUTULU CARİ SEÇİM PANELİ
+                                                      // En üstte arama kutusu; isim yazıldıkça liste anında daralır.
+                                                      // Enter'a basınca listedeki İLK cari seçilir (hızlı kullanım).
+                                                      const _q = foldTrSearch(matchSearchTerm.trim());
+                                                      const _filtered = [...customers]
+                                                          .filter(c => !_q || foldTrSearch(c.name).includes(_q))
+                                                          .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr'));
+                                                      return (
+                                                          <div className="mt-1 w-full max-w-[220px] mx-auto border-2 border-indigo-200 rounded-lg bg-white shadow-lg text-left overflow-hidden">
+                                                              <input
+                                                                  autoFocus
+                                                                  type="text"
+                                                                  value={matchSearchTerm}
+                                                                  onChange={(e) => setMatchSearchTerm(e.target.value)}
+                                                                  onKeyDown={(e) => {
+                                                                      if (e.key === 'Enter' && _filtered.length > 0) { assignBankTxCustomer(tx.id, _filtered[0].id); setMatchSearchTerm(''); }
+                                                                      if (e.key === 'Escape') { setMatchEditTxId(null); setMatchSearchTerm(''); }
+                                                                  }}
+                                                                  placeholder="🔍 Cari ara: isim yazın..."
+                                                                  className="w-full px-2 py-1.5 text-[11px] font-bold text-slate-700 border-b border-indigo-100 focus:outline-none focus:bg-indigo-50/40 placeholder:font-normal placeholder:text-gray-400"
+                                                              />
+                                                              <div className="max-h-44 overflow-y-auto">
+                                                                  {_filtered.length === 0 ? (
+                                                                      <div className="px-2 py-2 text-[10px] text-gray-400 italic">Sonuç bulunamadı</div>
+                                                                  ) : _filtered.map(c => (
+                                                                      <button
+                                                                          key={c.id}
+                                                                          onClick={() => { assignBankTxCustomer(tx.id, c.id); setMatchSearchTerm(''); }}
+                                                                          className="block w-full text-left px-2 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-indigo-50 border-b border-gray-50 last:border-b-0"
+                                                                      >{c.name}</button>
+                                                                  ))}
+                                                              </div>
+                                                          </div>
+                                                      );
+                                                  })()}
                                               </td>
                                               <td className="p-3 text-center align-top">
                                                   {tx.processed ? (
