@@ -1057,6 +1057,8 @@ const [firebaseUser, setFirebaseUser] = useState(null);
           { id: 'page-hatirlatmalar', label: 'Hatırlatmalar' },
           { id: 'page-kdvsiz-cariler', label: 'KDVsiz Cariler' },
           { id: 'page-icra-odalari', label: 'İcra Odaları' },
+          // YENİ: Hediye Verilen Odalar sayfası yetkisi
+          { id: 'page-hediye-verilen-odalar', label: 'Hediye Verilen Odalar' },
           { id: 'page-finans-rapor', label: 'Finans Rapor' },
           { id: 'page-depo-rapor', label: 'Depo Rapor' },
           { id: 'page-personel-rapor', label: 'Personel Rapor' },
@@ -1344,6 +1346,11 @@ const [firebaseUser, setFirebaseUser] = useState(null);
   const [anniversaryMonth, setAnniversaryMonth] = useState((new Date().getMonth() + 1).toString());
   const [anniversaryYear, setAnniversaryYear] = useState(new Date().getFullYear().toString());
   const [anniversarySearchTerm, setAnniversarySearchTerm] = useState('');
+
+  // --- YENİ: HEDİYE VERİLEN ODALAR SAYFASI STATE'LERİ ---
+  // giftPageRange: 'busene' | 'gecensene' | 'all'  → hediye ayının denk geldiği takvim yılına göre süzer
+  const [giftPageRange, setGiftPageRange] = useState('busene');
+  const [giftPageSearch, setGiftPageSearch] = useState('');
 
   // --- GÜNÜ GELEN ODALAR STATE'LERİ ---
   const [dueRoomsDate, setDueRoomsDate] = useState(new Date().toISOString().split('T')[0]);
@@ -5740,7 +5747,9 @@ const newAppt = {
         { id: 'gunu-gelen-odalar', label: 'Günü Gelen Odalar', permId: 'page-gunu-gelen-odalar' },
         { id: 'senesi-dolan-odalar', label: 'Senesi Dolan Odalar', permId: 'page-senesi-dolan-odalar' },
         { id: 'aylik-odeme', label: 'Aylık Borç Takip', permId: 'page-aylik-odeme' },
-        { id: 'icra-odalari', label: 'İcra Odaları', permId: 'page-icra-odalari' }
+        { id: 'icra-odalari', label: 'İcra Odaları', permId: 'page-icra-odalari' },
+        // YENİ: Hediye ay kullanan tüm odaların listelendiği sayfa
+        { id: 'hediye-verilen-odalar', label: 'Hediye Verilen Odalar', permId: 'page-hediye-verilen-odalar' }
     ] },
     { id: 'depo', label: 'Depo Listesi', icon: Box, permId: 'menu-depo' },
     { id: 'finans-yonetimi', label: 'Finans Yönetimi', icon: TrendingUp, permId: 'menu-finans-yonetimi', subItems: [
@@ -8452,6 +8461,202 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                       </table>
                   </div>
               </div>
+            </div>
+          ) : activeMenu === 'hediye-verilen-odalar' ? (
+            /* ============================================================
+               YENİ SAYFA: HEDİYE VERİLEN ODALAR
+               Hediye ay (giftMonths) kullanan TÜM odaları listeler.
+               - Filtre: Bu Sene / Geçen Sene / Tüm Zamanlar (hediye ayının denk geldiği takvim yılı)
+               - Her odanın kaç hediye ay aldığı ve hangi aylar olduğu görünür
+               - "Odaya Git" ve "Carisine Git" butonları vardır
+               ============================================================ */
+            <div className="max-w-7xl mx-auto flex flex-col h-full animate-in fade-in duration-300">
+              {(() => {
+                  const monthNames = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+                  const nowY = new Date().getFullYear();
+
+                  // Hediye ayının denk geldiği takvim tarihi seçili aralıkta mı?
+                  const inGiftRange = (d) => {
+                      if (giftPageRange === 'all') return true;
+                      if (giftPageRange === 'busene') return d.getFullYear() === nowY;
+                      if (giftPageRange === 'gecensene') return d.getFullYear() === nowY - 1;
+                      return true;
+                  };
+
+                  // ODA BAZLI HEDİYE LİSTESİ
+                  // Her oda için hediye aylarının takvim tarihleri hesaplanır (giriş/ödeme çapasından
+                  // giftStartMonthIndex + k ay sonrası). Filtreye uyan aylar satırda gösterilir.
+                  const giftRooms = rooms.map(room => {
+                      const gm = Number(room.giftMonths || 0);
+                      if (gm <= 0 || !room.entryDate) return null;
+                      const entryD = parseAnyDate(room.entryDate);
+                      if (!entryD) return null;
+                      // Ödeme günü çapası varsa onu kullan (ay sonu 29/30/31 kaymalarında ay-1 mantığı ile güvenli)
+                      const anchorD = room.paymentDate && String(room.paymentDate).includes('-') ? (parseAnyDate(room.paymentDate) || entryD) : entryD;
+                      const startIdx = Number(room.giftStartMonthIndex || 0);
+                      const hasKdv = room.hasKdv !== undefined ? room.hasKdv : true;
+
+                      const giftMonthsList = [];
+                      let rangeValue = 0; // filtreye uyan hediye aylarının kira karşılığı (KDV dahil)
+                      for (let k = 0; k < gm; k++) {
+                          const mc = startIdx + k;
+                          // new Date(yıl, ay + mc, 1) → ay taşması JS tarafından otomatik yönetilir (yıl geçişi güvenli)
+                          const giftDate = new Date(anchorD.getFullYear(), anchorD.getMonth() + mc, 1);
+                          if (!inGiftRange(giftDate)) continue;
+                          const base = Number(getRoomFeeForMonth(room, giftDate.getFullYear(), giftDate.getMonth()) || room.monthlyFee || 0);
+                          const total = hasKdv ? base * 1.20 : base;
+                          rangeValue += total;
+                          giftMonthsList.push({ label: `${monthNames[giftDate.getMonth()]} ${giftDate.getFullYear()}`, amount: total, dateObj: giftDate });
+                      }
+                      if (giftMonthsList.length === 0) return null; // bu odanın hediyesi seçili döneme denk gelmiyor
+
+                      const block = blocks.find(b => b.id === room.blockId);
+                      const warehouse = warehouses.find(w => w.id === block?.warehouseId);
+                      const cust = customers.find(c => c.name === room.customerName);
+                      return {
+                          room, block, warehouse, cust,
+                          totalGiftMonths: gm,                       // odaya verilen TOPLAM hediye ay
+                          rangeGiftMonths: giftMonthsList.length,    // seçili dönemdeki hediye ay adedi
+                          giftMonthsList, rangeValue,
+                          isActive: !!room.customerName              // oda hâlâ kirada mı?
+                      };
+                  }).filter(Boolean)
+                    // Arama: müşteri adı veya oda adı
+                    .filter(g => {
+                        const q = giftPageSearch.trim().toLocaleLowerCase('tr');
+                        if (!q) return true;
+                        return String(g.room.name || '').toLocaleLowerCase('tr').includes(q)
+                            || String(g.room.customerName || '').toLocaleLowerCase('tr').includes(q);
+                    })
+                    // En yeni hediye ayı en üstte
+                    .sort((a, b) => (b.giftMonthsList[0]?.dateObj || 0) - (a.giftMonthsList[0]?.dateObj || 0));
+
+                  // ÖZET KARTLAR
+                  const sumRooms = giftRooms.length;
+                  const sumMonths = giftRooms.reduce((acc, g) => acc + g.rangeGiftMonths, 0);
+                  const sumValue = giftRooms.reduce((acc, g) => acc + g.rangeValue, 0);
+                  const fmt = (n) => Number(n || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+                  const rangeLabel = giftPageRange === 'busene' ? `${nowY}` : giftPageRange === 'gecensene' ? `${nowY - 1}` : 'Tüm Zamanlar';
+
+                  return (
+                      <>
+                        {/* BAŞLIK */}
+                        <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                          <div>
+                            <h1 className="text-xs font-bold text-gray-400 tracking-wider uppercase mb-1">Ödeme İşlemleri</h1>
+                            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Gift size={24} className="text-pink-500" /> Hediye Verilen Odalar</h2>
+                            <p className="text-sm text-gray-500 mt-1">Hediye ay kullanan tüm odalar, aldıkları hediye ay sayısı ve hangi aylara denk geldiği.</p>
+                          </div>
+                        </div>
+
+                        {/* ARAMA + TARİH FİLTRESİ */}
+                        <div className="flex flex-col sm:flex-row gap-4 mb-6 items-start sm:items-center justify-between">
+                            <div className="relative w-full sm:w-72">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search size={16} className="text-gray-400" /></div>
+                                <input type="text" placeholder="Müşteri veya Oda Ara..." value={giftPageSearch} onChange={(e) => setGiftPageSearch(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-50 shadow-sm font-medium" />
+                            </div>
+                            {/* Bu Sene / Geçen Sene / Tüm Zamanlar */}
+                            <div className="flex bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm w-full sm:w-auto">
+                                {[['busene', 'Bu Sene'], ['gecensene', 'Geçen Sene'], ['all', 'Tüm Zamanlar']].map(([val, label]) => (
+                                    <button key={val} onClick={() => setGiftPageRange(val)} className={`px-4 py-2.5 text-sm font-bold transition-colors flex-1 sm:flex-none border-l border-gray-200 first:border-l-0 ${giftPageRange === val ? 'bg-pink-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>{label}</button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* ÖZET KARTLAR */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Hediye Verilen Oda</p>
+                                <p className="text-3xl font-black text-slate-800 mt-1">{sumRooms}</p>
+                                <p className="text-[11px] text-gray-400 font-bold mt-1">Dönem: {rangeLabel}</p>
+                            </div>
+                            <div className="bg-white rounded-2xl border border-pink-100 shadow-sm p-5">
+                                <p className="text-[11px] font-bold text-pink-400 uppercase tracking-wider">Toplam Hediye Ay</p>
+                                <p className="text-3xl font-black text-pink-600 mt-1">{sumMonths} Ay</p>
+                                <p className="text-[11px] text-gray-400 font-bold mt-1">Seçili dönemdeki hediye ay adedi</p>
+                            </div>
+                            <div className="bg-white rounded-2xl border border-amber-100 shadow-sm p-5">
+                                <p className="text-[11px] font-bold text-amber-500 uppercase tracking-wider">Vazgeçilen Kira (KDV Dahil)</p>
+                                <p className="text-3xl font-black text-amber-600 mt-1">{fmt(sumValue)} TL</p>
+                                <p className="text-[11px] text-gray-400 font-bold mt-1">Hediye aylarının kira karşılığı</p>
+                            </div>
+                        </div>
+
+                        {/* LİSTE */}
+                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                            {giftRooms.length === 0 ? (
+                                <div className="p-12 text-center">
+                                    <Gift size={40} className="text-gray-200 mx-auto mb-3" />
+                                    <p className="text-sm font-bold text-gray-400">Seçili dönemde hediye ay kullanan oda bulunamadı.</p>
+                                </div>
+                            ) : (
+                                <div className="divide-y divide-gray-100">
+                                    {giftRooms.map(g => (
+                                        <div key={g.room.id} className="p-5 flex flex-col lg:flex-row justify-between gap-4 hover:bg-pink-50/20 transition-colors">
+                                            {/* SOL: Oda + müşteri bilgisi */}
+                                            <div className="flex items-start gap-4 flex-1 min-w-0">
+                                                <div className="w-12 h-12 bg-pink-100 text-pink-600 rounded-xl flex items-center justify-center font-black text-sm border border-pink-200 shrink-0">
+                                                    {g.rangeGiftMonths}<span className="text-[9px] ml-0.5">AY</span>
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="font-bold text-slate-800 text-[15px]">{g.room.name} Odası</span>
+                                                        {!g.isActive && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">ÇIKIŞ YAPMIŞ</span>}
+                                                    </div>
+                                                    {/* Müşteri adı → carisine gider */}
+                                                    <button onClick={() => { if (g.cust) { setActiveMenu('tum-musteriler'); setSelectedCustomerId(g.cust.id); setSelectedRoomId(null); } }}
+                                                        className={`block text-left text-[13px] font-bold mt-0.5 ${g.cust ? 'text-indigo-600 hover:underline cursor-pointer' : 'text-gray-500 cursor-default'}`}
+                                                        title={g.cust ? 'Müşterinin carisine git' : 'Cari bulunamadı'}>
+                                                        {g.room.customerName || '— Müşteri yok —'}
+                                                    </button>
+                                                    <div className="text-[11px] text-gray-500 font-bold mt-1.5 flex items-center gap-2 flex-wrap">
+                                                        <span className="bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{g.warehouse?.name || '-'}</span>
+                                                        <span className="text-gray-300">•</span>
+                                                        <span>{g.block?.name || '-'}</span>
+                                                        <span className="text-gray-300">•</span>
+                                                        <span className="text-slate-600">Kira: {fmt(g.room.monthlyFee)} TL</span>
+                                                        <span className="text-gray-300">•</span>
+                                                        {/* Odaya verilen toplam hediye (filtreden bağımsız) */}
+                                                        <span className="text-pink-600">Toplam Hediye: {g.totalGiftMonths} Ay</span>
+                                                    </div>
+                                                    {/* HEDİYE AYLARI — hangi aylar hediye kullanıldı */}
+                                                    <div className="flex flex-wrap gap-1.5 mt-2.5">
+                                                        {g.giftMonthsList.map((m, i) => (
+                                                            <span key={i} className="text-[10px] font-bold bg-pink-50 text-pink-700 border border-pink-200 px-2 py-1 rounded-lg">
+                                                                {m.label} <span className="text-pink-400">({fmt(m.amount)} TL)</span>
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {/* SAĞ: Tutar + butonlar */}
+                                            <div className="flex flex-col items-start lg:items-end gap-2 shrink-0">
+                                                <div className="text-right">
+                                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dönem Hediye Bedeli</p>
+                                                    <p className="text-lg font-black text-amber-600">{fmt(g.rangeValue)} TL</p>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    {/* Carisine Git */}
+                                                    <button onClick={() => { if (g.cust) { setActiveMenu('tum-musteriler'); setSelectedCustomerId(g.cust.id); setSelectedRoomId(null); } }}
+                                                        disabled={!g.cust}
+                                                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 ${g.cust ? 'bg-slate-700 hover:bg-slate-800 text-white' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+                                                        <Users size={13} /> Carisine Git
+                                                    </button>
+                                                    {/* Odaya Git */}
+                                                    <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(g.warehouse?.id); setSelectedBlockId(g.room.blockId); setSelectedRoomId(g.room.id); setSelectedCustomerId(null); }}
+                                                        className="bg-pink-500 hover:bg-pink-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm shadow-pink-500/30 flex items-center gap-1.5">
+                                                        <Box size={13} /> Odaya Git
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                      </>
+                  );
+              })()}
             </div>
           ) : activeMenu === 'depo' && selectedRoomId ? (
             <div className="max-w-7xl mx-auto flex flex-col h-full bg-slate-50 relative">
