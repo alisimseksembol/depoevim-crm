@@ -8563,91 +8563,84 @@ const getWarehouseOccupiedM3 = (warehouseId) => {
                             </div>
                         </div>
 
-                        {/* ÖZET KARTLAR */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-                                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Hediye Verilen Oda</p>
-                                <p className="text-3xl font-black text-slate-800 mt-1">{sumRooms}</p>
-                                <p className="text-[11px] text-gray-400 font-bold mt-1">Dönem: {rangeLabel}</p>
+                        {/* ÖZET — kompakt tek satır (mobilde de yer kaplamaz) */}
+                        <div className="flex gap-3 mb-4">
+                            <div className="flex-1 bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Hediye Verilen Oda</p>
+                                <p className="text-xl font-black text-slate-800">{sumRooms} <span className="text-[11px] font-bold text-gray-400">/ {rangeLabel}</span></p>
                             </div>
-                            <div className="bg-white rounded-2xl border border-pink-100 shadow-sm p-5">
-                                <p className="text-[11px] font-bold text-pink-400 uppercase tracking-wider">Toplam Hediye Ay</p>
-                                <p className="text-3xl font-black text-pink-600 mt-1">{sumMonths} Ay</p>
-                                <p className="text-[11px] text-gray-400 font-bold mt-1">Seçili dönemdeki hediye ay adedi</p>
-                            </div>
-                            <div className="bg-white rounded-2xl border border-amber-100 shadow-sm p-5">
-                                <p className="text-[11px] font-bold text-amber-500 uppercase tracking-wider">Vazgeçilen Kira (KDV Dahil)</p>
-                                <p className="text-3xl font-black text-amber-600 mt-1">{fmt(sumValue)} TL</p>
-                                <p className="text-[11px] text-gray-400 font-bold mt-1">Hediye aylarının kira karşılığı</p>
+                            <div className="flex-1 bg-white rounded-xl border border-pink-100 shadow-sm px-4 py-3">
+                                <p className="text-[10px] font-bold text-pink-400 uppercase tracking-wider">Toplam Hediye Ay</p>
+                                <p className="text-xl font-black text-pink-600">{sumMonths} Ay</p>
                             </div>
                         </div>
 
-                        {/* LİSTE */}
+                        {/* LİSTE — KOMPAKT. Satır yüksekliği küçüktür, 73 kaydın tamamı liste halinde akar.
+                            Uzun listede sayfayı şişirmemek için liste kendi içinde kaydırılabilir (max-h). */}
                         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                            {/* Sonuç adedi bilgisi — kaç kaydın listelendiği net görünür */}
+                            <div className="px-4 py-2.5 bg-slate-50 border-b border-gray-100 flex items-center justify-between">
+                                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Hediye Kullanan Odalar</span>
+                                <span className="text-[11px] font-black text-pink-600">{giftRooms.length} kayıt</span>
+                            </div>
                             {giftRooms.length === 0 ? (
-                                <div className="p-12 text-center">
-                                    <Gift size={40} className="text-gray-200 mx-auto mb-3" />
+                                <div className="p-10 text-center">
+                                    <Gift size={32} className="text-gray-200 mx-auto mb-2" />
                                     <p className="text-sm font-bold text-gray-400">Seçili dönemde hediye ay kullanan oda bulunamadı.</p>
                                 </div>
                             ) : (
-                                <div className="divide-y divide-gray-100">
+                                <div className="divide-y divide-gray-100 max-h-[70vh] overflow-y-auto">
                                     {giftRooms.map(g => (
-                                        <div key={g.room.id} className="p-5 flex flex-col lg:flex-row justify-between gap-4 hover:bg-pink-50/20 transition-colors">
-                                            {/* SOL: Oda + müşteri bilgisi */}
-                                            <div className="flex items-start gap-4 flex-1 min-w-0">
-                                                <div className="w-12 h-12 bg-pink-100 text-pink-600 rounded-xl flex items-center justify-center font-black text-sm border border-pink-200 shrink-0">
-                                                    {g.rangeGiftMonths}<span className="text-[9px] ml-0.5">AY</span>
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        <span className="font-bold text-slate-800 text-[15px]">{g.room.name} Odası</span>
-                                                        {!g.isActive && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">ÇIKIŞ YAPMIŞ</span>}
-                                                    </div>
+                                        <div key={g.room.id} className="px-3 py-2.5 flex items-center gap-3 hover:bg-pink-50/30 transition-colors">
+                                            {/* Hediye ay adedi — küçük pembe kutu */}
+                                            <div className="w-9 h-9 bg-pink-100 text-pink-600 rounded-lg flex flex-col items-center justify-center border border-pink-200 shrink-0 leading-none">
+                                                <span className="font-black text-[13px]">{g.rangeGiftMonths}</span>
+                                                <span className="text-[7px] font-bold">AY</span>
+                                            </div>
+
+                                            {/* Oda + müşteri + hediye ayları — tek blokta, dar satırda */}
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-1.5 flex-wrap leading-tight">
+                                                    <span className="font-bold text-slate-800 text-[13px]">{g.room.name}</span>
+                                                    <span className="text-gray-300 text-[11px]">•</span>
                                                     {/* Müşteri adı → carisine gider */}
                                                     <button onClick={() => { if (g.cust) { setActiveMenu('tum-musteriler'); setSelectedCustomerId(g.cust.id); setSelectedRoomId(null); } }}
-                                                        className={`block text-left text-[13px] font-bold mt-0.5 ${g.cust ? 'text-indigo-600 hover:underline cursor-pointer' : 'text-gray-500 cursor-default'}`}
+                                                        className={`text-[12px] font-bold truncate max-w-[150px] sm:max-w-none ${g.cust ? 'text-indigo-600 hover:underline cursor-pointer' : 'text-gray-500 cursor-default'}`}
                                                         title={g.cust ? 'Müşterinin carisine git' : 'Cari bulunamadı'}>
                                                         {g.room.customerName || '— Müşteri yok —'}
                                                     </button>
-                                                    <div className="text-[11px] text-gray-500 font-bold mt-1.5 flex items-center gap-2 flex-wrap">
-                                                        <span className="bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{g.warehouse?.name || '-'}</span>
-                                                        <span className="text-gray-300">•</span>
-                                                        <span>{g.block?.name || '-'}</span>
-                                                        <span className="text-gray-300">•</span>
-                                                        <span className="text-slate-600">Kira: {fmt(g.room.monthlyFee)} TL</span>
-                                                        <span className="text-gray-300">•</span>
-                                                        {/* Odaya verilen toplam hediye (filtreden bağımsız) */}
-                                                        <span className="text-pink-600">Toplam Hediye: {g.totalGiftMonths} Ay</span>
-                                                    </div>
-                                                    {/* HEDİYE AYLARI — hangi aylar hediye kullanıldı */}
-                                                    <div className="flex flex-wrap gap-1.5 mt-2.5">
-                                                        {g.giftMonthsList.map((m, i) => (
-                                                            <span key={i} className="text-[10px] font-bold bg-pink-50 text-pink-700 border border-pink-200 px-2 py-1 rounded-lg">
-                                                                {m.label} <span className="text-pink-400">({fmt(m.amount)} TL)</span>
-                                                            </span>
-                                                        ))}
-                                                    </div>
+                                                    {!g.isActive && <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">ÇIKMIŞ</span>}
+                                                </div>
+                                                <div className="text-[10px] text-gray-500 font-bold mt-0.5 flex items-center gap-1.5 flex-wrap leading-tight">
+                                                    <span>{g.warehouse?.name || '-'}</span>
+                                                    <span className="text-gray-300">•</span>
+                                                    <span>{fmt(g.room.monthlyFee)} TL</span>
+                                                    <span className="text-gray-300">•</span>
+                                                    <span className="text-pink-600">Toplam {g.totalGiftMonths} Ay</span>
+                                                </div>
+                                                {/* HEDİYE AYLARI — hangi aylar hediye kullanıldı (kompakt etiketler) */}
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {g.giftMonthsList.map((m, i) => (
+                                                        <span key={i} className="text-[9px] font-bold bg-pink-50 text-pink-700 border border-pink-100 px-1.5 py-0.5 rounded">
+                                                            {m.label}
+                                                        </span>
+                                                    ))}
                                                 </div>
                                             </div>
-                                            {/* SAĞ: Tutar + butonlar */}
-                                            <div className="flex flex-col items-start lg:items-end gap-2 shrink-0">
-                                                <div className="text-right">
-                                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dönem Hediye Bedeli</p>
-                                                    <p className="text-lg font-black text-amber-600">{fmt(g.rangeValue)} TL</p>
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    {/* Carisine Git */}
-                                                    <button onClick={() => { if (g.cust) { setActiveMenu('tum-musteriler'); setSelectedCustomerId(g.cust.id); setSelectedRoomId(null); } }}
-                                                        disabled={!g.cust}
-                                                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 ${g.cust ? 'bg-slate-700 hover:bg-slate-800 text-white' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
-                                                        <Users size={13} /> Carisine Git
-                                                    </button>
-                                                    {/* Odaya Git */}
-                                                    <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(g.warehouse?.id); setSelectedBlockId(g.room.blockId); setSelectedRoomId(g.room.id); setSelectedCustomerId(null); }}
-                                                        className="bg-pink-500 hover:bg-pink-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm shadow-pink-500/30 flex items-center gap-1.5">
-                                                        <Box size={13} /> Odaya Git
-                                                    </button>
-                                                </div>
+
+                                            {/* SAĞ: küçük ikon butonlar (Carisine Git / Odaya Git) */}
+                                            <div className="flex gap-1.5 shrink-0">
+                                                <button onClick={() => { if (g.cust) { setActiveMenu('tum-musteriler'); setSelectedCustomerId(g.cust.id); setSelectedRoomId(null); } }}
+                                                    disabled={!g.cust}
+                                                    title="Carisine Git"
+                                                    className={`p-2 rounded-lg transition-colors ${g.cust ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' : 'bg-gray-50 text-gray-300 cursor-not-allowed'}`}>
+                                                    <Users size={14} />
+                                                </button>
+                                                <button onClick={() => { setActiveMenu('depo'); setSelectedWarehouseId(g.warehouse?.id); setSelectedBlockId(g.room.blockId); setSelectedRoomId(g.room.id); setSelectedCustomerId(null); }}
+                                                    title="Odaya Git"
+                                                    className="p-2 rounded-lg bg-pink-500 hover:bg-pink-600 text-white transition-colors">
+                                                    <Box size={14} />
+                                                </button>
                                             </div>
                                         </div>
                                     ))}
