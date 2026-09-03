@@ -126,6 +126,10 @@ export default function Finans(props) {
   // --- YENİ: DEPO HAREKET RAPORU STATE'LERİ ---
   const [depoReportTimeFilter, setDepoReportTimeFilter] = useState('buay');
   const [depoReportWhFilter, setDepoReportWhFilter] = useState('all');
+  // YENİ: KİRA HACMİ (CİRO) RAPORU filtreleri — üstteki oda adedi raporundan bağımsız çalışır,
+  // böylece iki raporu farklı dönemler için yan yana karşılaştırabilirsiniz.
+  const [hacimReportTimeFilter, setHacimReportTimeFilter] = useState('buay');
+  const [hacimReportWhFilter, setHacimReportWhFilter] = useState('all');
 
   // Finans Rapor'daki "Hediye Ay Özeti" için zaman filtresi (today|week|month|year|all)
   const [giftReportRange, setGiftReportRange] = useState('month');
@@ -905,6 +909,10 @@ export default function Finans(props) {
                                    const now = new Date();
                                    let start; let end = null;
                                    if (depoReportTimeFilter === 'buay') start = new Date(now.getFullYear(), now.getMonth(), 1);
+                                   // YENİ: GEÇEN AY — önceki ayın 1'i ile son günü arası.
+                                   // new Date(yıl, ay, 0) o aydan ÖNCEKİ ayın son gününü verir; Ocak ayındayken
+                                   // getMonth()-1 = -1 olsa bile JS bunu otomatik olarak önceki yılın Aralık ayına çevirir.
+                                   else if (depoReportTimeFilter === 'gecenay') { start = new Date(now.getFullYear(), now.getMonth() - 1, 1); end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59); }
                                    else if (depoReportTimeFilter === '3aylik') { start = new Date(); start.setMonth(start.getMonth() - 3); }
                                    else if (depoReportTimeFilter === '6aylik') { start = new Date(); start.setMonth(start.getMonth() - 6); }
                                    else if (depoReportTimeFilter === 'busene') start = new Date(now.getFullYear(), 0, 1);
@@ -913,7 +921,7 @@ export default function Finans(props) {
                                    return { start, end };
                                };
                                const { start: movementStartDate, end: movementEndDate } = getMovementRange();
-                               // Tarih seçili aralıkta mı? (üst sınır yalnızca "Geçen Sene" seçildiğinde vardır)
+                               // Tarih seçili aralıkta mı? (üst sınır "Geçen Sene" ve "Geçen Ay" seçildiğinde vardır)
                                const inMovementRange = (dt) => dt >= movementStartDate && (!movementEndDate || dt <= movementEndDate);
 
                                const movementReport = warehouses.filter(w => depoReportWhFilter === 'all' || w.id.toString() === depoReportWhFilter).map(wh => {
@@ -961,6 +969,8 @@ export default function Finans(props) {
                                                </select>
                                                <select value={depoReportTimeFilter} onChange={(e) => setDepoReportTimeFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-indigo-400 bg-white shadow-sm cursor-pointer">
                                                    <option value="buay">Bu Ay</option>
+                                                   {/* YENİ: Geçen Ay seçeneği — önceki ayın giriş/çıkışlarını gösterir */}
+                                                   <option value="gecenay">Geçen Ay</option>
                                                    <option value="3aylik">Son 3 Ay</option>
                                                    <option value="6aylik">Son 6 Ay</option>
                                                    <option value="busene">Bu Sene</option>
@@ -1007,6 +1017,145 @@ export default function Finans(props) {
                                                        <td className="px-6 py-5 text-center text-emerald-700 text-[16px]">{movementReport.reduce((acc, r) => acc + r.newEntries, 0)} Toplam Giriş</td>
                                                        <td className="px-6 py-5 text-center text-rose-700 text-[16px]">{movementReport.reduce((acc, r) => acc + r.exits, 0)} Toplam Çıkış</td>
                                                        <td className="px-6 py-5 text-center text-[16px]">{movementReport.reduce((acc, r) => acc + r.netChange, 0) > 0 ? '+' : ''}{movementReport.reduce((acc, r) => acc + r.netChange, 0)} Net Oda</td>
+                                                   </tr>
+                                               </tfoot>
+                                           </table>
+                                       </div>
+                                   </div>
+                               );
+                           })()}
+
+                           {/* ============================================================
+                               YENİ EKLENEN: AYLIK KİRA HACMİ (CİRO) GİRİŞ - ÇIKIŞ RAPORU
+                               Üstteki rapor ODA ADEDİNİ sayar; bu rapor o odaların AYLIK KİRA TUTARINI (TL) toplar.
+                               - Giren Hacim  : Seçili dönemde kiralanan odaların aylık kira toplamı
+                               - Çıkan Hacim  : Seçili dönemde tahliye edilen odaların aylık kira toplamı
+                               - Net Hacim    : Giren - Çıkan (aylık ciromuza net etkisi)
+                               Filtreler üstteki rapordan BAĞIMSIZDIR (kendi state'lerini kullanır).
+                               ============================================================ */}
+                           {(() => {
+                               // Zaman aralığı — üstteki raporla AYNI seçenekler (Bu Ay / Geçen Ay / Son 3 Ay / Son 6 Ay / Bu Sene / Geçen Sene / Tüm Zamanlar)
+                               const getHacimRange = () => {
+                                   const now = new Date();
+                                   let start; let end = null;
+                                   if (hacimReportTimeFilter === 'buay') start = new Date(now.getFullYear(), now.getMonth(), 1);
+                                   // GEÇEN AY: new Date(yıl, ay, 0) önceki ayın son gününü verir; Ocak'ta JS otomatik olarak
+                                   // önceki yılın Aralık ayına geçer (ay sonu 28/29/30/31 farkları kendiliğinden doğru hesaplanır).
+                                   else if (hacimReportTimeFilter === 'gecenay') { start = new Date(now.getFullYear(), now.getMonth() - 1, 1); end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59); }
+                                   else if (hacimReportTimeFilter === '3aylik') { start = new Date(); start.setMonth(start.getMonth() - 3); }
+                                   else if (hacimReportTimeFilter === '6aylik') { start = new Date(); start.setMonth(start.getMonth() - 6); }
+                                   else if (hacimReportTimeFilter === 'busene') start = new Date(now.getFullYear(), 0, 1);
+                                   else if (hacimReportTimeFilter === 'gecensene') { start = new Date(now.getFullYear() - 1, 0, 1); end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59); }
+                                   else start = new Date(2000, 0, 1); // Tüm Zamanlar
+                                   return { start, end };
+                               };
+                               const { start: hacimStartDate, end: hacimEndDate } = getHacimRange();
+                               const inHacimRange = (dt) => dt >= hacimStartDate && (!hacimEndDate || dt <= hacimEndDate);
+
+                               const hacimReport = warehouses.filter(w => hacimReportWhFilter === 'all' || w.id.toString() === hacimReportWhFilter).map(wh => {
+                                   const whBlocks = blocks.filter(b => b.warehouseId === wh.id).map(b => b.id);
+                                   const whRooms = allRooms.filter(r => whBlocks.includes(r.blockId));
+
+                                   let inVolume = 0;   // Giren aylık kira hacmi (TL)
+                                   let outVolume = 0;  // Çıkan aylık kira hacmi (TL)
+                                   let inCount = 0;    // Kaç oda girdi (hacmin kaç odadan geldiğini görmek için)
+                                   let outCount = 0;   // Kaç oda çıktı
+
+                                   whRooms.forEach(room => {
+                                       // 1) Halen AKTİF kiralamalar — dönem içinde giriş yapmışsa hacme eklenir
+                                       if (room.customerName && room.entryDate) {
+                                           const eDate = parseDateLocal(room.entryDate);
+                                           if (inHacimRange(eDate)) { inVolume += Number(room.monthlyFee || 0); inCount++; }
+                                       }
+                                       // 2) ARŞİV (geçmiş) kayıtları — giriş ve çıkış hacimleri ayrı ayrı hesaplanır
+                                       if (room.history && room.history.length > 0) {
+                                           room.history.forEach(h => {
+                                               const hFee = Number(h.monthlyFee || 0);
+                                               if (h.entryDate) {
+                                                   const eDate = parseDateLocal(h.entryDate);
+                                                   if (inHacimRange(eDate)) { inVolume += hFee; inCount++; }
+                                               }
+                                               if (h.exitDate) {
+                                                   const exDate = parseDateLocal(h.exitDate);
+                                                   if (inHacimRange(exDate)) { outVolume += hFee; outCount++; }
+                                               }
+                                           });
+                                       }
+                                   });
+
+                                   return { ...wh, inVolume, outVolume, inCount, outCount, netVolume: inVolume - outVolume };
+                               });
+
+                               // Genel toplamlar (tfoot için)
+                               const totalIn = hacimReport.reduce((acc, r) => acc + r.inVolume, 0);
+                               const totalOut = hacimReport.reduce((acc, r) => acc + r.outVolume, 0);
+                               const totalNet = totalIn - totalOut;
+                               const fmtTL = (n) => Number(n || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+
+                               return (
+                                   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                                       <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-50/50 gap-4">
+                                           <div>
+                                               <h3 className="text-lg font-bold text-gray-800">Aylık Kira Hacmi Hareketleri (Giren - Çıkan Ciro)</h3>
+                                               <p className="text-sm text-gray-500 mt-1">Seçili tarih aralığında kiralanan ve tahliye edilen odaların aylık kira tutarı (KDV hariç).</p>
+                                           </div>
+                                           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                                               <select value={hacimReportWhFilter} onChange={(e) => setHacimReportWhFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-indigo-400 bg-white shadow-sm cursor-pointer">
+                                                   <option value="all">Tüm Şubeler</option>
+                                                   {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                                               </select>
+                                               <select value={hacimReportTimeFilter} onChange={(e) => setHacimReportTimeFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-indigo-400 bg-white shadow-sm cursor-pointer">
+                                                   <option value="buay">Bu Ay</option>
+                                                   <option value="gecenay">Geçen Ay</option>
+                                                   <option value="3aylik">Son 3 Ay</option>
+                                                   <option value="6aylik">Son 6 Ay</option>
+                                                   <option value="busene">Bu Sene</option>
+                                                   <option value="gecensene">Geçen Sene</option>
+                                                   <option value="all">Tüm Zamanlar</option>
+                                               </select>
+                                           </div>
+                                       </div>
+                                       <div className="overflow-x-auto">
+                                           <table className="w-full text-left text-sm text-gray-600 min-w-[700px]">
+                                               <thead className="bg-white border-b border-gray-200 text-[11px] uppercase text-gray-500 font-bold">
+                                                   <tr>
+                                                       <th className="px-6 py-4">Depo Şubesi</th>
+                                                       <th className="px-6 py-4 text-center">Giren Kira Hacmi</th>
+                                                       <th className="px-6 py-4 text-center">Çıkan Kira Hacmi</th>
+                                                       <th className="px-6 py-4 text-center">Net Hacim Değişimi</th>
+                                                   </tr>
+                                               </thead>
+                                               <tbody className="divide-y divide-gray-100 bg-white">
+                                                   {hacimReport.map(report => (
+                                                       <tr key={report.id} className="hover:bg-slate-50 transition-colors">
+                                                           <td className="px-6 py-4 font-bold text-gray-800 text-[14px]">{report.name}</td>
+                                                           <td className="px-6 py-4 text-center">
+                                                               <span className="text-emerald-700 font-bold bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 flex items-center justify-center w-max mx-auto gap-1.5">
+                                                                   <ArrowDown size={14}/> +{fmtTL(report.inVolume)} TL
+                                                               </span>
+                                                               {/* Hacmin kaç odadan geldiği */}
+                                                               <span className="block text-[10px] text-gray-400 font-bold mt-1">{report.inCount} oda</span>
+                                                           </td>
+                                                           <td className="px-6 py-4 text-center">
+                                                               <span className="text-rose-700 font-bold bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-200 flex items-center justify-center w-max mx-auto gap-1.5">
+                                                                   <ArrowUp size={14}/> -{fmtTL(report.outVolume)} TL
+                                                               </span>
+                                                               <span className="block text-[10px] text-gray-400 font-bold mt-1">{report.outCount} oda</span>
+                                                           </td>
+                                                           <td className="px-6 py-4 text-center">
+                                                               <span className={`font-black text-sm px-4 py-1.5 rounded-full ${report.netVolume > 0 ? 'text-emerald-700 bg-emerald-100' : report.netVolume < 0 ? 'text-rose-700 bg-rose-100' : 'text-gray-600 bg-gray-100'}`}>
+                                                                   {report.netVolume > 0 ? '+' : ''}{fmtTL(report.netVolume)} TL
+                                                               </span>
+                                                           </td>
+                                                       </tr>
+                                                   ))}
+                                               </tbody>
+                                               <tfoot className="bg-slate-50 border-t border-gray-200 font-bold text-gray-800">
+                                                   <tr>
+                                                       <td className="px-6 py-5 text-xs tracking-wider uppercase text-gray-500">Genel Toplam</td>
+                                                       <td className="px-6 py-5 text-center text-emerald-700 text-[16px]">+{fmtTL(totalIn)} TL</td>
+                                                       <td className="px-6 py-5 text-center text-rose-700 text-[16px]">-{fmtTL(totalOut)} TL</td>
+                                                       <td className="px-6 py-5 text-center text-[16px]">{totalNet > 0 ? '+' : ''}{fmtTL(totalNet)} TL Net</td>
                                                    </tr>
                                                </tfoot>
                                            </table>
